@@ -448,7 +448,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
     switch (heroState) {
       case 'LOADING':
         return (
-          <View style={[styles.heroCard, { backgroundColor: isDark ? 'rgba(30,41,59,0.9)' : '#FFFFFF' }]}>
+          <View style={[styles.heroCard, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' }]}>
             <ActivityIndicator size="large" color="#0D4A4A" />
             <Text style={[styles.loadingText, { color: isDark ? '#94A3B8' : '#64748B' }]}>Loading schedule...</Text>
           </View>
@@ -480,7 +480,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
 
       case 'BREAK':
         return (
-          <View style={[styles.heroCard, { backgroundColor: isDark ? 'rgba(30,41,59,0.9)' : '#FFFFFF' }]}>
+          <View style={[styles.heroCard, { backgroundColor: isDark ? '#082020' : '#FFFFFF' }]}>
             <View style={styles.breakHeader}>
               <View style={styles.breakBadge}>
                 <Ionicons name="cafe-outline" size={16} color="#F59E0B" />
@@ -518,8 +518,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
 
       case 'DONE':
         return (
-          <View style={[styles.heroCard, { backgroundColor: isDark ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.9)' }]}>
-            <View style={[styles.doneInnerCard, { backgroundColor: isDark ? 'rgba(26, 107, 107, 0.4)' : 'rgba(13, 74, 74, 0.1)' }]}>
+          <View style={[styles.heroCard, { backgroundColor: isDark ? '#082020' : '#FFFFFF' }]}>
+            <View style={[styles.doneInnerCard, { backgroundColor: 'transparent' }]}>
               <View style={styles.doneContent}>
                 <Ionicons name="checkmark-circle" size={48} color={isDark ? '#3DDC97' : '#0D4A4A'} />
                 <Text style={[styles.doneTitle, { color: isDark ? '#FFFFFF' : '#0F172A' }]}>All Classes Done</Text>
@@ -529,7 +529,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
               {/* Button for late attendance if there are incomplete classes */}
               {schedule.some(s => s.status === 'incomplete') && (
                 <TouchableOpacity 
-                  style={[styles.doneScanButton, { backgroundColor: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(13, 74, 74, 0.15)' }]}
+                  style={[styles.doneScanButton, { backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7' }]}
                   onPress={handleFloatingScanPress}
                   activeOpacity={0.8}
                 >
@@ -571,7 +571,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
         key={slot.id || index}
         style={[
           styles.scheduleCard,
-          { backgroundColor: isDark ? 'rgba(0, 0, 0, 0.4)' : 'rgba(255, 255, 255, 0.85)' },
+          { backgroundColor: isDark ? '#082020' : '#FFFFFF' },
         ]}
         onPress={() => handleScheduleCardPress(slot)}
         activeOpacity={0.8}
@@ -710,7 +710,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
 
             {/* Schedule Container with rounded border */}
             <View style={[styles.scheduleContainer, { 
-              backgroundColor: isDark ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.5)',
+              backgroundColor: isDark ? '#082020' : '#FFFFFF',
               borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
             }]}>
               {schedule.map((slot, index) => renderScheduleItem(slot, index))}

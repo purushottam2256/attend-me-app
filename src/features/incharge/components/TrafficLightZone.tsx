@@ -1,15 +1,13 @@
 /**
  * TrafficLightZone - Shows P1 & P4 attendance as traffic light indicators
  * 
- * Colors:
- * - Green: >90% attendance
- * - Yellow: 75-90%
- * - Red: <75%
+ * New Zen Mode:
+ * - Minimalist Design
+ * - Positive Colors (Greens/Teals) only
  */
 
 import React from 'react';
-import { View, Text, StyleSheet, Animated } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { View, Text, StyleSheet } from 'react-native';
 import { useTheme } from '../../../contexts';
 
 interface PeriodData {
@@ -24,61 +22,47 @@ interface TrafficLightZoneProps {
   p4: PeriodData | null;
 }
 
-const getTrafficColor = (percentage: number): string => {
-  if (percentage >= 90) return '#22C55E'; // Green
-  if (percentage >= 75) return '#EAB308'; // Yellow
-  return '#EF4444'; // Red
-};
-
-const getTrafficLabel = (percentage: number): string => {
-  if (percentage >= 90) return 'Good';
-  if (percentage >= 75) return 'Fair';
-  return 'Critical';
-};
-
-const TrafficLight: React.FC<{
+const ZenLight: React.FC<{
   label: string;
-  time: string;
   data: PeriodData | null;
   isDark: boolean;
-}> = ({ label, time, data, isDark }) => {
+}> = ({ label, data, isDark }) => {
   const percentage = data?.percentage ?? 0;
-  const color = data ? getTrafficColor(percentage) : 'rgba(255,255,255,0.2)';
-  const status = data ? getTrafficLabel(percentage) : 'No Data';
+  // Zen Colors: Always positive tones, varying opacity/shade or distinct specific zen colors
+  // High = Deep Green, Mid = Soft Teal, Low = Muted Sage (No Red)
+  const ringColor = percentage >= 90 ? '#34C759' : percentage >= 75 ? '#5AC8FA' : '#8E8E93'; 
 
   return (
-    <View style={[styles.lightContainer, { 
-      backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(13, 74, 74, 0.06)',
-      borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
+    <View style={[styles.zenCard, { 
+      backgroundColor: isDark ? '#082020' : '#FFFFFF',
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.05,
+      shadowRadius: 12,
+      elevation: 2
     }]}>
-      {/* Traffic Light Circle */}
-      <View style={[styles.lightCircle, { backgroundColor: color, shadowColor: color }]}>
-        {data ? (
-          <Text style={styles.percentageText}>{percentage}%</Text>
-        ) : (
-          <Ionicons name="remove-outline" size={24} color="#FFF" />
-        )}
-      </View>
-      
-      {/* Info */}
-      <Text style={[styles.periodLabel, { color: isDark ? '#FFFFFF' : '#0F172A' }]}>
+      <Text style={[styles.periodLabel, { color: isDark ? '#8E8E93' : '#86868B' }]}>
         {label}
       </Text>
-      <Text style={[styles.timeText, { color: isDark ? 'rgba(255,255,255,0.5)' : '#64748B' }]}>
-        {time}
-      </Text>
       
-      {/* Count */}
-      {data && (
-        <Text style={[styles.countText, { color: isDark ? 'rgba(255,255,255,0.7)' : '#334155' }]}>
-          {data.present_count}/{data.total_count}
-        </Text>
-      )}
-      
-      {/* Status Badge */}
-      <View style={[styles.statusBadge, { backgroundColor: `${color}20` }]}>
-        <Text style={[styles.statusText, { color }]}>{status}</Text>
+      <View style={styles.centerContent}>
+        {data ? (
+            <View style={{alignItems: 'center'}}>
+                <Text style={[styles.percentText, { color: isDark ? '#FFF' : '#000' }]}>
+                    {percentage}<Text style={{fontSize: 20, color: '#8E8E93'}}>%</Text>
+                </Text>
+                <View style={[styles.statusBar, { backgroundColor: ringColor }]} />
+            </View>
+        ) : (
+            <Text style={{color: '#8E8E93'}}>--</Text>
+        )}
       </View>
+
+      {data && (
+         <Text style={[styles.countText, { color: isDark ? '#636366' : '#AEAEB2' }]}>
+            {data.present_count} / {data.total_count} Present
+         </Text>
+      )}
     </View>
   );
 };
@@ -88,36 +72,9 @@ export const TrafficLightZone: React.FC<TrafficLightZoneProps> = ({ p1, p4 }) =>
 
   return (
     <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <Ionicons name="analytics-outline" size={18} color={isDark ? '#3DDC97' : '#0D4A4A'} />
-        <Text style={[styles.title, { color: isDark ? '#FFFFFF' : '#0F172A' }]}>
-          Key Periods
-        </Text>
-      </View>
-      
-      <View style={styles.lightsRow}>
-        <TrafficLight 
-          label="Period 1" 
-          time="9:30 AM" 
-          data={p1} 
-          isDark={isDark} 
-        />
-        <TrafficLight 
-          label="Period 4" 
-          time="1:20 PM" 
-          data={p4} 
-          isDark={isDark} 
-        />
-      </View>
-      
-      {/* Insight */}
-      <View style={[styles.insightBanner, { 
-        backgroundColor: isDark ? 'rgba(61, 220, 151, 0.1)' : 'rgba(61, 220, 151, 0.08)',
-      }]}>
-        <Ionicons name="bulb-outline" size={14} color="#3DDC97" />
-        <Text style={[styles.insightText, { color: isDark ? 'rgba(255,255,255,0.8)' : '#334155' }]}>
-          P4 shows if students stayed after lunch
-        </Text>
+      <View style={styles.row}>
+        <ZenLight label="Morning (P1)" data={p1} isDark={isDark} />
+        <ZenLight label="Afternoon (P4)" data={p4} isDark={isDark} />
       </View>
     </View>
   );
@@ -125,86 +82,45 @@ export const TrafficLightZone: React.FC<TrafficLightZoneProps> = ({ p1, p4 }) =>
 
 const styles = StyleSheet.create({
   container: {
-    marginHorizontal: 16,
-    marginTop: 16,
+    marginHorizontal: 20,
+    marginTop: 20,
   },
-  headerRow: {
+  row: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
+    gap: 16,
   },
-  title: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  lightsRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  lightContainer: {
+  zenCard: {
     flex: 1,
+    padding: 20,
+    borderRadius: 24,
     alignItems: 'center',
-    paddingVertical: 20,
-    paddingHorizontal: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-  },
-  lightCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 8,
-    marginBottom: 12,
-  },
-  percentageText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '800',
+    justifyContent: 'space-between',
+    minHeight: 140,
   },
   periodLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  timeText: {
-    fontSize: 12,
-    marginBottom: 6,
-  },
-  countText: {
     fontSize: 13,
     fontWeight: '600',
-    marginBottom: 8,
-  },
-  statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  statusText: {
-    fontSize: 11,
-    fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
-  insightBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 10,
+  centerContent: {
+    marginVertical: 12,
   },
-  insightText: {
-    fontSize: 12,
+  percentText: {
+    fontSize: 42,
+    fontWeight: '800',
+    letterSpacing: -1,
+  },
+  statusBar: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    marginTop: 8,
+  },
+  countText: {
+    fontSize: 13,
     fontWeight: '500',
-  },
+  }
 });
 
 export default TrafficLightZone;

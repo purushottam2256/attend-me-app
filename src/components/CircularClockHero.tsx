@@ -173,7 +173,7 @@ export const CircularClockHero = forwardRef<CircularClockHeroRef, CircularClockH
 
   // Theme colors
   const colors = {
-    cardBg: isDark ? 'rgba(15, 35, 35, 0.95)' : '#FFFFFF',
+    cardBg: isDark ? '#082020' : '#FFFFFF',
     cardBorder: isDark ? 'rgba(61, 220, 151, 0.2)' : 'rgba(0,0,0,0.08)',
     ringBg: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(13, 74, 74, 0.1)',
     ringProgress: '#3DDC97',

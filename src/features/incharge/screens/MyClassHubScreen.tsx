@@ -2,13 +2,14 @@
  * MyClassHubScreen - Main hub for Class Incharge
  * 
  * Features:
- * - Traffic Light Zone (P1 & P4)
- * - Weekly Trends
+ * - Traffic Light Zone (P1 & P4) (Zen Mode Styles)
+ * - Weekly Trends (Zen Mode Colors)
+ * - Permission Management
  * - Watchlist (Critical Students)
- * - Add Permission Button
+ * - Home Screen Background (Gradient + Orbs)
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -17,29 +18,92 @@ import {
   RefreshControl,
   TouchableOpacity,
   ActivityIndicator,
+  Modal,
+  FlatList,
+  TextInput,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
+import { BlurView } from 'expo-blur';
 
 import { TrafficLightZone, WatchlistCard, TrendsSection } from '../components';
 import { useTheme } from '../../../contexts';
 import { supabase } from '../../../config/supabase';
-import {
-  getWatchlist,
-  getKeyPeriodAttendance,
-  getWeeklyTrend,
-  type StudentAggregate,
-  type PeriodAttendance,
-} from '../services/inchargeService';
+import { getClassStudents, getWatchlist, getKeyPeriodAttendance, getClassTrends, getAssignedClass, type StudentAggregate, type PeriodAttendance } from '../services/inchargeService';
+import { Colors } from '../../../constants';
 
 interface ClassInfo {
   dept: string;
   year: number;
   section: string;
 }
+
+// Helper component for Watchlist Pagination
+const WatchlistPager = ({ watchlist, colors, isDark }: { watchlist: StudentAggregate[], colors: any, isDark: boolean }) => {
+    const [containerWidth, setContainerWidth] = useState(0);
+    const [activeIndex, setActiveIndex] = useState(0);
+
+    const chunks = useMemo(() => {
+        const result = [];
+        for (let i = 0; i < watchlist.length; i += 5) {
+            result.push(watchlist.slice(i, i + 5));
+        }
+        return result;
+    }, [watchlist]);
+
+    if (chunks.length === 0) return null;
+
+    return (
+        <View onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}>
+            <ScrollView
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                decelerationRate="fast"
+                snapToInterval={containerWidth}
+                onMomentumScrollEnd={(ev) => {
+                    const x = ev.nativeEvent.contentOffset.x;
+                    const index = Math.round(x / containerWidth);
+                    setActiveIndex(index);
+                }}
+            >
+                {chunks.map((chunk, pageIndex) => (
+                    <View key={pageIndex} style={{ width: containerWidth }}>
+                        <View style={{ paddingRight: 4 }}> 
+                            {chunk.map((student) => (
+                                <WatchlistCard
+                                    key={student.student_id}
+                                    studentName={student.full_name}
+                                    rollNo={student.roll_no}
+                                    percentage={student.attendance_percentage}
+                                />
+                            ))}
+                        </View>
+                    </View>
+                ))}
+            </ScrollView>
+
+            {/* Pagination Dots */}
+            {chunks.length > 1 && (
+                <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 12, marginBottom: 4 }}>
+                    {chunks.map((_, i) => (
+                        <View
+                            key={i}
+                            style={{
+                                width: 6, height: 6, borderRadius: 3, marginHorizontal: 4,
+                                backgroundColor: i === activeIndex ? colors.accent : (isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.1)')
+                            }}
+                        />
+                    ))}
+                </View>
+            )}
+        </View>
+    );
+};
 
 export const MyClassHubScreen: React.FC = () => {
   const { isDark } = useTheme();
@@ -54,30 +118,18 @@ export const MyClassHubScreen: React.FC = () => {
   const [p4, setP4] = useState<PeriodAttendance | null>(null);
   const [watchlist, setWatchlist] = useState<StudentAggregate[]>([]);
   const [trendData, setTrendData] = useState<{ day: string; percentage: number }[]>([]);
+  const [trendRange, setTrendRange] = useState<'day' | 'week' | 'month'>('week');
 
-  // Get class info from user profile
+  // Load Class Info
   const fetchClassInfo = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('dept')
-      .eq('id', user.id)
-      .single();
-
-    if (!profile?.dept) return null;
-
-    // For now, assume incharge handles year 1, section A
-    // In production, this would come from a class_assignments table
-    return {
-      dept: profile.dept,
-      year: 3, // TODO: Get from class assignment
-      section: 'A', // TODO: Get from class assignment
-    };
+    const assignment = await getAssignedClass(user.id);
+    if (!assignment) console.log('[MyClassHub] No class assignment found.');
+    return assignment;
   };
 
-  // Load all data
+  // Load Data
   const loadData = useCallback(async () => {
     try {
       const info = await fetchClassInfo();
@@ -87,23 +139,34 @@ export const MyClassHubScreen: React.FC = () => {
       }
       setClassInfo(info);
 
-      // Fetch all data in parallel
-      const [periods, students, trends] = await Promise.all([
+      const [periods, students] = await Promise.all([
         getKeyPeriodAttendance(info.dept, info.year, info.section),
         getWatchlist(info.dept, info.year, info.section, 75),
-        getWeeklyTrend(info.dept, info.year, info.section),
       ]);
 
       setP1(periods.p1);
       setP4(periods.p4);
-      setWatchlist(students.slice(0, 5)); // Show top 5
-      setTrendData(trends);
+      setWatchlist(students.slice(0, 5));
     } catch (error) {
       console.error('[MyClassHub] Error loading data:', error);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  // Fetch trends
+  useEffect(() => {
+     if (!classInfo) return;
+     const fetchTrends = async () => {
+         try {
+             const data = await getClassTrends(classInfo.dept, classInfo.year, classInfo.section, trendRange);
+             setTrendData(data.map(d => ({ day: d.label, percentage: d.value })));
+         } catch (e) {
+             console.error("Error fetching trends", e);
+         }
+     };
+     fetchTrends();
+  }, [classInfo, trendRange]);
 
   useEffect(() => {
     loadData();
@@ -116,284 +179,343 @@ export const MyClassHubScreen: React.FC = () => {
     setRefreshing(false);
   }, [loadData]);
 
+  // View All Modal Logic
+  const [showAllStudents, setShowAllStudents] = useState(false);
+  const [allStudents, setAllStudents] = useState<StudentAggregate[]>([]);
+  const [loadingAll, setLoadingAll] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const filteredAllStudents = useMemo(() => {
+    if (!searchQuery) return allStudents;
+    const lower = searchQuery.toLowerCase();
+    return allStudents.filter(s => 
+      s.full_name.toLowerCase().includes(lower) || 
+      s.roll_no.toLowerCase().includes(lower)
+    );
+  }, [allStudents, searchQuery]);
+
   const handleAddPermission = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    // TODO: Navigate to Permission screen
-    // navigation.navigate('Permission' as never);
+    navigation.navigate('Permission' as never);
   };
 
-  // Theme colors
+  const handleViewAll = async () => {
+    if (!classInfo) return;
+    setShowAllStudents(true);
+    if (allStudents.length > 0) return;
+
+    setLoadingAll(true);
+    try {
+        const students = await getWatchlist(classInfo.dept, classInfo.year, classInfo.section, 101);
+        setAllStudents(students);
+    } catch (err) {
+        console.error("Failed to load all students", err);
+    } finally {
+        setLoadingAll(false);
+    }
+  };
+
+  // Zen Mode Colors (Apple Style)
   const colors = {
-    bg: isDark ? ['#0D4A4A', '#1A6B6B', '#0F3D3D'] : ['#F0FDF4', '#ECFDF5', '#F0FDF4'],
-    textPrimary: isDark ? '#FFFFFF' : '#0F172A',
-    textSecondary: isDark ? 'rgba(255,255,255,0.7)' : '#64748B',
-    surface: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.9)',
-    accent: '#3DDC97',
+    // bg: isDark ? ['#000000', '#1C1C1E'] : ['#FFFFFF', '#F5F5F7'], // We are using Home Gradient now
+    textPrimary: isDark ? '#FFFFFF' : '#000000',
+    textSecondary: isDark ? '#8E8E93' : '#86868B',
+    surface: isDark ? '#082020' : '#FFFFFF', // Deep Green for Dark Mode to match theme
+    accent: '#34C759', // Apple Green
+    border: isDark ? '#38383A' : '#E5E5EA',
   };
 
   if (loading) {
     return (
-      <LinearGradient colors={colors.bg as [string, string, string]} style={styles.loadingContainer}>
+      <View style={[styles.loadingContainer, { backgroundColor: isDark ? '#111' : '#F5F5F5' }]}>
         <ActivityIndicator size="large" color={colors.accent} />
-        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-          Loading class data...
-        </Text>
-      </LinearGradient>
+      </View>
     );
   }
 
+
   if (!classInfo) {
     return (
-      <LinearGradient colors={colors.bg as [string, string, string]} style={styles.loadingContainer}>
-        <Ionicons name="school-outline" size={48} color={colors.textSecondary} />
-        <Text style={[styles.loadingText, { color: colors.textPrimary }]}>
-          No Class Assigned
-        </Text>
-        <Text style={[styles.subText, { color: colors.textSecondary }]}>
-          Please contact admin to assign a class
-        </Text>
-      </LinearGradient>
+      <View style={[styles.loadingContainer, { backgroundColor: isDark ? '#111' : '#F5F5F5' }]}>
+        <Text style={[styles.loadingText, { color: colors.textPrimary }]}>No Class Assigned</Text>
+      </View>
     );
   }
 
   return (
-    <LinearGradient colors={colors.bg as [string, string, string]} style={styles.container}>
+    <View style={styles.container}>
+      {/* Premium Gradient Background with Orbs (Home Page Style) */}
+      <View style={StyleSheet.absoluteFill}>
+        <LinearGradient
+          colors={[Colors.premium.gradientStart, Colors.premium.gradientMid, Colors.premium.gradientEnd]}
+          style={StyleSheet.absoluteFill}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        />
+        <View style={[styles.orb, styles.orb1]} />
+        <View style={[styles.orb, styles.orb2]} />
+        <View style={[styles.orb, styles.orb3]} />
+      </View>
+
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={{ paddingBottom: 120 + insets.bottom }}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={colors.accent}
-          />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
       >
-        {/* Header */}
-        <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+        {/* Apple Style Large Header */}
+        <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
           <View>
-            <Text style={[styles.title, { color: colors.textPrimary }]}>
-              My Class
+            <Text style={[styles.superTitle, { color: 'rgba(255,255,255,0.8)' }]}>
+              {classInfo.dept}-{classInfo.year}{classInfo.section}
             </Text>
-            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-              {classInfo.dept} - Year {classInfo.year}, Section {classInfo.section}
+            <Text style={[styles.mainTitle, { color: '#FFFFFF' }]}>
+              Class Hub
             </Text>
           </View>
           <TouchableOpacity 
-            style={[styles.settingsBtn, { backgroundColor: colors.surface }]}
-            activeOpacity={0.7}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              navigation.navigate('Profile' as never);
-            }}
+            style={[styles.profileBtn, { backgroundColor: 'rgba(255,255,255,0.2)' }]}
+            onPress={() => navigation.navigate('Profile' as never)}
           >
-            <Ionicons name="person-circle-outline" size={26} color={colors.accent} />
+             <Ionicons name="person" size={20} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
 
-        {/* Traffic Light Zone */}
+        {/* 1. Traffic Light Zone */}
         <TrafficLightZone p1={p1} p4={p4} />
 
-        {/* Trends */}
-        <TrendsSection data={trendData} />
-
-        {/* Watchlist */}
-        <View style={styles.watchlistSection}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.titleRow}>
-              <Ionicons name="warning-outline" size={18} color="#EF4444" />
-              <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-                Watchlist
-              </Text>
-              <View style={styles.countBadge}>
-                <Text style={styles.countText}>{watchlist.length}</Text>
-              </View>
+        {/* 2. Trends Graph */}
+        <View style={styles.sectionContainer}>
+            <View style={[styles.glassCard, { backgroundColor: colors.surface }]}>
+                <View style={styles.sectionHeaderRow}>
+                    <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Weekly Trends</Text>
+                    
+                    {/* Filter Pills */}
+                    <View style={styles.filterRow}>
+                        {['day', 'week', 'month'].map((range) => (
+                            <TouchableOpacity
+                                key={range}
+                                onPress={() => {
+                                    Haptics.selectionAsync();
+                                    setTrendRange(range as any);
+                                }}
+                                style={[
+                                    styles.filterPill,
+                                    { backgroundColor: trendRange === range ? colors.accent : (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)') }
+                                ]}
+                            >
+                                <Text style={[
+                                    styles.filterText, 
+                                    { color: trendRange === range ? '#FFF' : colors.textPrimary }
+                                ]}>
+                                    {range}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                </View>
+                {/* Pass a glass style derived props if needed, but for now relying on TrendsSection styling */}
+                <TrendsSection data={trendData} />
             </View>
-            <TouchableOpacity activeOpacity={0.7}>
-              <Text style={[styles.viewAllText, { color: colors.accent }]}>View All</Text>
-            </TouchableOpacity>
-          </View>
-
-          {watchlist.length === 0 ? (
-            <View style={[styles.emptyCard, { 
-              backgroundColor: colors.surface,
-              borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-            }]}>
-              <Ionicons name="checkmark-circle-outline" size={32} color="#22C55E" />
-              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                All students above 75% attendance! 🎉
-              </Text>
-            </View>
-          ) : (
-            watchlist.map((student) => (
-              <WatchlistCard
-                key={student.student_id}
-                studentName={student.full_name}
-                rollNo={student.roll_no}
-                percentage={student.attendance_percentage}
-              />
-            ))
-          )}
         </View>
 
-        {/* Add Permission Section */}
-        <View style={styles.permissionSection}>
-          <Text style={[styles.sectionTitle, { color: colors.textPrimary, marginBottom: 12 }]}>
-            Add Permission
+        {/* 3. Permissions (Moved Up) */}
+        <View style={styles.sectionContainer}>
+          <Text style={[styles.sectionTitle, { color: colors.textPrimary, marginBottom: 12, marginLeft: 4 }]}>
+            Quick Actions
           </Text>
-          <View style={styles.permissionButtons}>
+          <View style={styles.actionGrid}>
             <TouchableOpacity 
-              style={[styles.permBtn, { backgroundColor: isDark ? 'rgba(234, 179, 8, 0.15)' : 'rgba(234, 179, 8, 0.1)' }]}
+              style={[styles.actionCard, { backgroundColor: colors.surface }]}
               activeOpacity={0.7}
               onPress={handleAddPermission}
             >
-              <Ionicons name="calendar-outline" size={20} color="#EAB308" />
-              <Text style={[styles.permBtnText, { color: colors.textPrimary }]}>Leave</Text>
+              <View style={[styles.iconCircle, { backgroundColor: 'rgba(52, 199, 89, 0.1)' }]}>
+                <Ionicons name="add" size={24} color="#34C759" />
+              </View>
+              <Text style={[styles.actionTitle, { color: colors.textPrimary }]}>Grant Leave</Text>
+              <Text style={[styles.actionSubtitle, { color: colors.textSecondary }]}>Approve OD/Leave</Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity 
-              style={[styles.permBtn, { backgroundColor: isDark ? 'rgba(61, 220, 151, 0.15)' : 'rgba(61, 220, 151, 0.1)' }]}
+              style={[styles.actionCard, { backgroundColor: colors.surface }]}
               activeOpacity={0.7}
+              onPress={() => navigation.navigate('ManagePermissions' as never)}
             >
-              <Ionicons name="briefcase-outline" size={20} color="#3DDC97" />
-              <Text style={[styles.permBtnText, { color: colors.textPrimary }]}>Dept Work</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={[styles.permBtn, { backgroundColor: isDark ? 'rgba(79, 70, 229, 0.15)' : 'rgba(79, 70, 229, 0.1)' }]}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="people-outline" size={20} color="#4F46E5" />
-              <Text style={[styles.permBtnText, { color: colors.textPrimary }]}>Club</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={[styles.permBtn, { backgroundColor: isDark ? 'rgba(236, 72, 153, 0.15)' : 'rgba(236, 72, 153, 0.1)' }]}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="megaphone-outline" size={20} color="#EC4899" />
-              <Text style={[styles.permBtnText, { color: colors.textPrimary }]}>Event</Text>
+              <View style={[styles.iconCircle, { backgroundColor: 'rgba(0, 122, 255, 0.1)' }]}>
+                <Ionicons name="list" size={24} color="#007AFF" />
+              </View>
+              <Text style={[styles.actionTitle, { color: colors.textPrimary }]}> manage</Text>
+              <Text style={[styles.actionSubtitle, { color: colors.textSecondary }]}>View History</Text>
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* 4. Watchlist (At Bottom) */}
+        <View style={styles.sectionContainer}>
+          <View style={[styles.glassCard, { backgroundColor: colors.surface }]}>
+              <View style={styles.sectionHeaderRow}>
+                <View style={{flexDirection: 'row', alignItems: 'center', gap: 6}}>
+                    <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Watchlist</Text>
+                    <View style={[styles.badge, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
+                        <Text style={[styles.badgeText, { color: colors.textPrimary }]}>{watchlist.length}</Text>
+                    </View>
+                </View>
+                <TouchableOpacity onPress={handleViewAll}>
+                  <Text style={{ color: colors.accent, fontSize: 15, fontWeight: '500' }}>See All</Text>
+                </TouchableOpacity>
+              </View>
+
+              {watchlist.length === 0 ? (
+                <View style={[styles.emptyState, { backgroundColor: 'transparent' }]}>
+                  <Ionicons name="checkmark-circle" size={48} color={colors.accent} />
+                  <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No critical students</Text>
+                </View>
+              ) : (
+                <WatchlistPager watchlist={watchlist} colors={colors} isDark={isDark} />
+              )}
+          </View>
+        </View>
+
       </ScrollView>
-    </LinearGradient>
+
+      {/* View All Modal */}
+      <Modal visible={showAllStudents} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowAllStudents(false)}>
+        <View style={[styles.modalContainer, { backgroundColor: isDark ? '#000' : '#F2F2F7' }]}>
+           <View style={[styles.modalHeader, { 
+               backgroundColor: isDark ? '#1C1C1E' : '#FFF',
+               paddingTop: Math.max(insets.top, 20) + 10 // Ensure clearance for notch
+           }]}>
+                <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Class Roster</Text>
+                <TouchableOpacity onPress={() => setShowAllStudents(false)} style={styles.closeButton}>
+                    <Ionicons name="close-circle" size={30} color={colors.textSecondary} />
+                </TouchableOpacity>
+           </View>
+           
+           <View style={[styles.searchContainer, { backgroundColor: isDark ? '#1C1C1E' : '#FFF' }]}>
+                <View style={[styles.searchField, { backgroundColor: isDark ? '#2C2C2E' : '#E5E5EA' }]}>
+                    <Ionicons name="search" size={20} color={colors.textSecondary} />
+                    <TextInput 
+                        style={[styles.input, { color: colors.textPrimary }]} 
+                        placeholder="Search student" 
+                        placeholderTextColor={colors.textSecondary}
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                    />
+                </View>
+           </View>
+
+           {loadingAll ? (
+               <ActivityIndicator style={{marginTop: 50}} color={colors.accent}/>
+           ) : (
+               <FlatList
+                    data={filteredAllStudents}
+                    keyExtractor={item => item.student_id}
+                    contentContainerStyle={{padding: 16}}
+                    renderItem={({item}) => (
+                        <View style={[styles.studentRow, { backgroundColor: isDark ? '#1C1C1E' : '#FFF' }]}>
+                            <View>
+                                <Text style={[styles.studentName, { color: colors.textPrimary }]}>{item.full_name}</Text>
+                                <Text style={[styles.studentRoll, { color: colors.textSecondary }]}>{item.roll_no}</Text>
+                            </View>
+                            <View style={{alignItems: 'flex-end'}}>
+                                <Text style={[styles.studentPercent, { color: colors.textPrimary }]}>{Math.round(item.attendance_percentage)}%</Text>
+                            </View>
+                        </View>
+                    )}
+               />
+           )}
+        </View>
+      </Modal>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
+  container: { flex: 1 },
+  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  loadingText: { marginTop: 10, fontSize: 16, fontWeight: '500' },
+  scrollView: { flex: 1 },
+
+  // Background Orbs
+  orb: {
+    position: 'absolute',
+    borderRadius: 200,
   },
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
+  orb1: {
+    width: 300,
+    height: 300,
+    backgroundColor: 'rgba(61, 220, 151, 0.15)',
+    top: -100,
+    right: -100,
   },
-  loadingText: {
-    fontSize: 15,
-    fontWeight: '500',
+  orb2: {
+    width: 250,
+    height: 250,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    bottom: 200,
+    left: -80,
   },
-  subText: {
-    fontSize: 13,
-    marginTop: 4,
+  orb3: {
+    width: 180,
+    height: 180,
+    backgroundColor: 'rgba(61, 220, 151, 0.08)',
+    bottom: 400,
+    right: -40,
   },
-  scrollView: {
-    flex: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingHorizontal: 16,
-    marginBottom: 8,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    fontSize: 13,
-    fontWeight: '500',
-    marginTop: 4,
-  },
-  settingsBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  watchlistSection: {
-    marginHorizontal: 16,
-    marginTop: 24,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  countBadge: {
-    backgroundColor: '#EF4444',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-    marginLeft: 4,
-  },
-  countText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  viewAllText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  emptyCard: {
-    padding: 24,
-    borderRadius: 14,
-    borderWidth: 1,
-    alignItems: 'center',
-    gap: 8,
-  },
-  emptyText: {
-    fontSize: 14,
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  permissionSection: {
-    marginHorizontal: 16,
-    marginTop: 24,
-  },
-  permissionButtons: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  permBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-  },
-  permBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
+
+  // Header
+  header: { paddingHorizontal: 20, marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  superTitle: { fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 },
+  mainTitle: { fontSize: 34, fontWeight: '800', letterSpacing: -0.5 },
+  profileBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', shadowColor: "#000", shadowOffset: {width: 0, height: 2}, shadowOpacity: 0.1, shadowRadius: 8, elevation: 2 },
+
+  // Sections
+  sectionContainer: { marginTop: 24, paddingHorizontal: 20 },
+  sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  sectionTitle: { fontSize: 20, fontWeight: '700', letterSpacing: -0.5 },
+  
+  // Filters
+  filterRow: { flexDirection: 'row', gap: 8 },
+  filterPill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  filterText: { fontSize: 13, fontWeight: '600', textTransform: 'capitalize' },
+
+  // Action Cards
+  actionGrid: { flexDirection: 'row', gap: 12 },
+  actionCard: { flex: 1, padding: 20, borderRadius: 20, shadowColor: "#000", shadowOffset: {width: 0, height: 4}, shadowOpacity: 0.05, shadowRadius: 12, elevation: 2 },
+  iconCircle: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  actionTitle: { fontSize: 16, fontWeight: '600', marginBottom: 2 },
+  actionSubtitle: { fontSize: 13 },
+
+  // Badge
+  badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
+  badgeText: { fontSize: 12, fontWeight: '700' },
+
+  // Empty State
+  emptyState: { padding: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  emptyText: { fontSize: 16, fontWeight: '500' },
+
+  // Modal
+  modalContainer: { flex: 1 },
+  modalHeader: { padding: 20, paddingTop: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  modalTitle: { fontSize: 24, fontWeight: '700' },
+  closeButton: { padding: 4 },
+  searchContainer: { paddingHorizontal: 20, paddingBottom: 16 },
+  searchField: { flexDirection: 'row', alignItems: 'center', height: 44, borderRadius: 12, paddingHorizontal: 12, gap: 10 },
+  input: { flex: 1, fontSize: 16 },
+  studentRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, marginBottom: 8, borderRadius: 12, marginHorizontal: 20 },
+  studentName: { fontSize: 16, fontWeight: '600' },
+  studentRoll: { fontSize: 13, marginTop: 2 },
+  studentPercent: { fontSize: 18, fontWeight: '700' },
+  glassCard: {
+    padding: 20,
+    borderRadius: 24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    elevation: 2,
+    width: '100%'
   },
 });
 

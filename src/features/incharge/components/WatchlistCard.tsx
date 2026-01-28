@@ -69,11 +69,7 @@ export const WatchlistCard: React.FC<WatchlistCardProps> = ({
             <Text style={[styles.studentName, { color: isDark ? '#FFFFFF' : '#0F172A' }]} numberOfLines={1}>
               {studentName}
             </Text>
-            {isCritical && (
-              <View style={styles.criticalBadge}>
-                <Text style={styles.criticalText}>CRITICAL</Text>
-              </View>
-            )}
+            {/* Critical Tag Removed */}
           </View>
           <Text style={[styles.rollNo, { color: isDark ? 'rgba(255,255,255,0.5)' : '#64748B' }]}>
             {rollNo}

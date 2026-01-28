@@ -11,7 +11,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { 
   getStudentsForClass, 
   createAttendanceSession, 
-  submitAttendance 
+  submitAttendance,
+  getClassPermissions
 } from '../../../services/dashboardService';
 import { supabase } from '../../../config/supabase';
 import { 
@@ -27,7 +28,7 @@ export interface AttendanceStudent {
   rollNo: string;
   photoUrl?: string;
   bleUUID?: string;
-  status: 'pending' | 'present' | 'absent';
+  status: 'pending' | 'present' | 'absent' | 'od' | 'leave';
   detectedAt?: number;
 }
 
@@ -61,7 +62,7 @@ interface UseAttendanceReturn {
   absentCount: number;
   pendingCount: number;
   totalCount: number;
-  updateStudentStatus: (studentId: string, status: 'pending' | 'present' | 'absent') => void;
+  updateStudentStatus: (studentId: string, status: 'pending' | 'present' | 'absent' | 'od' | 'leave') => void;
   submitAttendance: () => Promise<{ success: boolean; error: string | null; queued?: boolean }>;
   refreshStudents: () => Promise<void>;
   isOfflineMode: boolean;
@@ -76,8 +77,8 @@ export function useAttendance({ classData, batch }: UseAttendanceOptions): UseAt
   const { isOnline } = useNetworkStatus();
 
   // Derived counts
-  const presentCount = students.filter(s => s.status === 'present').length;
-  const absentCount = students.filter(s => s.status === 'absent').length;
+  const presentCount = students.filter(s => s.status === 'present' || s.status === 'od').length;
+  const absentCount = students.filter(s => s.status === 'absent' || s.status === 'leave').length;
   const pendingCount = students.filter(s => s.status === 'pending').length;
   const totalCount = students.length;
 
@@ -109,14 +110,26 @@ export function useAttendance({ classData, batch }: UseAttendanceOptions): UseAt
             batchNumber
           );
 
-          mappedStudents = fetchedStudents.map(s => ({
-            id: s.id,
-            name: s.full_name,
-            rollNo: s.roll_no,
-            bleUUID: s.bluetooth_uuid || undefined,
-            status: 'pending' as const,
-            photoUrl: undefined,
-          }));
+          // Get active permissions for today
+          const permissions = await getClassPermissions(fetchedStudents.map(s => s.id));
+          const permissionMap = new Map(permissions.map(p => [p.student_id, p.type]));
+
+          mappedStudents = fetchedStudents.map(s => {
+            const permissionType = permissionMap.get(s.id);
+            // If OD/Leave exists, set status automatically
+            const initialStatus = permissionType 
+              ? permissionType as 'od' | 'leave'
+              : 'pending';
+
+            return {
+              id: s.id,
+              name: s.full_name,
+              rollNo: s.roll_no,
+              bleUUID: s.bluetooth_uuid || undefined,
+              status: initialStatus,
+              photoUrl: undefined,
+            };
+          });
           
           setIsOfflineMode(false);
         } catch (onlineErr) {
@@ -136,7 +149,7 @@ export function useAttendance({ classData, batch }: UseAttendanceOptions): UseAt
             name: s.name,
             rollNo: s.rollNo,
             bleUUID: s.bluetoothUUID || undefined,
-            status: 'pending' as const,
+            status: 'pending' as const, // Cannot verify permissions offline easily unless cached
             photoUrl: undefined,
           }));
           
@@ -171,7 +184,7 @@ export function useAttendance({ classData, batch }: UseAttendanceOptions): UseAt
   }, [fetchStudents]);
 
   // Update a single student's status
-  const updateStudentStatus = useCallback((studentId: string, status: 'pending' | 'present' | 'absent') => {
+  const updateStudentStatus = useCallback((studentId: string, status: 'pending' | 'present' | 'absent' | 'od' | 'leave') => {
     setStudents(prev => prev.map(s => 
       s.id === studentId 
         ? { ...s, status, detectedAt: status === 'present' ? Date.now() : undefined }

@@ -19,7 +19,7 @@ import { useTheme } from '../../../contexts';
 
 const SWIPE_THRESHOLD = 50;
 
-type StudentStatus = 'pending' | 'present' | 'absent';
+type StudentStatus = 'pending' | 'present' | 'absent' | 'od' | 'leave';
 
 interface StudentCardProps {
   name: string;
@@ -93,10 +93,43 @@ export const StudentCard: React.FC<StudentCardProps> = ({
     })
   ).current;
 
-  // Apple Zen Mode status styles
+type StudentStatus = 'pending' | 'present' | 'absent' | 'od' | 'leave';
+
+interface StudentCardProps {
+  name: string;
+  rollNo: string;
+  photoUrl?: string;
+  status: StudentStatus;
+  onStatusChange: (newStatus: StudentStatus) => void;
+}
+
+export const StudentCard: React.FC<StudentCardProps> = ({
+  name,
+  rollNo,
+  photoUrl,
+  status,
+  onStatusChange,
+}) => {
+  const { isDark } = useTheme();
+  const translateX = useRef(new Animated.Value(0)).current;
+  const isSwipingRef = useRef(false);
+
+  // ... (lines 43-95 skipped in edit, assumed unchanged, but I need to make sure I don't break them. The tool won't let me skip middle lines easily if I replace a block. I will target specific blocks.)
+  // Actually, I can't use '...' in replacement. I have to replace what I target.
+  // I will target the switch block `getStatusStyle` and the type definition separately if needed, or just the top block and the style block.
+  // Using separate call for styles/type.
+  
+  // Need to handle PanResponder logic for OD/Leave? 
+  // Should users be able to swipe OD/Leave students? 
+  // Probably yes, to manually override. Swipe Right -> Present. Swipe Left -> Absent.
+  // That logic is in lines 72/75: `onStatusChange('present')` / `onStatusChange('absent')`.
+  // That remains valid. If manually swiped, it overrides OD/Leave.
+  
+  // This replacement is just for `getStatusStyle`.
   const getStatusStyle = () => {
     switch (status) {
       case 'present':
+      case 'od': // OD looks like Present
         return { 
           bg: isDark ? '#1C2E1E' : '#E8F9EC', 
           border: isDark ? 'rgba(52, 199, 89, 0.3)' : 'rgba(52, 199, 89, 0.25)', 
@@ -105,6 +138,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({
           avatarBg: isDark ? '#1A2E1C' : '#FFFFFF',
         };
       case 'absent':
+      case 'leave': // Leave looks like Absent
         return { 
           bg: isDark ? '#2E1C1C' : '#FEF0F0', 
           border: isDark ? 'rgba(255, 107, 107, 0.25)' : 'rgba(255, 107, 107, 0.2)', 
@@ -200,14 +234,20 @@ export const StudentCard: React.FC<StudentCardProps> = ({
             <Text style={[styles.rollNo, { color: textColors.rollNo }]}>{rollNo}</Text>
           </View>
 
-          {/* Status Indicator */}
-          <View style={[styles.statusIndicator, { backgroundColor: statusStyle.accent }]}>
-            <Ionicons 
-              name={status === 'present' ? 'checkmark' : status === 'absent' ? 'close' : 'remove'} 
-              size={10} 
-              color="#FFFFFF" 
-            />
-          </View>
+          {/* Status Indicator / Tag */}
+          {(status === 'od' || status === 'leave') ? (
+            <View style={[styles.statusTag, { backgroundColor: statusStyle.accent }]}>
+              <Text style={styles.statusTagText}>{status.toUpperCase()}</Text>
+            </View>
+          ) : (
+            <View style={[styles.statusIndicator, { backgroundColor: statusStyle.accent }]}>
+              <Ionicons 
+                name={status === 'present' ? 'checkmark' : status === 'absent' ? 'close' : 'remove'} 
+                size={10} 
+                color="#FFFFFF" 
+              />
+            </View>
+          )}
         </TouchableOpacity>
       </Animated.View>
     </View>
@@ -286,6 +326,19 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  statusTag: {
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusTagText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
   },
 });
 

@@ -29,12 +29,12 @@ export const TrendsSection: React.FC<TrendsSectionProps> = ({ data }) => {
     const highest = sorted[sorted.length - 1];
     
     if (lowest.percentage < 75) {
-      return `Attendance drops on ${lowest.day}s`;
+      return `Low: ${lowest.day}`;
     }
     if (highest.percentage > 90) {
-      return `Best attendance on ${highest.day}s`;
+      return `Peak: ${highest.day}`;
     }
-    return 'Attendance is consistent this week';
+    return 'Stable week';
   };
 
   const maxPercentage = Math.max(...data.map(d => d.percentage), 100);
@@ -69,9 +69,7 @@ export const TrendsSection: React.FC<TrendsSectionProps> = ({ data }) => {
           <View style={styles.barsRow}>
             {data.map((item, index) => {
               const barHeight = (item.percentage / maxPercentage) * 80;
-              const color = item.percentage >= 90 ? '#22C55E' 
-                         : item.percentage >= 75 ? '#EAB308' 
-                         : '#EF4444';
+              const color = '#34C759'; // Apple Green for all bars (Zen Mode)
               
               return (
                 <View key={index} style={styles.barWrapper}>

@@ -21,6 +21,11 @@ import { LoginScreen, ForgotPasswordScreen } from '../features/auth';
 import { Colors } from '../constants';
 import { signOut, getStoredProfile } from '../services/authService';
 import { MainTabNavigator } from './MainTabNavigator';
+import {
+  MyClassHubScreen,
+  PermissionScreen,
+  ManagePermissionsScreen,
+} from '../features/incharge/screens';
 
 // Keep native splash screen visible
 SplashScreenExpo.preventAutoHideAsync();
@@ -35,6 +40,8 @@ export type RootStackParamList = {
   Auth: undefined;
   LoginSuccess: undefined;
   Main: undefined;
+  Permission: undefined;
+  ManagePermissions: undefined;
 };
 
 // Stacks
@@ -153,6 +160,16 @@ export const RootNavigator: React.FC = () => {
               {() => <MainTabNavigator userName={userName} userRole={userRole} onLogout={handleLogout} />}
             </RootStack.Screen>
           )}
+          <RootStack.Screen 
+            name="Permission" 
+            component={PermissionScreen}
+            options={{ presentation: 'modal' }}
+          />
+          <RootStack.Screen 
+            name="ManagePermissions" 
+            component={ManagePermissionsScreen}
+            options={{ headerShown: false }}
+          />
         </RootStack.Navigator>
       </NavigationContainer>
     </View>

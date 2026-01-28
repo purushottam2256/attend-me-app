@@ -643,3 +643,38 @@ export async function getFacultySubjects(facultyId: string): Promise<{ id: strin
     return [];
   }
 }
+
+// =====================================================
+// PERMISSION FUNCTIONS
+// =====================================================
+
+/**
+ * Get active permissions for a list of students on a specific date
+ */
+export async function getClassPermissions(
+  studentIds: string[],
+  date: string = new Date().toISOString().split('T')[0]
+): Promise<{ student_id: string; type: 'od' | 'leave' }[]> {
+  try {
+    const { data, error } = await supabase
+      .from('attendance_permissions')
+      .select('student_id, type')
+      .in('student_id', studentIds)
+      .eq('is_active', true)
+      .lte('start_date', date)
+      .gte('end_date', date);
+
+    if (error) {
+      console.error('Error fetching class permissions:', error);
+      return [];
+    }
+
+    return (data || []).map((p: any) => ({
+      student_id: p.student_id,
+      type: p.type as 'od' | 'leave',
+    }));
+  } catch (error) {
+    console.error('Permissions fetch error:', error);
+    return [];
+  }
+}

@@ -9,7 +9,7 @@
  * - Scan timeout protection
  */
 
-import { BleManager, Device, State } from 'react-native-ble-plx';
+import { BleManager, Device, State, ScanMode } from 'react-native-ble-plx';
 import { Platform, PermissionsAndroid } from 'react-native';
 
 // Singleton BLE Manager
@@ -23,8 +23,8 @@ let scanTimeoutHandle: NodeJS.Timeout | null = null;
 
 // Configuration
 const BLE_CONFIG = {
-  // Minimum signal strength to accept (-85 is reasonable for classroom distance)
-  MIN_RSSI: -85,
+  // Minimum signal strength to accept (-120 = practically no filter, max range)
+  MIN_RSSI: -120,
   // Maximum scan duration in milliseconds (60 minutes - full class period)
   MAX_SCAN_DURATION: 60 * 60 * 1000,
   // Log verbose device info
@@ -177,7 +177,10 @@ export const startScanning = (
   // Start scanning
   manager.startDeviceScan(
     null, // Scan all devices to see their advertised UUIDs
-    { allowDuplicates: false },
+    { 
+      allowDuplicates: true, // Key fix: Allow updates so we catch them when RSSI improves
+      scanMode: ScanMode.LowLatency // Android: Aggressive scanning for best results
+    },
     (error, device) => {
       if (error) {
         console.error('[BLE] ❌ Scan Error:', error.message);

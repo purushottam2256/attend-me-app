@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { StudentCard } from './StudentCard';
 import { useTheme } from '../../../contexts';
 
-type StudentStatus = 'pending' | 'present' | 'absent';
+type StudentStatus = 'pending' | 'present' | 'absent' | 'od' | 'leave';
 
 interface Student {
   id: string;
@@ -65,19 +65,19 @@ export const StudentList: React.FC<StudentListProps> = ({
       : students;
 
     const verifiedList = filtered
-      .filter(s => s.status === 'present')
+      .filter(s => s.status === 'present' || s.status === 'od')
       .sort((a, b) => (b.detectedAt || 0) - (a.detectedAt || 0));
 
     const pendingList = filtered
-      .filter(s => s.status === 'pending' || s.status === 'absent')
+      .filter(s => s.status === 'pending' || s.status === 'absent' || s.status === 'leave')
       .sort((a, b) => a.rollNo.localeCompare(b.rollNo));
 
     return { verified: verifiedList, pending: pendingList };
   }, [students, searchQuery]);
 
   // Stats
-  const presentCount = students.filter(s => s.status === 'present').length;
-  const absentCount = students.filter(s => s.status === 'absent').length;
+  const presentCount = students.filter(s => s.status === 'present' || s.status === 'od').length;
+  const absentCount = students.filter(s => s.status === 'absent' || s.status === 'leave').length;
   const pendingCount = students.filter(s => s.status === 'pending').length;
 
   return (
