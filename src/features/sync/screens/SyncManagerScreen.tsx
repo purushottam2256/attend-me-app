@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../../contexts/ThemeContext';
+import { ZenToast } from '../../../components/ZenToast';
 import { ResolverEngine, SyncResult } from '../../../services/ResolverEngine';
 import { getPendingCount } from '../../../services/offlineService';
 import NetInfo from '@react-native-community/netinfo';
@@ -15,6 +16,11 @@ export const SyncManagerScreen = ({ navigation }: any) => {
     const [isSyncing, setIsSyncing] = useState(false);
     const [syncLog, setSyncLog] = useState<string[]>([]);
     const [isOnline, setIsOnline] = useState(true);
+    const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'warning' }>({
+        visible: false,
+        message: '',
+        type: 'success'
+    });
 
     useEffect(() => {
         checkStatus();
@@ -31,7 +37,7 @@ export const SyncManagerScreen = ({ navigation }: any) => {
 
     const handleSync = async () => {
         if (!isOnline) {
-            Alert.alert('Offline', 'Please connect to the internet to sync.');
+            setToast({ visible: true, message: 'Please connect to the internet to sync.', type: 'warning' });
             return;
         }
 
@@ -135,6 +141,13 @@ export const SyncManagerScreen = ({ navigation }: any) => {
                 </View>
 
             </ScrollView>
+            
+            <ZenToast 
+                visible={toast.visible} 
+                message={toast.message} 
+                type={toast.type}
+                onHide={() => setToast(prev => ({ ...prev, visible: false }))}
+            />
         </View>
     );
 };

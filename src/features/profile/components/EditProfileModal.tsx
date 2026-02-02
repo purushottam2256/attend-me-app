@@ -7,14 +7,14 @@ import {
     TouchableOpacity, 
     TextInput, 
     Image, 
-    ActivityIndicator, 
-    Alert,
+    ActivityIndicator,
     Platform 
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../../config/supabase';
+import { ZenToast } from '../../../components/ZenToast';
 
 interface EditProfileModalProps {
     visible: boolean;
@@ -38,6 +38,11 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
     const [imageUri, setImageUri] = useState<string | null>(currentPhoto);
     const [isLoading, setIsLoading] = useState(false);
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+    const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'warning' }>({
+        visible: false,
+        message: '',
+        type: 'success'
+    });
 
     // Reset state when modal opens
     useEffect(() => {
@@ -52,7 +57,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
         try {
             const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
             if (status !== 'granted') {
-                Alert.alert('Permission Denied', 'We need access to your gallery to update your profile photo.');
+                setToast({ visible: true, message: 'Gallery permission required', type: 'error' });
                 return;
             }
 
@@ -68,13 +73,13 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                 setHasUnsavedChanges(true);
             }
         } catch (error) {
-            Alert.alert('Error', 'Failed to open image picker.');
+            setToast({ visible: true, message: 'Failed to open image picker', type: 'error' });
         }
     };
 
     const handleSave = async () => {
         if (!name.trim()) {
-            Alert.alert('Required', 'Name cannot be empty.');
+            setToast({ visible: true, message: 'Name cannot be empty', type: 'warning' });
             return;
         }
 
@@ -131,7 +136,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
             onClose();
 
         } catch (error: any) {
-            Alert.alert('Update Failed', error.message || 'Could not update profile.');
+            setToast({ visible: true, message: error.message || 'Update Failed', type: 'error' });
             console.error(error);
         } finally {
             setIsLoading(false);
@@ -202,6 +207,12 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                         </TouchableOpacity>
                     </View>
                 </View>
+                <ZenToast 
+                    visible={toast.visible} 
+                    message={toast.message} 
+                    type={toast.type}
+                    onHide={() => setToast(prev => ({ ...prev, visible: false }))}
+                />
             </View>
         </Modal>
     );

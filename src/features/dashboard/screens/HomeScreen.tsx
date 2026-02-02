@@ -7,7 +7,9 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
+  Image,
 } from 'react-native';
+
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,7 +26,8 @@ import {
   getHolidayInfo,
   SubstitutionInfo 
 } from '../../../services/dashboardService';
-import { SlideToStart, BatchSplitterModal } from '../../../components';
+import { NotificationService } from '../../../services/NotificationService';
+import { SlideToStart, BatchSplitterModal, BellIcon } from '../../../components';
 import { CircularClockHero, CircularClockHeroRef } from '../../../components/CircularClockHero';
 import { NoClassesHero } from '../../../components/NoClassesHero';
 import { useConnectionStatus } from '../../../hooks';
@@ -67,6 +70,29 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
   const [showOffHoursModal, setShowOffHoursModal] = useState(false);
   const [offHoursReason, setOffHoursReason] = useState<'break' | 'after_hours' | 'before_hours' | 'holiday' | 'suspended'>('break');
   const [previousClasses, setPreviousClasses] = useState<ScheduleSlot[]>([]);
+  const [profileImage, setProfileImage] = useState<string | null>(null);
+
+  // Load Profile Image
+  useEffect(() => {
+    const loadProfileImage = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data } = await supabase
+            .from('profiles')
+            .select('avatar_url')
+            .eq('id', user.id)
+            .single();
+          if (data?.avatar_url) {
+            setProfileImage(data.avatar_url);
+          }
+        }
+      } catch (e) {
+        console.log('Error loading profile image:', e);
+      }
+    };
+    loadProfileImage();
+  }, []);
 
   // Reset slider when screen comes into focus
   useFocusEffect(
@@ -290,6 +316,35 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
       setSchedule(mergedClasses);
       determineHeroState(mergedClasses);
       
+      // Schedule Reminders (Professional Feature)
+      try {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('notifications_enabled')
+            .eq('id', user.id)
+            .single();
+
+          if (profile?.notifications_enabled) {
+             // Cancel old to avoid duplicates
+             await NotificationService.cancelAll();
+             
+             for (const slot of mergedClasses) {
+                 if (slot.status === 'upcoming' || slot.status === 'live') {
+                     const classDate = parseTime(slot.start_time);
+                     if (classDate.getTime() > Date.now()) { // Only future classes
+                         await NotificationService.scheduleClassReminder(
+                             slot.subject?.name || 'Class',
+                             `${slot.target_year}-${slot.target_section} (${slot.room || 'N/A'})`,
+                             classDate
+                         );
+                     }
+                 }
+             }
+          }
+      } catch (err) {
+          console.log('Reminder Scheduling Error:', err);
+      }
+      
       await AsyncStorage.setItem(SCHEDULE_CACHE_KEY, JSON.stringify({
         data: mergedClasses,
         timestamp: Date.now(),
@@ -343,18 +398,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
   const navigateToScanner = (batch: 'full' | 1 | 2) => {
     setShowBatchModal(false);
     if (isManualMode) {
-      // Pass the filtered batch to ManualEntry, but ManualEntry accepts 'classData' and handles batching internally?
-      // Actually ManualEntryScreen has a batch filter UI. But if we selected a batch from modal, maybe we should preset it?
-      // ManualEntryScreen uses 'batch: full' by default in useAttendance. 
-      // It has a filter UI.
-      // If user selected Batch 1, maybe we should filter? 
-      // Current ManualEntryScreen doesn't accept 'batch' param to preset filter.
-      // But we can just navigate to it. It has its own filter.
-      // Users might be annoyed if they selected batch and it shows all. 
-      // But 'ManualEntryScreen' is designed to show filtering inside. 
-      // Ideally we shouldn't show batch modal for manual entry if the screen handles it.
-      // But 'handleManualEntry' logic checks isLab and shows modal.
-      // Let's just navigate. The screen allows changing batches.
       navigation.navigate('ManualEntry', { classData: currentClass });
     } else {
       navigation.navigate('Scan', { classData: currentClass, batch, manual: false });
@@ -440,13 +483,21 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
     <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
       <View style={styles.headerLeft}>
         <TouchableOpacity 
-          style={[styles.avatar, { backgroundColor: 'rgba(255,255,255,0.2)' }]}
+          style={[styles.avatar, { backgroundColor: 'rgba(255,255,255,0.2)', overflow: 'hidden' }]}
           onPress={() => navigation.navigate('Profile')}
           activeOpacity={0.8}
         >
-          <Text style={[styles.avatarText, { color: '#FFFFFF' }]}>
-            {userName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-          </Text>
+          {profileImage ? (
+            <Image 
+              source={{ uri: profileImage }} 
+              style={{ width: '100%', height: '100%' }} 
+              resizeMode="cover"
+            />
+          ) : (
+            <Text style={[styles.avatarText, { color: '#FFFFFF' }]}>
+              {userName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+            </Text>
+          )}
         </TouchableOpacity>
         <View>
           <Text style={[styles.greeting, { color: 'rgba(255,255,255,0.7)' }]}>
@@ -468,9 +519,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
           />
         </View>
         
-        <TouchableOpacity style={[styles.iconButton, { backgroundColor: 'rgba(255,255,255,0.15)' }]}>
-          <Ionicons name="notifications-outline" size={22} color="#FFFFFF" />
-        </TouchableOpacity>
+        <BellIcon 
+          style={[styles.iconButton, { backgroundColor: 'rgba(255,255,255,0.15)' }]} 
+          size={22} 
+          color="#FFFFFF" 
+        />
       </View>
     </View>
   );

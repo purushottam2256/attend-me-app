@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Linking, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -17,6 +17,7 @@ interface WatchlistCardProps {
   percentage: number;
   parentMobile?: string;
   studentMobile?: string;
+  onStatusMessage?: (message: string, type: 'success' | 'error' | 'warning') => void;
 }
 
 const getUrgencyColor = (percentage: number): string => {
@@ -30,6 +31,7 @@ export const WatchlistCard: React.FC<WatchlistCardProps> = ({
   percentage,
   parentMobile,
   studentMobile,
+  onStatusMessage,
 }) => {
   const { isDark } = useTheme();
   const urgencyColor = getUrgencyColor(percentage);
@@ -37,7 +39,7 @@ export const WatchlistCard: React.FC<WatchlistCardProps> = ({
 
   const handleCallParent = async () => {
     if (!parentMobile) {
-      Alert.alert('No Contact', 'Parent mobile number not available');
+      onStatusMessage?.('Parent mobile number not available', 'error');
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -46,7 +48,7 @@ export const WatchlistCard: React.FC<WatchlistCardProps> = ({
 
   const handleWhatsApp = async () => {
     if (!studentMobile) {
-      Alert.alert('No Contact', 'Student mobile number not available');
+      onStatusMessage?.('Student mobile number not available', 'error');
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

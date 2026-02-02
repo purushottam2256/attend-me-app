@@ -48,6 +48,7 @@ import {
   ScanBlockedModal,
   type BlockReason,
 } from "../components";
+import { ZenToast } from "../../../components/ZenToast";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -240,6 +241,11 @@ export const ScanScreen: React.FC = () => {
   // Scan blocked state
   const [showBlocked, setShowBlocked] = useState(false);
   const [blockReason, setBlockReason] = useState<BlockReason>("no_class");
+  const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'warning' | 'info' }>({
+      visible: false,
+      message: '',
+      type: 'info'
+  });
 
   // Show blocked modal when no live class
   useEffect(() => {
@@ -512,19 +518,9 @@ export const ScanScreen: React.FC = () => {
 
         if (students.length === 0) {
           handshakeRotation.stopAnimation();
-          import("react-native").then(({ Alert }) => {
-            Alert.alert(
-              "No Students Found",
-              "Could not load the student roster for this class. Please try again.",
-              [
-                {
-                  text: "Go Back",
-                  onPress: () => navigation.navigate("Home" as never),
-                },
-                { text: "Retry", onPress: () => refreshStudents() },
-              ],
-            );
-          });
+          handshakeRotation.stopAnimation();
+          setToast({ visible: true, message: 'Could not load student roster. Please try again.', type: 'error' });
+          return;
           return;
         }
 
@@ -704,30 +700,23 @@ export const ScanScreen: React.FC = () => {
         bleState === "unsupported"
       ) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        // Show alert about Bluetooth being off
-        import("react-native").then(({ Alert }) => {
-          Alert.alert(
-            "Bluetooth Required",
-            bleState === "unauthorized"
-              ? "Please grant Bluetooth permission to scan for students."
-              : bleState === "unsupported"
-                ? "Bluetooth is not supported on this device."
-                : "Please turn on Bluetooth to scan for students.",
-            [{ text: "OK" }],
-          );
-        });
+        const msg =
+          bleState === "unauthorized"
+            ? "Please grant Bluetooth permission."
+            : bleState === "unsupported"
+              ? "Bluetooth is not supported."
+              : "Please turn on Bluetooth.";
+        setToast({ visible: true, message: msg, type: "error" });
         return;
       }
 
       // Check if roster is loaded (only for first start, not pause/resume)
       if (scanState !== "SCANNING" && students.length === 0) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-        import("react-native").then(({ Alert }) => {
-          Alert.alert(
-            "Loading Roster",
-            "Please wait for the student roster to load.",
-            [{ text: "OK" }],
-          );
+        setToast({
+          visible: true,
+          message: "Please wait for student roster to load",
+          type: "info",
         });
         return;
       }
@@ -980,21 +969,7 @@ export const ScanScreen: React.FC = () => {
           <Text style={styles.headerSubtitle}>{section}</Text>
         </View>
         <View style={{ flexDirection: "row", gap: 8 }}>
-          <TouchableOpacity
-            style={styles.menuButton}
-            onPress={() =>
-              navigation.navigate("ManualEntry", {
-                classData,
-                existingAttendance,
-              })
-            }
-          >
-            <Ionicons
-              name="grid-outline"
-              size={22}
-              color={COLORS.textPrimary}
-            />
-          </TouchableOpacity>
+
           <TouchableOpacity
             style={styles.menuButton}
             onPress={handleAutoPilotToggle}
@@ -1257,6 +1232,13 @@ export const ScanScreen: React.FC = () => {
           </View>
         </BlurView>
       </Modal>
+
+      <ZenToast
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        onHide={() => setToast((prev) => ({ ...prev, visible: false }))}
+      />
     </View>
   );
 };

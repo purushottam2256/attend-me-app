@@ -92,7 +92,10 @@ CREATE TABLE public.profiles (
     faculty_id TEXT UNIQUE,
     mobile TEXT,
     is_biometric_enabled BOOLEAN DEFAULT FALSE,
-    device_token TEXT, -- For FCM push notifications
+    is_biometric_enabled BOOLEAN DEFAULT FALSE,
+    device_token TEXT, -- For FCM push notifications (Legacy)
+    push_token TEXT, -- For Expo Push Notifications
+    avatar_url TEXT, -- Profile picture URL
     avatar_url TEXT, -- Profile picture URL
     is_on_leave BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -257,7 +260,7 @@ CREATE TABLE public.substitutions (
     accepted_at TIMESTAMPTZ,
     created_by UUID REFERENCES public.profiles(id), -- Who created the request
     notes TEXT,
-    CONSTRAINT unique_substitution UNIQUE (date, slot_id, original_faculty_id)
+    CONSTRAINT unique_substitution_request UNIQUE (date, slot_id, original_faculty_id, substitute_faculty_id)
 );
 
 -- Indexes
@@ -1427,3 +1430,5 @@ RECOMMENDATIONS:
 -- ============================================================================
 -- END OF SCHEMA
 -- ============================================================================
+
+

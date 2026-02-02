@@ -12,16 +12,24 @@ import {
   TextInput,
   RefreshControl,
   ActivityIndicator,
-  Alert,
+  Animated,
+  Modal,
+  StyleSheet,
+  Dimensions
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../../../contexts';
+import { NotificationService } from '../../../services/NotificationService';
 import { supabase } from '../../../config/supabase';
 import { getTodaySchedule, getTomorrowSchedule, TimetableSlot } from '../../../services/dashboardService';
-import { swapStyles as styles } from '../styles';
+import { swapStyles as styles } from '../styles/SwapScreen.styles';
+
+type SwapScreenRouteProp = RouteProp<{
+    Swap: { classToSwap?: TimetableSlot };
+}, 'Swap'>;
 
 type Mode = 'substitute' | 'swap';
 
@@ -30,16 +38,30 @@ interface Faculty {
   full_name: string;
   dept: string;
   email: string;
+  push_token?: string;
 }
 
 export const SwapScreen: React.FC = () => {
   const { isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
+  const route = useRoute<SwapScreenRouteProp>();
   
   const [mode, setMode] = useState<Mode>('substitute');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [feedback, setFeedback] = useState<{ 
+    visible: boolean; 
+    message: string; 
+    type: 'success' | 'error' | 'warning';
+    subMessage?: string;
+  }>({
+      visible: false,
+      message: '',
+      type: 'success'
+  });
+  
+  // User Info
   const [userId, setUserId] = useState<string | null>(null);
   const [userDept, setUserDept] = useState<string | null>(null);
   const [isShowingTomorrow, setIsShowingTomorrow] = useState(false);
@@ -62,7 +84,42 @@ export const SwapScreen: React.FC = () => {
   const [sameClassFaculties, setSameClassFaculties] = useState<Faculty[]>([]);
   const [swapNote, setSwapNote] = useState('');
   
-  // Theme-aware Premium Colors
+  // Success Animation State
+  // Success Animation State
+  const fadeAnim = useState(new Animated.Value(0))[0];
+  const scaleAnim = useState(new Animated.Value(0.5))[0];
+
+  useEffect(() => {
+    if (feedback.visible) {
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.spring(scaleAnim, {
+          toValue: 1,
+          friction: 6,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      
+      // Auto hide logic
+      if (feedback.type !== 'success') {
+          const timer = setTimeout(() => {
+              setFeedback(prev => ({ ...prev, visible: false }));
+          }, 2500);
+          return () => clearTimeout(timer);
+      }
+    } else {
+      fadeAnim.setValue(0);
+      scaleAnim.setValue(0.5);
+    }
+  }, [feedback.visible]);
+
+  const showFeedback = (type: 'success' | 'error' | 'warning', message: string, subMessage?: string) => {
+      setFeedback({ visible: true, type, message, subMessage });
+  };
   const colors = {
     // Backgrounds
     background: isDark ? '#0A0A0A' : '#F8FAFC',
@@ -79,8 +136,8 @@ export const SwapScreen: React.FC = () => {
     inputBg: isDark ? 'rgba(255,255,255,0.08)' : '#F8FAFC',
     inputBorder: isDark ? 'rgba(255,255,255,0.15)' : '#E2E8F0',
     
-    // Brand - Using scan button teal color
-    accent: '#0D9488', // Teal matching scan button
+    // Brand
+    accent: '#0D9488', 
     teal: '#0D4A4A',
     tealLight: '#1A6B6B',
     tealDark: '#0F3D3D',
@@ -96,6 +153,23 @@ export const SwapScreen: React.FC = () => {
     loadData();
   }, []);
 
+  // Pre-selection Effect (runs when screen is focused)
+  useFocusEffect(
+    useCallback(() => {
+      if (route.params?.classToSwap) {
+          const classToSwap = route.params.classToSwap;
+          // Pre-select for Substitute Mode
+          setSelectedClass(classToSwap);
+          
+          // Pre-select for Swap Mode
+          setSwapMyClass(classToSwap);
+          
+          // Clear params to prevent re-selection on subsequent focus if user changed intent
+          navigation.setParams({ classToSwap: undefined });
+      }
+    }, [route.params, navigation])
+  );
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -109,6 +183,7 @@ export const SwapScreen: React.FC = () => {
         .select('dept')
         .eq('id', user.id)
         .single();
+      setUserDept(profile?.dept || null);
       setUserDept(profile?.dept || null);
       
       // Load today's schedule
@@ -134,13 +209,21 @@ export const SwapScreen: React.FC = () => {
       
       // Load ALL faculty in same dept for substitute
       if (profile?.dept) {
-        const { data: faculties } = await supabase
+        const { data: faculties, error: fetchError } = await supabase
           .from('profiles')
-          .select('id, full_name, dept, email')
+          .select('id, full_name, dept, email, push_token')
           .eq('dept', profile.dept)
           .neq('id', user.id)
           .order('full_name');
+        
+        if (fetchError) {
+          console.error('[SwapScreen] Fetch Error:', fetchError);
+        }
+        
+        // Removed debug log
         setFacultyList(faculties || []);
+      } else {
+        // Removed debug log
       }
       
     } catch (error) {
@@ -166,12 +249,17 @@ export const SwapScreen: React.FC = () => {
       
       if (timetables && timetables.length > 0) {
         const facultyIds = [...new Set(timetables.map(t => t.faculty_id))];
-        const { data: faculties } = await supabase
+        const { data: faculties, error: fetchError } = await supabase
           .from('profiles')
-          .select('id, full_name, dept, email')
+          .select('id, full_name, dept, email, push_token')
           .in('id', facultyIds);
+          
+        if (fetchError) console.error('[SwapScreen] SameClass Fetch Error:', fetchError);
+          
+        // Removed debug log
         setSameClassFaculties(faculties || []);
       } else {
+        // Removed debug log
         setSameClassFaculties([]);
       }
     } catch (error) {
@@ -219,13 +307,15 @@ export const SwapScreen: React.FC = () => {
   // Send substitute request
   const sendSubstituteRequest = async () => {
     if (!selectedClass || !selectedFaculty || !userId) {
-      Alert.alert('Error', 'Please select a class and faculty');
+      showFeedback('warning', 'Missing Selection', 'Please select a class and faculty');
       return;
     }
     
     try {
       const today = new Date().toISOString().split('T')[0];
       
+
+
       const { error } = await supabase
         .from('substitutions')
         .insert({
@@ -242,31 +332,41 @@ export const SwapScreen: React.FC = () => {
           notes: substituteNote || null,
         });
       
-      if (error) throw error;
+      if (error) {
+
+          throw error;
+      }
       
       // Create notification
-      await supabase.from('notifications').insert({
-        user_id: selectedFaculty.id,
-        type: 'substitute_request',
-        priority: 'high',
-        title: 'Substitute Request',
-        body: `${selectedClass.subject?.name || 'Class'} at ${selectedClass.start_time}${substituteNote ? ' - ' + substituteNote : ''}`,
-        data: { slot_id: selectedClass.slot_id, date: today },
-      });
+      // Notification created via Realtime trigger or NotificationScreen fetches 'substitutions' directly
+      // Removed redundant manual notification insert to prevent duplicates
+
+      // Send Real Push
+      if (selectedFaculty.push_token) {
+          NotificationService.sendPushNotification(
+              selectedFaculty.push_token,
+              'Substitute Request',
+              `${selectedClass.subject?.name || 'Class'} at ${selectedClass.start_time}`,
+              { requestId: selectedClass.slot_id, type: 'SUB_REQUEST' } // Add type for action buttons
+          );
+      }
       
-      Alert.alert('Success', `Request sent to ${selectedFaculty.full_name}`, [
-        { text: 'OK', onPress: () => navigation.navigate('Home') }
-      ]);
+      showFeedback('success', 'Request Sent!', `Request sent to ${selectedFaculty.full_name}`);
+      
+      setTimeout(() => {
+         setFeedback(prev => ({ ...prev, visible: false }));
+         navigation.navigate('Home');
+      }, 1500);
       
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to send request');
+      showFeedback('error', 'Failed', error.message || 'Failed to send request');
     }
   };
 
   // Send swap request
   const sendSwapRequest = async () => {
     if (!swapMyClass || !swapTargetFaculty || !swapTargetSlot || !userId) {
-      Alert.alert('Error', 'Please select your class, faculty, and their slot');
+      showFeedback('warning', 'Missing Selection', 'Please select your class, faculty, and their slot');
       return;
     }
     
@@ -295,13 +395,26 @@ export const SwapScreen: React.FC = () => {
         body: `Swap ${swapMyClass.slot_id?.toUpperCase()} ↔️ ${swapTargetSlot?.toUpperCase()}${swapNote ? ' - ' + swapNote : ''}`,
         data: { slot_a: swapMyClass.slot_id, slot_b: swapTargetSlot, date: today },
       });
+
+      // Send Real Push
+      if (swapTargetFaculty.push_token) {
+          NotificationService.sendPushNotification(
+              swapTargetFaculty.push_token,
+              'Swap Request',
+              `Swap ${swapMyClass.slot_id?.toUpperCase()} ↔️ ${swapTargetSlot?.toUpperCase()}`,
+              { type: 'SWAP_REQUEST' }
+          );
+      }
       
-      Alert.alert('Success', `Swap request sent to ${swapTargetFaculty.full_name}`, [
-        { text: 'OK', onPress: () => navigation.navigate('Home') }
-      ]);
+      // Success Animation & Redirect
+      showFeedback('success', 'Request Sent!', 'Redirecting home...');
+      setTimeout(() => {
+          setFeedback(prev => ({ ...prev, visible: false }));
+          navigation.navigate('Home');
+      }, 2000);
       
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to send swap request');
+      showFeedback('error', 'Swap Failed', error.message || 'Failed to send swap request');
     }
   };
 
@@ -353,6 +466,41 @@ export const SwapScreen: React.FC = () => {
         </Text>
       </TouchableOpacity>
     </View>
+  );
+
+  // Render feedback modal
+  const renderFeedbackModal = () => (
+    <Modal visible={feedback.visible} transparent animationType="none">
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' }}>
+            <Animated.View style={{ 
+                opacity: fadeAnim, 
+                transform: [{ scale: scaleAnim }],
+                backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+                width: 250, padding: 24, borderRadius: 24,
+                alignItems: 'center', justifyContent: 'center',
+                shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 20, elevation: 10
+            }}>
+                <View style={{ 
+                    width: 64, height: 64, borderRadius: 32, 
+                    backgroundColor: feedback.type === 'success' ? '#22C55E' : feedback.type === 'error' ? '#EF4444' : '#F59E0B', 
+                    alignItems: 'center', justifyContent: 'center', marginBottom: 16 
+                }}>
+                    <Ionicons 
+                        name={feedback.type === 'success' ? "checkmark" : feedback.type === 'error' ? "alert" : "warning"} 
+                        size={32} color="#FFF" 
+                    />
+                </View>
+                <Text style={{ fontSize: 18, fontWeight: '600', color: isDark ? '#FFF' : '#000', marginBottom: 8, textAlign: 'center' }}>
+                    {feedback.message}
+                </Text>
+                {feedback.subMessage && (
+                    <Text style={{ fontSize: 14, color: isDark ? '#94A3B8' : '#64748B', textAlign: 'center' }}>
+                        {feedback.subMessage}
+                    </Text>
+                )}
+            </Animated.View>
+        </View>
+    </Modal>
   );
 
   // Render class card - Premium Zen styling
@@ -758,6 +906,22 @@ export const SwapScreen: React.FC = () => {
             <Text style={styles.pageTitle}>Swap & Sub</Text>
             <Text style={styles.subtitle}>Manage class handoffs</Text>
           </View>
+          
+          {/* History Icon Button */}
+          <TouchableOpacity
+            style={{
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                backgroundColor: 'rgba(255,255,255,0.1)',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginRight: 8
+            }}
+            onPress={() => navigation.navigate('SwapHistory')}
+          >
+            <Ionicons name="time-outline" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
         </View>
         
         {renderTabs()}
@@ -772,6 +936,8 @@ export const SwapScreen: React.FC = () => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.teal} />
         }
       >
+        {renderFeedbackModal()}
+
         {loading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={colors.accent} />

@@ -28,7 +28,7 @@ import { supabase } from '../../../config/supabase';
 import { getAttendanceHistory, AttendanceSession } from '../../../services/dashboardService';
 import { EditAttendanceModal, FilterBar } from '../components';
 import { historyStyles as styles, DATE_TILE_WIDTH } from '../styles';
-import { ToastNotification } from '../../../components/ui/ToastNotification';
+import { ZenToast } from '../../../components/ZenToast';
 
 // Months for picker
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -643,9 +643,24 @@ export const HistoryScreen: React.FC = () => {
         style={[styles.headerGradient, { paddingTop: insets.top }]}
       >
         <View style={styles.titleRow}>
-          <View>
-            <Text style={styles.pageTitle}>History</Text>
-            <Text style={styles.subtitle}>{formatDisplayDate()}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <TouchableOpacity 
+              style={{ 
+                width: 44,
+                height: 44,
+                borderRadius: 14,
+                backgroundColor: 'rgba(255,255,255,0.15)',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+              onPress={() => navigation.navigate('Home')}
+            >
+              <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+            <View style={{ marginLeft: 12 }}>
+              <Text style={styles.pageTitle}>History</Text>
+              <Text style={styles.subtitle}>{formatDisplayDate()}</Text>
+            </View>
           </View>
           <View style={styles.headerButtons}>
             <TouchableOpacity
@@ -772,11 +787,11 @@ export const HistoryScreen: React.FC = () => {
       />
 
       {/* Toast Notification */}
-      <ToastNotification
+      <ZenToast
         visible={toast.visible}
         type={toast.type}
         message={toast.message}
-        onDismiss={() => setToast(prev => ({ ...prev, visible: false }))}
+        onHide={() => setToast(prev => ({ ...prev, visible: false }))}
       />
     </View>
   );

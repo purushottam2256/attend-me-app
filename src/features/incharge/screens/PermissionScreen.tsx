@@ -16,11 +16,10 @@ import {
   TouchableOpacity,
   TextInput,
   ScrollView,
-  Alert,
-  Platform,
   ActivityIndicator,
   Modal,
 } from "react-native";
+import { ZenToast } from "../../../components/ZenToast";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -51,6 +50,11 @@ export const PermissionScreen: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [students, setStudents] = useState<StudentAggregate[]>([]);
+  const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'warning' }>({
+      visible: false,
+      message: '',
+      type: 'success'
+  });
 
   // Form State
   const [type, setType] = useState<PermissionType>("leave");
@@ -92,7 +96,7 @@ export const PermissionScreen: React.FC = () => {
       const classInfo = await getAssignedClass(user.id);
       
       if (!classInfo) {
-        Alert.alert("Error", "No class assigned to you as Incharge.");
+        setToast({ visible: true, message: "No class assigned to you as Incharge.", type: 'error' });
         return;
       }
 
@@ -100,7 +104,8 @@ export const PermissionScreen: React.FC = () => {
       setStudents(classStudents);
     } catch (error) {
       console.error("Error loading students:", error);
-      Alert.alert("Error", "Failed to load student list");
+      console.error("Error loading students:", error);
+      setToast({ visible: true, message: "Failed to load student list", type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -118,12 +123,12 @@ export const PermissionScreen: React.FC = () => {
 
   const handleSubmit = async () => {
     if (selectedStudentIds.size === 0) {
-      Alert.alert("Required", "Please select at least one student");
+      setToast({ visible: true, message: "Please select at least one student", type: 'warning' });
       return;
     }
 
     if (type === "od" && !reason.trim() && category === "other") {
-      Alert.alert("Required", "Please specify a reason for Other category");
+      setToast({ visible: true, message: "Please specify a reason for Other category", type: 'warning' });
       return;
     }
 
@@ -155,15 +160,19 @@ export const PermissionScreen: React.FC = () => {
       await Promise.all(promises);
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert(
-        "Success",
-        `${type === "leave" ? "Leave" : "OD"} granted for ${selectedStudentIds.size} student(s)`,
-        [{ text: "OK", onPress: () => navigation.goBack() }],
-      );
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setToast({
+          visible: true,
+          message: `${type === "leave" ? "Leave" : "OD"} granted for ${selectedStudentIds.size} student(s)`,
+          type: 'success'
+      });
+      setTimeout(() => {
+          navigation.goBack();
+      }, 1500);
     } catch (error: any) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       console.error(error);
-      Alert.alert("Error", error.message || "Failed to grant permissions. Some permissions may have overlapped.");
+      setToast({ visible: true, message: error.message || "Failed to grant permissions", type: 'error' });
     } finally {
       setSubmitting(false);
     }
@@ -616,6 +625,13 @@ export const PermissionScreen: React.FC = () => {
 
 
       {renderStudentPicker()}
+      
+      <ZenToast 
+          visible={toast.visible} 
+          message={toast.message} 
+          type={toast.type}
+          onHide={() => setToast(prev => ({ ...prev, visible: false }))}
+      />
     </View>
   );
 };

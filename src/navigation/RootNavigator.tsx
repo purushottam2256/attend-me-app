@@ -29,6 +29,8 @@ import {
 import { ManualEntryScreen } from '../features/scanning/screens/ManualEntryScreen';
 import { BeaconDoctorScreen } from '../features/diagnostics/screens/BeaconDoctorScreen';
 import { SyncManagerScreen } from '../features/sync/screens/SyncManagerScreen';
+import { NotificationScreen } from '../features/notifications/screens/NotificationScreenNew';
+import { SwapHistoryScreen } from '../features/swap/screens/SwapHistoryScreen';
 
 // Keep native splash screen visible
 SplashScreenExpo.preventAutoHideAsync();
@@ -62,6 +64,8 @@ export type RootStackParamList = {
   };
   BeaconDoctor: undefined;
   SyncManager: undefined;
+  Notifications: { filter?: 'requests' | 'all' };
+  SwapHistory: undefined;
 };
 
 // Stacks
@@ -205,7 +209,17 @@ export const RootNavigator: React.FC = () => {
             component={SyncManagerScreen}
             options={{ headerShown: false }}
           />
-        </RootStack.Navigator>
+        <RootStack.Screen 
+          name="Notifications" 
+          component={NotificationScreen} 
+          options={{ animation: 'slide_from_right' }}
+        />
+        <RootStack.Screen 
+          name="SwapHistory" 
+          component={SwapHistoryScreen} 
+          options={{ animation: 'slide_from_right', headerShown: false }}
+        />
+      </RootStack.Navigator>
       </NavigationContainer>
     </View>
   );

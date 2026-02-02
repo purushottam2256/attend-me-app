@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Switch,
-  Alert,
   Modal,
   TextInput,
   ActivityIndicator,
@@ -80,8 +79,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
   const [reportModalVisible, setReportModalVisible] = useState(false);
 
   // -- Toast State --
-  const [toastVisible, setToastVisible] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
+  const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'warning' }>({
+      visible: false,
+      message: '',
+      type: 'success'
+  });
 
   // -- Forms --
   // Leave
@@ -165,16 +167,19 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
       await AsyncStorage.setItem('notificationsEnabled', val.toString());
   };
 
-  const showZenToast = (msg: string) => {
-      setToastMessage(msg);
-      setToastVisible(true);
-      if (hapticsEnabled) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  const showZenToast = (msg: string, type: 'success' | 'error' | 'warning' = 'success') => {
+      setToast({ visible: true, message: msg, type });
+      if (hapticsEnabled) {
+          if (type === 'error') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          else if (type === 'warning') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          else Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
   };
 
   // --- Actions ---
   const handleApplyLeave = async () => {
       if (!leaveReason.trim()) {
-          Alert.alert('Required', 'Please enter a reason.');
+          showZenToast('Please enter a reason.', 'warning');
           return;
       }
       setIsSubmittingLeave(true);
@@ -202,7 +207,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
         setLeaveReason('');
         // Notify HOD logic would be ideally backend trigger, but we simulate success here
       } catch (err) {
-        Alert.alert('Error', 'Failed to apply for leave.');
+        showZenToast('Failed to apply for leave.', 'error');
         console.error(err);
       } finally {
         setIsSubmittingLeave(false);
@@ -212,7 +217,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
   const handlePickReportImage = async () => {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-           Alert.alert('Permission needed', 'Gallery permission required.');
+           showZenToast('Gallery permission required.', 'error');
            return;
       }
       
@@ -270,9 +275,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
         setReportQuery('');
         setReportImage(null);
 
-        showZenToast(`Report Submitted. ID: #${Math.floor(Math.random() * 9000) + 1000}`);
+        showZenToast(`Report Submitted. ID: #${Math.floor(Math.random() * 9000) + 1000}`, 'success');
       } catch (err) {
-          Alert.alert('Error', 'Failed to submit report.');
+          showZenToast('Failed to submit report.', 'error');
           console.error(err);
       } finally {
           setIsSubmittingReport(false);
@@ -365,9 +370,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
       </View>
 
       <ZenToast 
-        visible={toastVisible} 
-        message={toastMessage} 
-        onHide={() => setToastVisible(false)} 
+        visible={toast.visible} 
+        message={toast.message} 
+        type={toast.type}
+        onHide={() => setToast(prev => ({ ...prev, visible: false }))} 
       />
 
       <ScrollView
@@ -501,7 +507,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
           onClose={() => setEditProfileVisible(false)}
           onProfileUpdated={() => {
               loadUserData();
-              showZenToast('Profile Updated Successfully');
+              showZenToast('Profile Updated Successfully', 'success');
           }}
           currentName={displayName}
           currentPhoto={profileImage}

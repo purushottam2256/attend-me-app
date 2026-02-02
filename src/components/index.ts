@@ -2,3 +2,4 @@
 export { ProgressRing } from './ProgressRing';
 export { SlideToStart } from './SlideToStart';
 export { BatchSplitterModal } from './BatchSplitterModal';
+export { BellIcon } from './BellIcon';

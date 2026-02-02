@@ -10,7 +10,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -18,6 +17,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../../contexts';
 import { supabase } from '../../../config/supabase';
+import { ZenToast } from '../../../components/ZenToast';
+import { ConfirmationModal } from '../../../components/ConfirmationModal';
 import { 
   getTodaySchedule, 
   getStudentsForClass, 
@@ -42,6 +43,14 @@ export const AttendanceScreen: React.FC = () => {
   const [classes, setClasses] = useState<TimetableSlot[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [attendance, setAttendance] = useState<Map<string, 'present' | 'absent'>>(new Map());
+  
+  // UI State
+  const [toast, setToast] = useState<{ visible: boolean, type: 'success' | 'error' | 'warning', message: string }>({ visible: false, type: 'success', message: '' });
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+
+  const showToast = (type: 'success' | 'error' | 'warning', message: string) => {
+    setToast({ visible: true, type, message });
+  };
 
   const loadClasses = useCallback(async () => {
     try {
@@ -109,58 +118,53 @@ export const AttendanceScreen: React.FC = () => {
 
   const handleSubmit = async () => {
     if (!selectedClass) return;
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmSubmit = async () => {
+    setShowConfirmModal(false);
+    
+    if (!selectedClass) return;
 
     const records: AttendanceRecord[] = [];
     attendance.forEach((status, studentId) => {
       records.push({ studentId, status });
     });
 
-    Alert.alert(
-      'Submit Attendance',
-      `Mark ${records.filter(r => r.status === 'present').length} present and ${records.filter(r => r.status === 'absent').length} absent?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Submit',
-          onPress: async () => {
-            setSubmitting(true);
-            try {
-              const { data: { user } } = await supabase.auth.getUser();
-              if (!user) return;
+    setSubmitting(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-              const { sessionId, error: sessionError } = await createAttendanceSession(
-                user.id,
-                selectedClass.subject.id,
-                selectedClass.slot_id,
-                selectedClass.target_dept,
-                selectedClass.target_year,
-                selectedClass.target_section,
-                students.length,
-                selectedClass.batch
-              );
+      const { sessionId, error: sessionError } = await createAttendanceSession(
+        user.id,
+        selectedClass.subject.id,
+        selectedClass.slot_id,
+        selectedClass.target_dept,
+        selectedClass.target_year,
+        selectedClass.target_section,
+        students.length,
+        selectedClass.batch
+      );
 
-              if (sessionError || !sessionId) {
-                Alert.alert('Error', sessionError || 'Failed to create session');
-                return;
-              }
+      if (sessionError || !sessionId) {
+        showToast('error', sessionError || 'Failed to create session');
+        return;
+      }
 
-              const { success, error } = await submitAttendance(sessionId, user.id, records);
-              
-              if (success) {
-                Alert.alert('Success', 'Attendance submitted successfully!');
-                loadClasses();
-              } else {
-                Alert.alert('Error', error || 'Failed to submit attendance');
-              }
-            } catch (error) {
-              Alert.alert('Error', 'An unexpected error occurred');
-            } finally {
-              setSubmitting(false);
-            }
-          },
-        },
-      ]
-    );
+      const { success, error } = await submitAttendance(sessionId, user.id, records);
+      
+      if (success) {
+        showToast('success', 'Attendance submitted successfully!');
+        loadClasses();
+      } else {
+        showToast('error', error || 'Failed to submit attendance');
+      }
+    } catch (error) {
+      showToast('error', 'An unexpected error occurred');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const presentCount = Array.from(attendance.values()).filter(s => s === 'present').length;
@@ -364,6 +368,23 @@ export const AttendanceScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
       )}
+      {/* Modal and Toast */}
+      <ConfirmationModal
+        visible={showConfirmModal}
+        title="Submit Attendance"
+        message={`Mark ${presentCount} present and ${absentCount} absent?`}
+        onConfirm={handleConfirmSubmit}
+        onCancel={() => setShowConfirmModal(false)}
+        confirmLabel="Submit"
+        isDark={isDark}
+      />
+
+      <ZenToast
+        visible={toast.visible}
+        type={toast.type}
+        message={toast.message}
+        onHide={() => setToast(prev => ({ ...prev, visible: false }))}
+      />
     </View>
   );
 };

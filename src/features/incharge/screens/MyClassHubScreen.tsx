@@ -22,15 +22,19 @@ import {
   FlatList,
   TextInput,
   Platform,
+  Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
+import { ZenToast } from '../../../components/ZenToast';
+
 import { BlurView } from 'expo-blur';
 
 import { TrafficLightZone, WatchlistCard, TrendsSection } from '../components';
+import { BellIcon } from '../../../components/BellIcon';
 import { useTheme } from '../../../contexts';
 import { supabase } from '../../../config/supabase';
 import { getClassStudents, getWatchlist, getKeyPeriodAttendance, getClassTrends, getAssignedClass, type StudentAggregate, type PeriodAttendance } from '../services/inchargeService';
@@ -43,7 +47,7 @@ interface ClassInfo {
 }
 
 // Helper component for Watchlist Pagination
-const WatchlistPager = ({ watchlist, colors, isDark }: { watchlist: StudentAggregate[], colors: any, isDark: boolean }) => {
+const WatchlistPager = ({ watchlist, colors, isDark, onMessage }: { watchlist: StudentAggregate[], colors: any, isDark: boolean, onMessage: (msg: string, type: 'success' | 'error' | 'warning') => void }) => {
     const [containerWidth, setContainerWidth] = useState(0);
     const [activeIndex, setActiveIndex] = useState(0);
 
@@ -80,6 +84,7 @@ const WatchlistPager = ({ watchlist, colors, isDark }: { watchlist: StudentAggre
                                     studentName={student.full_name}
                                     rollNo={student.roll_no}
                                     percentage={student.attendance_percentage}
+                                    onStatusMessage={onMessage}
                                 />
                             ))}
                         </View>
@@ -120,6 +125,14 @@ export const MyClassHubScreen: React.FC = () => {
   const [watchlist, setWatchlist] = useState<StudentAggregate[]>([]);
   const [trendData, setTrendData] = useState<{ day: string; percentage: number }[]>([]);
   const [trendRange, setTrendRange] = useState<'day' | 'week' | 'month'>('week');
+  const [profileImage, setProfileImage] = useState<string | null>(null);
+  
+  // Toast
+  const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'warning' }>({
+      visible: false,
+      message: '',
+      type: 'success'
+  });
 
   // Load Class Info
   const fetchClassInfo = useCallback(async () => {
@@ -141,6 +154,19 @@ export const MyClassHubScreen: React.FC = () => {
       setClassInfo(info);
       setError(null);
 
+      // Added: Fetch Profile Image
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data } = await supabase
+            .from('profiles')
+            .select('avatar_url')
+            .eq('id', user.id)
+            .single();
+        if (data?.avatar_url) {
+            setProfileImage(data.avatar_url);
+        }
+      }
+
       const [periods, students] = await Promise.all([
         getKeyPeriodAttendance(info.dept, info.year, info.section),
         getWatchlist(info.dept, info.year, info.section, 75),
@@ -151,11 +177,16 @@ export const MyClassHubScreen: React.FC = () => {
       setWatchlist(students.slice(0, 5));
     } catch (error) {
       console.error('[MyClassHub] Error loading data:', error);
-      setError('Failed to load class data');
+      setToast({ visible: true, message: 'Failed to refresh data', type: 'error' });
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [fetchClassInfo]);
+  }, [fetchClassInfo, classInfo]); // Added classInfo dependency logic check
+
+  const showToast = useCallback((message: string, type: 'success' | 'error' | 'warning') => {
+      setToast({ visible: true, message, type });
+  }, []);
 
   // Fetch trends
   useEffect(() => {
@@ -287,20 +318,53 @@ export const MyClassHubScreen: React.FC = () => {
       >
         {/* Apple Style Large Header */}
         <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
-          <View>
-            <Text style={[styles.superTitle, { color: 'rgba(255,255,255,0.8)' }]}>
-              {classInfo.dept}-{classInfo.year}{classInfo.section}
-            </Text>
-            <Text style={[styles.mainTitle, { color: '#FFFFFF' }]}>
-              Class Hub
-            </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <TouchableOpacity 
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 14,
+                backgroundColor: 'rgba(255,255,255,0.15)',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+              onPress={() => navigation.navigate('Home' as never)}
+            >
+               <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+            <View>
+              <Text style={[styles.superTitle, { color: 'rgba(255,255,255,0.8)' }]}>
+                {classInfo.dept}-{classInfo.year}{classInfo.section}
+              </Text>
+              <Text style={[styles.mainTitle, { color: '#FFFFFF' }]}>
+                Class Hub
+              </Text>
+            </View>
           </View>
-          <TouchableOpacity 
-            style={[styles.profileBtn, { backgroundColor: 'rgba(255,255,255,0.2)' }]}
-            onPress={() => navigation.navigate('Profile' as never)}
-          >
-             <Ionicons name="person" size={20} color="#FFFFFF" />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <BellIcon />
+            <TouchableOpacity 
+              style={[
+                styles.profileBtn, 
+                { 
+                  backgroundColor: 'rgba(255,255,255,0.2)',
+                  overflow: 'hidden',
+                  padding: 0 // Remove padding to let image fill
+                }
+              ]}
+              onPress={() => navigation.navigate('Profile' as never)}
+            >
+               {profileImage ? (
+                 <Image 
+                   source={{ uri: profileImage }} 
+                   style={{ width: '100%', height: '100%' }} 
+                   resizeMode="cover"
+                 />
+               ) : (
+                 <Ionicons name="person" size={20} color="#FFFFFF" style={{ alignSelf: 'center', marginTop: 8 }} />
+               )}
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* 1. Traffic Light Zone */}
@@ -394,7 +458,7 @@ export const MyClassHubScreen: React.FC = () => {
                   <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No critical students</Text>
                 </View>
               ) : (
-                <WatchlistPager watchlist={watchlist} colors={colors} isDark={isDark} />
+                <WatchlistPager watchlist={watchlist} colors={colors} isDark={isDark} onMessage={showToast} />
               )}
           </View>
         </View>
@@ -449,6 +513,13 @@ export const MyClassHubScreen: React.FC = () => {
            )}
         </View>
       </Modal>
+
+      <ZenToast
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        onHide={() => setToast(prev => ({ ...prev, visible: false }))}
+      />
     </View>
   );
 };

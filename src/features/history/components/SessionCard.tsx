@@ -11,7 +11,6 @@ import {
   TouchableOpacity,
   Animated,
   Share,
-  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../../contexts';
@@ -90,11 +89,8 @@ export const SessionCard: React.FC<SessionCardProps> = ({
 
   // Export handlers
   const handleExport = (format: 'pdf' | 'excel' | 'json') => {
-    Alert.alert(
-      'Export',
-      `Exporting as ${format.toUpperCase()}...`,
-      [{ text: 'OK' }]
-    );
+    console.log(`Exporting as ${format.toUpperCase()}...`);
+    // Placeholder for future export implementation
   };
 
   // Colors

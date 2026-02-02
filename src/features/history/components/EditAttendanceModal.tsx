@@ -16,7 +16,6 @@ import {
   FlatList,
   TextInput,
   Share,
-  Alert,
   Animated,
   Platform,
 } from 'react-native';
@@ -24,7 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../../contexts';
 import { supabase } from '../../../config/supabase';
-import { ToastNotification } from '../../../components/ui/ToastNotification';
+import { ZenToast } from '../../../components/ZenToast';
 
 // Types
 interface Student {
@@ -576,11 +575,11 @@ export const EditAttendanceModal: React.FC<EditAttendanceModalProps> = ({
         {renderExportMenu()}
 
         {/* Toast Notification */}
-        <ToastNotification
+        <ZenToast
           visible={toast.visible}
           type={toast.type}
           message={toast.message}
-          onDismiss={() => setToast(prev => ({ ...prev, visible: false }))}
+          onHide={() => setToast(prev => ({ ...prev, visible: false }))}
         />
       </View>
     </Modal>

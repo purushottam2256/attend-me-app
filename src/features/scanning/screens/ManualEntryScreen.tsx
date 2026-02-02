@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
   BackHandler,
   Modal,
   Image,
@@ -27,7 +26,7 @@ import { ManualAttendanceGrid } from '../components/ManualAttendanceGrid';
 import { useAttendance } from '../hooks/useAttendance';
 import { checkExistingSession } from '../../../services/dashboardService';
 import { supabase } from '../../../config/supabase';
-import { ToastNotification } from '../../../components/ui/ToastNotification';
+import { ZenToast } from '../../../components/ZenToast';
 
 // Types
 type BatchFilter = 'all' | 1 | 2;
@@ -348,12 +347,13 @@ export const ManualEntryScreen: React.FC = () => {
       </Modal>
 
       {/* Top Toast Notification */}
-      <ToastNotification
+      <ZenToast
         visible={toast.visible}
-        type={toast.type}
+        type={toast.type as any} // 'success' | 'error' match
         message={toast.message}
-        onRetry={toast.onRetry}
-        onDismiss={hideToast}
+        onAction={toast.onRetry}
+        actionLabel={toast.onRetry ? "Retry" : undefined}
+        onHide={hideToast}
       />
 
 
