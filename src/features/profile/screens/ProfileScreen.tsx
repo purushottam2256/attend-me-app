@@ -105,8 +105,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
   const [reportImage, setReportImage] = useState<string | null>(null);
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
 
-  // -- Holidays --
+  // -- Holidays & Timetable --
   const [holidays, setHolidays] = useState<any[]>([]);
+  const [timetable, setTimetable] = useState<any[]>([]);
 
   useEffect(() => {
     loadUserData();
@@ -115,13 +116,42 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
   }, []);
 
   const loadHolidays = async () => {
-      const { data } = await supabase
-          .from('holidays')
-          .select('*')
-          .gte('date', new Date().toISOString())
-          .order('date', { ascending: true })
-          .limit(3);
-      if (data) setHolidays(data);
+      try {
+        const { data } = await supabase
+            .from('academic_calendar')
+            .select('*')
+            .gte('date', new Date().toISOString())
+            .order('date', { ascending: true })
+            .limit(5);
+        if (data) setHolidays(data);
+      } catch (e) {
+        console.error('Error loading holidays:', e);
+      }
+  };
+
+  const loadTimetable = async () => {
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data, error } = await supabase
+            .from('master_timetables')
+            .select(`
+                day,
+                slot_id,
+                target_dept,
+                target_year,
+                target_section,
+                subject:subject_id(name, code)
+            `)
+            .eq('faculty_id', user.id)
+            .eq('is_active', true);
+
+        if (error) throw error;
+        if (data) setTimetable(data);
+    } catch (err) {
+        console.log('Error loading timetable:', err);
+    }
   };
 
   const loadUserData = async () => {
@@ -165,6 +195,23 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
   const toggleNotifications = async (val: boolean) => {
       setNotificationsEnabled(val);
       await AsyncStorage.setItem('notificationsEnabled', val.toString());
+      
+      // IMPORTANT: Sync with database so HomeScreen can check
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase
+          .from('profiles')
+          .update({ notifications_enabled: val })
+          .eq('id', user.id);
+      }
+      
+      // Cancel all scheduled reminders when disabled
+      if (!val) {
+        await NotificationService.cancelAllScheduled();
+        showZenToast('Class reminders disabled', 'warning');
+      } else {
+        showZenToast('Class reminders enabled', 'success');
+      }
   };
 
   const showZenToast = (msg: string, type: 'success' | 'error' | 'warning' = 'success') => {
@@ -390,12 +437,16 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
 
         {renderSection('Faculty Services', [
            { icon: 'document-text', label: 'Apply for Leave', value: 'Notify HOD', onPress: () => setLeaveModalVisible(true), color: '#F59E0B' },
-           { icon: 'calendar', label: 'My Schedule', value: 'Weekly Timetable', onPress: () => { setScheduleModalVisible(true); loadHolidays(); }, color: '#8B5CF6' }
+           { icon: 'calendar', label: 'My Schedule', value: 'Weekly Timetable', onPress: () => { setScheduleModalVisible(true); loadTimetable(); loadHolidays(); }, color: '#8B5CF6' }
         ])}
 
         {renderSection('App Settings', [
           { icon: isDark ? 'moon' : 'sunny', label: 'Dark Mode', isToggle: true, toggleValue: isDark, onToggle: () => setTheme(isDark ? 'light' : 'dark'), color: isDark ? '#8B5CF6' : '#F59E0B' },
           { icon: 'notifications', label: 'Push Notifications', isToggle: true, toggleValue: notificationsEnabled, onToggle: toggleNotifications, color: '#EC4899' },
+          { icon: 'flask', label: 'Test Notification', onPress: async () => {
+              await import('../../../services/NotificationService').then(m => m.NotificationService.testLocalNotification());
+              showZenToast('Notification Sent!');
+          }, color: '#3B82F6' },
           { icon: 'phone-portrait', label: 'Haptic Feedback', isToggle: true, toggleValue: hapticsEnabled, onToggle: toggleHaptics, color: '#10B981' }
         ])}
 
@@ -520,17 +571,24 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
           <View style={{ flex: 1, backgroundColor: '#0F766E' }}> 
               
               {/* Header */}
-              <View style={[styles.modalHeader, { marginTop: insets.top + 20, paddingHorizontal: 20 }]}>
-                  <View>
-                      <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '700', letterSpacing: 1 }}>ACADEMIC PLAN</Text>
-                      <Text style={{ color: '#FFF', fontSize: 28, fontWeight: '800' }}>Weekly Schedule</Text>
-                  </View>
+              <View style={[styles.modalHeader, { marginTop: insets.top + 20, paddingHorizontal: 20, justifyContent: 'flex-start', gap: 16 }]}>
                   <TouchableOpacity 
                       onPress={() => setScheduleModalVisible(false)}
-                      style={{ backgroundColor: 'rgba(255,255,255,0.2)', padding: 8, borderRadius: 100 }}
+                      style={{ 
+                        width: 44,
+                        height: 44,
+                        borderRadius: 14,
+                        backgroundColor: 'rgba(255,255,255,0.15)',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
                   >
-                      <Ionicons name="close" size={24} color="#FFF" />
+                      <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
                   </TouchableOpacity>
+                  <View>
+                      <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '700', letterSpacing: 1 }}>ACADEMIC PLAN</Text>
+                      <Text style={{ color: '#FFF', fontSize: 24, fontWeight: '800' }}>Weekly Schedule</Text>
+                  </View>
               </View>
               
               <View style={{ flex: 1, backgroundColor: isDark ? '#082020' : '#F1F5F9', borderTopLeftRadius: 32, borderTopRightRadius: 32, overflow: 'hidden' }}>
@@ -551,59 +609,74 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
                                 </View>
 
                                 {/* Time Rows */}
-                                {['09:30 - 10:20', '10:20 - 11:10', '11:10 - 12:00', '12:00 - 12:50', '01:40 - 02:30', '02:30 - 03:20'].map((time, rowIdx) => (
-                                    <View key={rowIdx} style={{ flexDirection: 'row', marginBottom: 12, alignItems: 'center' }}>
-                                        {/* Time Column */}
-                                        <View style={{ width: 80, paddingRight: 12, justifyContent: 'center' }}>
-                                            <Text style={{ fontSize: 11, fontWeight: '700', color: isDark ? '#FFF' : '#082020', textAlign: 'center' }}>{time.split(' - ')[0]}</Text>
-                                            <Text style={{ fontSize: 10,  color: isDark ? '#94A3B8' : '#64748B', textAlign: 'center' }}>to</Text>
-                                            <Text style={{ fontSize: 11, fontWeight: '700', color: isDark ? '#FFF' : '#082020', textAlign: 'center' }}>{time.split(' - ')[1]}</Text>
+                                {[
+                                    { id: 'p1', time: '09:30 - 10:20' },
+                                    { id: 'p2', time: '10:20 - 11:10' },
+                                    { id: 'p3', time: '11:10 - 12:00' },
+                                    { id: 'p4', time: '12:00 - 12:50' },
+                                    { id: 'LUNCH', time: '12:50 - 01:40', type: 'BREAK' },
+                                    { id: 'p5', time: '01:40 - 02:30' },
+                                    { id: 'p6', time: '02:30 - 03:20' }
+                                ].map((row, rowIdx) => {
+                                    if (row.type === 'BREAK') {
+                                        return (
+                                            <View key={row.id} style={{ flexDirection: 'row', marginBottom: 12, alignItems: 'center' }}>
+                                                <View style={{ width: 80, paddingRight: 12, justifyContent: 'center' }}>
+                                                    <Text style={{ fontSize: 11, fontWeight: '700', color: isDark ? '#FFF' : '#082020', textAlign: 'center' }}>{row.time.split(' - ')[0]}</Text>
+                                                    <Text style={{ fontSize: 10,  color: isDark ? '#94A3B8' : '#64748B', textAlign: 'center' }}>to</Text>
+                                                    <Text style={{ fontSize: 11, fontWeight: '700', color: isDark ? '#FFF' : '#082020', textAlign: 'center' }}>{row.time.split(' - ')[1]}</Text>
+                                                </View>
+                                                <View style={{ flex: 1, height: 40, backgroundColor: isDark ? '#1E293B' : '#E2E8F0', borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                                                    <Text style={{ fontSize: 12, fontWeight: '800', color: isDark ? '#94A3B8' : '#64748B', letterSpacing: 2 }}>LUNCH BREAK 🍱</Text>
+                                                </View>
+                                            </View>
+                                        );
+                                    }
+
+                                    return (
+                                        <View key={row.id} style={{ flexDirection: 'row', marginBottom: 12, alignItems: 'center' }}>
+                                            {/* Time Column */}
+                                            <View style={{ width: 80, paddingRight: 12, justifyContent: 'center' }}>
+                                                <Text style={{ fontSize: 11, fontWeight: '700', color: isDark ? '#FFF' : '#082020', textAlign: 'center' }}>{row.time.split(' - ')[0]}</Text>
+                                                <Text style={{ fontSize: 10,  color: isDark ? '#94A3B8' : '#64748B', textAlign: 'center' }}>to</Text>
+                                                <Text style={{ fontSize: 11, fontWeight: '700', color: isDark ? '#FFF' : '#082020', textAlign: 'center' }}>{row.time.split(' - ')[1]}</Text>
+                                            </View>
+    
+                                            {/* Schedule Cells */}
+                                            {['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map((day, colIdx) => {
+                                                const slotData = timetable.find(t => 
+                                                    t.day?.toUpperCase().startsWith(day) && 
+                                                    String(t.slot_id) === String(row.id)
+                                                );
+                                                
+                                                const hasClass = !!slotData;
+                                                
+                                                return (
+                                                    <View key={colIdx} style={{ 
+                                                        width: 140, 
+                                                        height: 60,
+                                                        backgroundColor: hasClass ? (isDark ? '#0F766E' : '#F0FDFA') : 'transparent',
+                                                        borderRadius: 12,
+                                                        borderWidth: 1,
+                                                        borderColor: hasClass ? '#0D9488' : (isDark ? '#334155' : '#E2E8F0'),
+                                                        padding: 8,
+                                                        marginRight: 8,
+                                                        justifyContent: 'center'
+                                                    }}>
+                                                        {hasClass ? (
+                                                            <>
+                                                                <Text numberOfLines={1} style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#FFF' : '#0F766E' }}>{slotData.subject?.name || 'Subject'}</Text>
+                                                                <Text style={{ fontSize: 10, color: isDark ? '#99F6E4' : '#0D9488', marginTop: 2 }}>{slotData.target_dept}-{slotData.target_section}</Text>
+                                                            </>
+                                                        ) : (
+                                                            <Text style={{ fontSize: 11, color: isDark ? '#334155' : '#CBD5E1', textAlign: 'center', fontStyle: 'italic' }}>- Free -</Text>
+                                                        )}
+                                                    </View>
+                                                );
+                                            })}
                                         </View>
-
-                                        {/* Schedule Cells (Simulated Fetch Data) */}
-                                        {['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map((day, colIdx) => {
-                                            // Mock Data Logic (Replace with real DB data map)
-                                            const isBreak = rowIdx === 3; // Lunch break simulation
-                                            const hasClass = !isBreak && (rowIdx + colIdx) % 3 !== 0; // Randomize cells
-                                            
-                                            // Real app should map `timetable` data here using `day` and `time`
-                                            
-                                            if (isBreak) return (
-                                                <View key={colIdx} style={{ width: 140, height: 80, backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#F1F5F9', marginHorizontal: 4, borderRadius: 8, justifyContent: 'center', alignItems: 'center' }}>
-                                                    <Text style={{ color: isDark ? '#475569' : '#94A3B8', fontSize: 10, fontWeight: '700', letterSpacing: 1 }}>LUNCH</Text>
-                                                </View>
-                                            );
-
-                                            return (
-                                                <View key={colIdx} style={{ 
-                                                    width: 140, height: 90, 
-                                                    backgroundColor: hasClass ? (isDark ? '#082020' : '#FFF') : 'transparent',
-                                                    borderWidth: hasClass ? 1 : 0,
-                                                    borderColor: isDark ? '#334155' : '#E2E8F0',
-                                                    borderRadius: 12, 
-                                                    marginHorizontal: 4, 
-                                                    padding: 10,
-                                                    justifyContent: 'center',
-                                                    elevation: hasClass ? 1 : 0
-                                                }}>
-                                                    {hasClass ? (
-                                                        <>
-                                                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                                                                <Text style={{ color: '#0F766E', fontSize: 10, fontWeight: '800' }}>CS{3100 + rowIdx}</Text>
-                                                                <Text style={{ color: isDark ? '#CBD5E1' : '#475569', fontSize: 10, fontWeight: '700' }}>III-CSE-A</Text>
-                                                            </View>
-                                                            <Text style={{ color: isDark ? '#FFF' : '#082020', fontSize: 12, fontWeight: '700', marginBottom: 2 }} numberOfLines={2}>
-                                                                {['Computer Networks', 'Operating Systems', 'Software Eng.', 'Database Mgmt'][rowIdx % 4]}
-                                                            </Text>
-                                                        </>
-                                                    ) : (
-                                                        <Text style={{ color: isDark ? '#334155' : '#CBD5E1', fontSize: 11, textAlign: 'center', fontWeight: '600' }}>- Free -</Text>
-                                                    )}
-                                                </View>
-                                            )
-                                        })}
-                                    </View>
-                                ))}
+                                    );
+                                })}
                             </View>
                         </ScrollView>
                         
@@ -671,15 +744,23 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
       {/* --- Help Modal (Full Screen Detailed Guide) --- */}
       <Modal visible={helpModalVisible} animationType="slide" transparent={false} onRequestClose={() => setHelpModalVisible(false)}>
           <View style={{ flex: 1, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }}>
-              <View style={[styles.modalHeader, { marginTop: insets.top + 20, paddingHorizontal: 24, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: isDark ? '#1E293B' : '#E2E8F0' }]}>
-                  <View>
-                      <Text style={[styles.modalTitle, { color: isDark ? '#FFF' : '#0F172A', marginBottom: 4 }]}>Help Center</Text>
-                      <Text style={{ color: isDark ? '#94A3B8' : '#64748B', fontSize: 13 }}>Complete guide to Attend-Me</Text>
+              <LinearGradient
+                  colors={['#0D4A4A', '#1A6B6B', '#0F3D3D']}
+                  style={{ paddingTop: insets.top + 16, paddingBottom: 16, paddingHorizontal: 20 }}
+              >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', gap: 16 }}>
+                       <TouchableOpacity 
+                         style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' }}
+                         onPress={() => setHelpModalVisible(false)}
+                       >
+                         <Ionicons name="chevron-back" size={24} color="#FFF" />
+                       </TouchableOpacity>
+                       <View>
+                           <Text style={{ fontSize: 20, fontWeight: '700', color: '#FFF' }}>Help Center</Text>
+                           <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)' }}>Complete guide to Attend-Me</Text>
+                       </View>
                   </View>
-                  <TouchableOpacity onPress={() => setHelpModalVisible(false)} style={{ backgroundColor: isDark ? '#1E293B' : '#FFF', padding: 8, borderRadius: 100, borderWidth: 1, borderColor: isDark ? '#334155' : '#E2E8F0' }}>
-                      <Ionicons name="close" size={24} color={isDark ? '#FFF' : '#0F172A'} />
-                  </TouchableOpacity>
-              </View>
+              </LinearGradient>
               
               <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 60 }}>
                    
@@ -737,21 +818,69 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
                        </View>
                    </View>
 
-                   {/* 3. Features */}
+                   {/* 3. Detailed Features Guide */}
                    <View style={{ marginBottom: 32 }}>
-                       <Text style={{ fontSize: 12, fontWeight: '800', color: '#8B5CF6', marginBottom: 16, letterSpacing: 1 }}>FEATURES & TOOLS</Text>
-                       <View style={{ backgroundColor: isDark ? '#1E293B' : '#F9FAFB', borderRadius: 12, overflow: 'hidden' }}>
-                           {[
-                               { label: 'Manual Entry', desc: 'Mark students manually if they forgot their ID.' },
-                               { label: 'Leave Application', desc: 'Apply for Full/Half day leaves. HOD is notified instantly.' },
-                               { label: 'Weekly Schedule', desc: 'View your timetable. Data is synced with the college DB.' },
-                               { label: 'Report Issue', desc: 'Found a bug? Shake the phone or use the Report form.' },
-                           ].map((f, i) => (
-                               <View key={i} style={{ padding: 16, borderBottomWidth: i===3 ? 0 : 1, borderBottomColor: isDark ? '#334155' : '#E2E8F0' }}>
-                                   <Text style={{ fontWeight: '700', fontSize: 14, color: isDark ? '#FFF' : '#0F172A' }}>{f.label}</Text>
-                                   <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', marginTop: 2 }}>{f.desc}</Text>
-                               </View>
-                           ))}
+                       <Text style={{ fontSize: 12, fontWeight: '800', color: '#8B5CF6', marginBottom: 16, letterSpacing: 1 }}>DETAILED USER GUIDE</Text>
+                       
+                       {/* Attendance & Class Management */}
+                       <View style={{ backgroundColor: isDark ? '#1E293B' : '#F9FAFB', borderRadius: 12, overflow: 'hidden', marginBottom: 16, borderWidth: 1, borderColor: isDark ? '#334155' : '#E2E8F0' }}>
+                           <View style={{ padding: 16, backgroundColor: isDark ? '#334155' : '#F1F5F9' }}>
+                               <Text style={{ fontWeight: '800', fontSize: 14, color: isDark ? '#FFF' : '#0F172A' }}>ATTENDANCE & CLASSES</Text>
+                           </View>
+                           <View style={{ padding: 16 }}>
+                               <Text style={{ fontWeight: '700', fontSize: 13, color: isDark ? '#CBD5E1' : '#334155', marginBottom: 4 }}>Live Scanning</Text>
+                               <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', marginBottom: 12, lineHeight: 18 }}>
+                                   When a class is "Live", tap the card to start scanning. The app detects student beacons via Bluetooth. Ensure Bluetooth is ON. A green circle indicates detecting; blue dots are students found.
+                               </Text>
+
+                               <Text style={{ fontWeight: '700', fontSize: 13, color: isDark ? '#CBD5E1' : '#334155', marginBottom: 4 }}>Manual Entry</Text>
+                               <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', marginBottom: 12, lineHeight: 18 }}>
+                                   If a student's ID card is missing or damaged, tap "Manual Entry". Search by Roll Number or Name and mark them Present manually. 
+                               </Text>
+
+                               <Text style={{ fontWeight: '700', fontSize: 13, color: isDark ? '#CBD5E1' : '#334155', marginBottom: 4 }}>Grace Period</Text>
+                               <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 18 }}>
+                                   You can continue taking attendance for up to 10 minutes after the class end time. After that, the class is marked "Incomplete" if no attendance was taken.
+                               </Text>
+                           </View>
+                       </View>
+
+                       {/* Swaps & Substitutions */}
+                       <View style={{ backgroundColor: isDark ? '#1E293B' : '#F9FAFB', borderRadius: 12, overflow: 'hidden', marginBottom: 16, borderWidth: 1, borderColor: isDark ? '#334155' : '#E2E8F0' }}>
+                            <View style={{ padding: 16, backgroundColor: isDark ? '#334155' : '#F1F5F9' }}>
+                               <Text style={{ fontWeight: '800', fontSize: 14, color: isDark ? '#FFF' : '#0F172A' }}>SWAPS & SUBSTITUTIONS</Text>
+                           </View>
+                           <View style={{ padding: 16 }}>
+                               <Text style={{ fontWeight: '700', fontSize: 13, color: isDark ? '#CBD5E1' : '#334155', marginBottom: 4 }}>Requesting a Swap</Text>
+                               <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', marginBottom: 12, lineHeight: 18 }}>
+                                   Tap on an "Upcoming" class card to enter Delegate Mode. Select a faculty member and choose "Swap" (Mutual Exchange) or "Substitute" (One-way cover).
+                               </Text>
+
+                               <Text style={{ fontWeight: '700', fontSize: 13, color: isDark ? '#CBD5E1' : '#334155', marginBottom: 4 }}>Handling Requests</Text>
+                               <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 18 }}>
+                                   Check your Notifications for incoming requests. 
+                                   {'\n'}• <Text style={{fontWeight:'700'}}>Swap:</Text> You take their class, they take yours.
+                                   {'\n'}• <Text style={{fontWeight:'700'}}>Substitute:</Text> You cover their class.
+                                   {'\n'}Once accepted, your Schedule automatically updates to reflect the new timings and classes.
+                               </Text>
+                           </View>
+                       </View>
+
+                       {/* Admin & Utilities */}
+                       <View style={{ backgroundColor: isDark ? '#1E293B' : '#F9FAFB', borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: isDark ? '#334155' : '#E2E8F0' }}>
+                            <View style={{ padding: 16, backgroundColor: isDark ? '#334155' : '#F1F5F9' }}>
+                               <Text style={{ fontWeight: '800', fontSize: 14, color: isDark ? '#FFF' : '#0F172A' }}>UTILITIES</Text>
+                           </View>
+                           <View style={{ padding: 16 }}>
+                               <Text style={{ fontWeight: '700', fontSize: 13, color: isDark ? '#CBD5E1' : '#334155', marginBottom: 4 }}>Leave Application</Text>
+                               <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', marginBottom: 12, lineHeight: 18 }}>
+                                   Go to Profile -&gt; Apply for Leave. Select Dates and providing a reason. Status will be pending until HOD approval.
+                               </Text>
+                               <Text style={{ fontWeight: '700', fontSize: 13, color: isDark ? '#CBD5E1' : '#334155', marginBottom: 4 }}>Reports & Issues</Text>
+                               <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 18 }}>
+                                   Use Profile -&gt; Report Issue for any bugs or hardware failures. Attaching a screenshot helps us resolve it faster.
+                               </Text>
+                           </View>
                        </View>
                    </View>
 

@@ -1,14 +1,7 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-
-interface NotificationAction {
-  label: string;
-  onPress: () => void;
-  variant: 'primary' | 'secondary';
-  icon?: keyof typeof Ionicons.glyphMap;
-}
+import { Swipeable, GestureHandlerRootView } from 'react-native-gesture-handler';
 
 interface NotificationCardProps {
   title: string;
@@ -16,282 +9,265 @@ interface NotificationCardProps {
   timestamp: string;
   type: 'request' | 'alert' | 'info';
   isRead: boolean;
-  actions?: NotificationAction[];
   icon?: keyof typeof Ionicons.glyphMap;
   isDark?: boolean;
   selectionMode?: boolean;
   isSelected?: boolean;
-  onLongPress?: () => void;
   onPress?: () => void;
-}
-
-interface NotificationCardProps {
-  // ... existing props
+  onDelete?: () => void;
+  onLongPress?: () => void;
   status?: 'accepted' | 'declined' | 'pending' | null;
 }
 
-export const NotificationCard = ({ 
+/**
+ * WHATSAPP-STYLE COMPACT NOTIFICATION CARD
+ * - Minimal padding for dense list
+ * - Swipe left to delete
+ * - Long press to select
+ * - Tap to view details
+ */
+export const NotificationCard = React.memo(({ 
   title, 
   body, 
   timestamp, 
   type, 
   isRead, 
-  actions, 
   icon,
   isDark = false,
   selectionMode = false,
   isSelected = false,
-  onLongPress,
   onPress,
+  onDelete,
+  onLongPress,
   status
 }: NotificationCardProps) => {
+  const swipeableRef = useRef<Swipeable>(null);
 
+  // WhatsApp-inspired colors
+  const colors = {
+    bg: isDark ? '#0B141A' : '#FFFFFF',
+    border: isDark ? '#1F2C34' : '#E8E8E8',
+    textPrimary: isDark ? '#E9EDEF' : '#111B21',
+    textSecondary: isDark ? '#8696A0' : '#667781',
+    textMuted: isDark ? '#667781' : '#8696A0',
+    accent: '#00A884', // WhatsApp green
+    unreadBg: isDark ? 'rgba(0, 168, 132, 0.08)' : 'rgba(0, 168, 132, 0.05)',
+    selectedBg: isDark ? 'rgba(0, 168, 132, 0.15)' : 'rgba(0, 168, 132, 0.1)',
+    deleteRed: '#F15C6D',
+  };
+
+  // Type icon colors
   const getIconColor = () => {
     switch (type) {
-      case 'request': return '#10B981'; // Green
-      case 'alert': return '#F59E0B';   // Amber
-      default: return '#64748B';        // Slate Gray (was Green)
+      case 'request': return '#00A884';
+      case 'alert': return '#FFA500';
+      default: return '#53BDEB';
     }
   };
 
-  const isResolved = status === 'accepted' || status === 'declined';
-  const effectiveRead = isRead || isResolved; // Treat resolved as read
-
-  const currentIconColor = effectiveRead ? (isDark ? '#475569' : '#CBD5E1') : getIconColor();
-
-  const containerStyle = [
-    styles.container,
-    { 
-        backgroundColor: isDark ? '#082020' : '#FFFFFF',
-        borderWidth: 1,
-        borderColor: isDark ? 'rgba(255, 255, 255, 0.1)' : '#E2E8F0',
-    },
-    // Selection Mode Highlight
-    isSelected && {
-        backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : '#EFF6FF',
-        borderColor: '#10B981'
-    },
-    // Read/Resolved state overrides
-    effectiveRead && !isSelected && { 
-        backgroundColor: isDark ? '#1E293B' : '#F1F5F9', // Strong Gray
-        borderColor: isDark ? '#1E293B' : '#F1F5F9',
-        shadowOpacity: 0 
-    },
-    // Unread highlight
-    !effectiveRead && !isSelected && { 
-        borderColor: isDark ? 'rgba(16, 185, 129, 0.5)' : '#10B981',
+  const getIcon = () => {
+    if (icon) return icon;
+    switch (type) {
+      case 'request': return 'swap-horizontal';
+      case 'alert': return 'warning';
+      default: return 'notifications';
     }
-  ];
+  };
 
-  return (
-    <TouchableOpacity 
+  // Render delete action (swipe right-to-left reveals this)
+  const renderRightActions = (progress: Animated.AnimatedInterpolation<number>) => {
+    const translateX = progress.interpolate({
+      inputRange: [0, 1],
+      outputRange: [80, 0],
+    });
+    
+    return (
+      <Animated.View style={[styles.deleteAction, { transform: [{ translateX }] }]}>
+        <TouchableOpacity 
+          style={[styles.deleteButton, { backgroundColor: colors.deleteRed }]}
+          onPress={() => {
+            swipeableRef.current?.close();
+            onDelete?.();
+          }}
+        >
+          <Ionicons name="trash-outline" size={22} color="#FFF" />
+        </TouchableOpacity>
+      </Animated.View>
+    );
+  };
+
+  const cardContent = (
+    <TouchableOpacity
       activeOpacity={0.7}
-      style={containerStyle}
-      onLongPress={onLongPress}
       onPress={onPress}
+      onLongPress={onLongPress}
       delayLongPress={300}
+      style={[
+        styles.card,
+        { 
+          backgroundColor: isSelected ? colors.selectedBg : (isRead ? colors.bg : colors.unreadBg),
+          borderBottomColor: colors.border,
+        }
+      ]}
     >
-      {/* Selection Checkbox */}
+      {/* Selection indicator */}
       {selectionMode && (
-          <View style={styles.selectionContainer}>
-              <Ionicons 
-                name={isSelected ? "checkbox" : "square-outline"} 
-                size={24} 
-                color={isSelected ? "#10B981" : (isDark ? "#64748B" : "#CBD5E1")} 
-              />
-          </View>
-      )}
-
-      {/* Left Accent Bar */}
-      {!selectionMode && (
-          <View style={[
-              styles.accentBar, 
-              { backgroundColor: effectiveRead ? (isDark ? '#334155' : '#CBD5E1') : currentIconColor }
-          ]} />
-      )}
-
-      <View style={[styles.contentContainer, effectiveRead && { paddingLeft: 16 }]}> 
-        {/* Header Row */}
-        <View style={styles.headerRow}>
-          <View style={[styles.iconContainer, 
-            { backgroundColor: effectiveRead ? (isDark ? 'rgba(255,255,255,0.05)' : '#F1F5F9') : `${currentIconColor}15` }
-          ]}>
-            <Ionicons name={icon || 'notifications'} size={20} color={currentIconColor} />
-          </View>
-          
-          <View style={styles.headerText}>
-            <Text style={[
-              styles.title, 
-              { color: isDark ? '#FFFFFF' : '#0F172A' },
-              effectiveRead && { color: isDark ? '#94A3B8' : '#64748B', fontWeight: '400' }
-            ]} numberOfLines={1}>
-              {title}
-            </Text>
-          </View>
-
-          {/* Time & Unread Indicator */}
-          <View style={{ alignItems: 'flex-end', gap: 4 }}>
-            {!effectiveRead && (
-                <View style={{ 
-                    width: 8, 
-                    height: 8, 
-                    borderRadius: 4, 
-                    backgroundColor: '#10B981',
-                    marginBottom: 2
-                }} />
-            )}
-            <Text style={[styles.timestamp, effectiveRead && { color: isDark ? '#52525B' : '#94A3B8' }]}>{timestamp}</Text>
-          </View>
+        <View style={[
+          styles.checkbox,
+          { 
+            backgroundColor: isSelected ? colors.accent : 'transparent',
+            borderColor: isSelected ? colors.accent : colors.textMuted,
+          }
+        ]}>
+          {isSelected && <Ionicons name="checkmark" size={14} color="#FFF" />}
         </View>
+      )}
 
-        {/* Body Text */}
-        <Text style={[
-            styles.body, 
-            { color: isDark ? '#E2E8F0' : '#334155' },
-            effectiveRead && { color: isDark ? '#64748B' : '#94A3B8' }
-        ]} numberOfLines={2}>
-          {body}
-        </Text>
+      {/* Icon */}
+      <View style={[styles.iconContainer, { backgroundColor: getIconColor() + '20' }]}>
+        <Ionicons name={getIcon()} size={18} color={getIconColor()} />
+      </View>
 
-        {/* Actions or Status Badge */}
-        {status && status !== 'pending' ? (
-            <View style={styles.statusContainer}>
-                <View style={[
-                    styles.statusBadge,
-                    { backgroundColor: status === 'accepted' ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#DCFCE7') : (isDark ? 'rgba(239, 68, 68, 0.2)' : '#FEE2E2') }
-                ]}>
-                    <Text style={[
-                        styles.statusText,
-                        { color: status === 'accepted' ? '#15803D' : '#B91C1C' }
-                    ]}>
-                        {status === 'accepted' ? 'Accepted' : 'Declined'}
-                    </Text>
-                </View>
+      {/* Content */}
+      <View style={styles.content}>
+        <View style={styles.headerRow}>
+          <Text 
+            style={[
+              styles.title, 
+              { 
+                color: colors.textPrimary,
+                fontWeight: isRead ? '500' : '600' 
+              }
+            ]} 
+            numberOfLines={1}
+          >
+            {title}
+          </Text>
+          <Text style={[styles.time, { color: isRead ? colors.textMuted : colors.accent }]}>
+            {timestamp}
+          </Text>
+        </View>
+        
+        <View style={styles.bodyRow}>
+          {/* Unread indicator */}
+          {!isRead && (
+            <View style={[styles.unreadDot, { backgroundColor: colors.accent }]} />
+          )}
+          <Text 
+            style={[styles.body, { color: colors.textSecondary }]} 
+            numberOfLines={1}
+          >
+            {body}
+          </Text>
+          
+          {/* Status badge */}
+          {status && status !== 'pending' && (
+            <View style={[
+              styles.statusBadge, 
+              { backgroundColor: status === 'accepted' ? '#00A884' : '#F15C6D' }
+            ]}>
+              <Ionicons 
+                name={status === 'accepted' ? 'checkmark' : 'close'} 
+                size={10} 
+                color="#FFF" 
+              />
             </View>
-        ) : (
-            actions && actions.length > 0 && (
-            <View style={styles.actionsRow}>
-                {actions.map((action, index) => (
-                <TouchableOpacity
-                    key={index}
-                    style={[
-                    styles.actionButton,
-                    action.variant === 'primary' 
-                        ? { backgroundColor: effectiveRead ? '#94A3B8' : '#10B981', borderColor: effectiveRead ? '#94A3B8' : '#10B981' }
-                        : { backgroundColor: 'transparent', borderColor: isDark ? '#334155' : '#E2E8F0' }
-                    ]}
-                    onPress={action.onPress}
-                    activeOpacity={0.8}
-                >
-                    {/* ... icon and text */}
-                    {action.icon && <Ionicons name={action.icon} size={16} color={action.variant === 'primary' ? '#FFFFFF' : (isDark ? '#FFFFFF' : '#0F172A')} />}
-                    <Text style={[styles.actionText, { color: action.variant === 'primary' ? '#FFFFFF' : (isDark ? '#FFFFFF' : '#0F172A') }]}>{action.label}</Text>
-                </TouchableOpacity>
-                ))}
-            </View>
-            )
-        )}
+          )}
+        </View>
       </View>
     </TouchableOpacity>
   );
-};
+
+  // If selection mode is active, don't allow swipe
+  if (selectionMode) {
+    return cardContent;
+  }
+
+  // Normal mode - swipeable
+  return (
+    <Swipeable
+      ref={swipeableRef}
+      renderRightActions={renderRightActions}
+      rightThreshold={40}
+      overshootRight={false}
+    >
+      {cardContent}
+    </Swipeable>
+  );
+});
 
 const styles = StyleSheet.create({
-  container: {
-    flexDirection: 'row',
-    borderRadius: 20,
-    overflow: 'hidden',
-    marginBottom: 16,
-    shadowColor: '#64748B',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
-    elevation: 2,
-  },
-  accentBar: {
-    width: 6,
-    height: '100%',
-  },
-  contentContainer: {
-    flex: 1,
-    padding: 16,
-    paddingLeft: 12,
-  },
-  headerRow: {
+  card: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
-    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 0.5,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    marginRight: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   iconContainer: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
   },
-  headerText: {
+  content: {
     flex: 1,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
   },
   title: {
     fontSize: 15,
-    fontWeight: '700',
-    letterSpacing: -0.3,
+    flex: 1,
+    marginRight: 8,
   },
-  timeContainer: {
+  time: {
+    fontSize: 12,
+  },
+  bodyRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    alignSelf: 'flex-start',
-    marginTop: 2,
   },
-  timestamp: {
-    fontSize: 11,
-    color: '#94A3B8',
-    fontWeight: '500',
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
   },
   body: {
     fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 12,
-    paddingLeft: 52, // Align with title text (40px icon + 12px gap)
-  },
-  actionsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    paddingLeft: 52,
-  },
-  actionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    borderWidth: 1,
-    gap: 8,
     flex: 1,
   },
-  actionText: {
-    fontSize: 13,
-    fontWeight: '600',
+  statusBadge: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
   },
-  selectionContainer: {
-    paddingLeft: 16,
+  deleteAction: {
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+  },
+  deleteButton: {
+    width: 70,
+    height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  statusContainer: {
-    paddingLeft: 52,
-    flexDirection: 'row',
-  },
-  statusBadge: {
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '700',
   },
 });

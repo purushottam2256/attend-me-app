@@ -300,15 +300,20 @@ App Ver  : 1.0.3
             <ZenToast visible={toastVisible} message={toastMessage} type={toastType} onHide={() => setToastVisible(false)} />
             
             {/* Header */}
-            <View style={[styles.header, { paddingTop: insets.top + 16, backgroundColor: colors.bg }]}>
-                <TouchableOpacity onPress={() => navigation.goBack()} style={[styles.backButton, { backgroundColor: colors.iconBg }]}>
-                    <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
-                </TouchableOpacity>
-                <View>
-                    <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Beacon Doctor</Text>
-                    <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>System Health & Diagnostics</Text>
+            <LinearGradient
+                colors={['#0D4A4A', '#1A6B6B', '#0F3D3D']}
+                style={{ paddingTop: insets.top + 24, paddingBottom: 20, paddingHorizontal: 20 }}
+            >
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', gap: 16 }}>
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' }}>
+                        <Ionicons name="chevron-back" size={24} color="#FFF" />
+                    </TouchableOpacity>
+                    <View>
+                        <Text style={{ fontSize: 20, fontWeight: '700', color: '#FFF' }}>Beacon Doctor</Text>
+                        <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)' }}>System Health & Diagnostics</Text>
+                    </View>
                 </View>
-            </View>
+            </LinearGradient>
 
             <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
                 

@@ -234,32 +234,68 @@ export const SwapScreen: React.FC = () => {
   };
 
   // Load faculties who teach the same class (for swap mode)
+  // Enhanced Faculty Type for Swap
+  interface SwapCandidate extends Faculty {
+    target_slot?: TimetableSlot;
+  }
+  
+  // Load faculties who teach the same class (for swap mode)
   const loadSameClassFaculties = async (slot: TimetableSlot) => {
     if (!userId) return;
     
     try {
-      // Find other faculties who teach the same class (dept, year, section)
+      // Find other faculties & their specific slot for this class
       const { data: timetables } = await supabase
         .from('master_timetables')
-        .select('faculty_id')
+        .select(`
+          id, day, room, batch, is_active,
+          faculty_id,
+          slot_id, start_time, end_time,
+          subject:subjects(id, name, code),
+          target_dept, target_year, target_section
+        `)
         .eq('target_dept', slot.target_dept)
         .eq('target_year', slot.target_year)
         .eq('target_section', slot.target_section)
         .neq('faculty_id', userId);
       
       if (timetables && timetables.length > 0) {
+        // Get unique faculty IDs
         const facultyIds = [...new Set(timetables.map(t => t.faculty_id))];
-        const { data: faculties, error: fetchError } = await supabase
+        
+        // Fetch Profiles
+        const { data: profiles } = await supabase
           .from('profiles')
           .select('id, full_name, dept, email, push_token')
           .in('id', facultyIds);
           
-        if (fetchError) console.error('[SwapScreen] SameClass Fetch Error:', fetchError);
-          
-        // Removed debug log
-        setSameClassFaculties(faculties || []);
+        if (profiles) {
+           // Merge Profile + Slot Info
+           const candidates: SwapCandidate[] = profiles.map(profile => {
+               // Find the matching timetable entry (first match)
+               const match = timetables.find(t => t.faculty_id === profile.id);
+               
+               // Handle subject being array or object
+               let cleanSlot: TimetableSlot | undefined;
+               
+               if (match) {
+                   const subjectAny = match.subject as any;
+                   const subjectObj = Array.isArray(subjectAny) ? subjectAny[0] : subjectAny;
+                   
+                   cleanSlot = {
+                       ...match,
+                       subject: subjectObj
+                   } as TimetableSlot;
+               }
+
+               return {
+                   ...profile,
+                   target_slot: cleanSlot
+               };
+           });
+           setSameClassFaculties(candidates);
+        }
       } else {
-        // Removed debug log
         setSameClassFaculties([]);
       }
     } catch (error) {
@@ -387,14 +423,8 @@ export const SwapScreen: React.FC = () => {
       
       if (error) throw error;
       
-      await supabase.from('notifications').insert({
-        user_id: swapTargetFaculty.id,
-        type: 'swap_request',
-        priority: 'high',
-        title: 'Swap Request',
-        body: `Swap ${swapMyClass.slot_id?.toUpperCase()} ↔️ ${swapTargetSlot?.toUpperCase()}${swapNote ? ' - ' + swapNote : ''}`,
-        data: { slot_a: swapMyClass.slot_id, slot_b: swapTargetSlot, date: today },
-      });
+      // Notification handled by Database Trigger (notification_triggers.sql)
+      // await supabase.from('notifications').insert({...});
 
       // Send Real Push
       if (swapTargetFaculty.push_token) {
@@ -434,15 +464,16 @@ export const SwapScreen: React.FC = () => {
   };
 
   // Handle swap faculty selection
-  const handleSwapFacultySelect = (faculty: Faculty) => {
+  const handleSwapFacultySelect = (faculty: any) => { // Type as any or SwapCandidate
     if (swapTargetFaculty?.id === faculty.id) {
       setSwapTargetFaculty(null);
-      setTargetFacultySchedule([]);
       setSwapTargetSlot(null);
     } else {
       setSwapTargetFaculty(faculty);
-      setSwapTargetSlot(null);
-      loadTargetSchedule(faculty.id);
+      // Auto-select their slot since we know it matches
+      if (faculty.target_slot?.slot_id) {
+          setSwapTargetSlot(faculty.target_slot.slot_id);
+      }
     }
   };
 
@@ -583,6 +614,19 @@ export const SwapScreen: React.FC = () => {
         <Text style={[styles.facultyDept, { color: colors.textSecondary }]}>
           {faculty.dept || 'Faculty'}
         </Text>
+        {/* Swap Slot Info */}
+        {(faculty as any).target_slot && (
+           <View style={{ marginTop: 6, flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+              <View style={{ backgroundColor: isSelected ? '#FFF' : colors.accent + '20', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                  <Text style={{ color: isSelected ? colors.accent : colors.accent, fontSize: 11, fontWeight: '700' }}>
+                      {(faculty as any).target_slot.slot_id?.toUpperCase()}
+                  </Text>
+              </View>
+              <Text style={{ color: isSelected ? 'rgba(255,255,255,0.9)' : colors.textMuted, fontSize: 11, fontWeight: '500' }}>
+                 {(faculty as any).target_slot.target_dept}-{(faculty as any).target_slot.target_year}-{(faculty as any).target_slot.target_section} • {(faculty as any).target_slot.start_time?.slice(0, 5)}
+              </Text>
+           </View>
+        )}
       </View>
       {isSelected && (
         <Ionicons name="checkmark-circle" size={22} color={colors.accent} />
@@ -798,33 +842,10 @@ export const SwapScreen: React.FC = () => {
               No other faculty teaches this class
             </Text>
           )}
-        </View>
-      )}
-      
-      {/* Step 3: Select Their Slot */}
-      {swapTargetFaculty && (
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
-            3. Select Their Slot
-          </Text>
-          
-          {loadingTarget ? (
-            <ActivityIndicator size="small" color={colors.accent} />
-          ) : targetFacultySchedule.length > 0 ? (
-            targetFacultySchedule.map(slot => renderClassCard(
-              slot,
-              swapTargetSlot === slot.slot_id,
-              () => setSwapTargetSlot(swapTargetSlot === slot.slot_id ? null : slot.slot_id)
-            ))
-          ) : (
-            <Text style={[styles.emptySubtitle, { color: colors.textMuted, textAlign: 'center' }]}>
-              No available slots for this faculty
-            </Text>
-          )}
-          
-          {/* Notes & Send Button */}
-          {swapTargetSlot && (
-            <View style={{ marginTop: 16 }}>
+
+          {/* Notes & Send Button (Shown immediately after selecting faculty) */}
+          {swapTargetFaculty && swapTargetSlot && (
+            <View style={{ marginTop: 24, borderTopWidth: 1, borderTopColor: colors.cardBorder, paddingTop: 16 }}>
               <Text style={[styles.sectionTitle, { color: colors.textSecondary, marginBottom: 8 }]}>
                 Add Note (Optional)
               </Text>
@@ -884,6 +905,7 @@ export const SwapScreen: React.FC = () => {
           )}
         </View>
       )}
+
     </>
   );
 

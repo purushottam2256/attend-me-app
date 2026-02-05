@@ -69,6 +69,7 @@ const WatchlistPager = ({ watchlist, colors, isDark, onMessage }: { watchlist: S
                 showsHorizontalScrollIndicator={false}
                 decelerationRate="fast"
                 snapToInterval={containerWidth}
+                style={{ maxHeight: 280 }}
                 onMomentumScrollEnd={(ev) => {
                     const x = ev.nativeEvent.contentOffset.x;
                     const index = Math.round(x / containerWidth);
@@ -169,12 +170,12 @@ export const MyClassHubScreen: React.FC = () => {
 
       const [periods, students] = await Promise.all([
         getKeyPeriodAttendance(info.dept, info.year, info.section),
-        getWatchlist(info.dept, info.year, info.section, 75),
+        getWatchlist(info.dept, info.year, info.section, 60),  // Changed from 75 to 60%
       ]);
 
       setP1(periods.p1);
       setP4(periods.p4);
-      setWatchlist(students.slice(0, 5));
+      setWatchlist(students);  // Show all students below threshold, not limited to 5
     } catch (error) {
       console.error('[MyClassHub] Error loading data:', error);
       setToast({ visible: true, message: 'Failed to refresh data', type: 'error' });

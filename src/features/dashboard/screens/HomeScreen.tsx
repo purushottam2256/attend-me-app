@@ -326,7 +326,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
 
           if (profile?.notifications_enabled) {
              // Cancel old to avoid duplicates
-             await NotificationService.cancelAll();
+             await NotificationService.cancelAllScheduled();
              
              for (const slot of mergedClasses) {
                  if (slot.status === 'upcoming' || slot.status === 'live') {

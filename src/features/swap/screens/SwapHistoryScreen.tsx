@@ -1,13 +1,13 @@
 /**
  * SwapHistoryScreen - View sent requests
- * Premium Zen UI
+ * Premium Zen UI with Date Grouping
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
-  ScrollView,
+  SectionList,
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
@@ -20,9 +20,16 @@ import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../../../contexts';
 import { supabase } from '../../../config/supabase';
 import { swapStyles as styles } from '../styles/SwapScreen.styles';
-import { format } from 'date-fns';
+import { format, isToday, isYesterday, isThisWeek, isThisMonth } from 'date-fns';
 
 type Tab = 'substitute' | 'swap';
+
+interface HistoryItem {
+  id: string;
+  date: string;
+  type: 'sub' | 'swap';
+  data: any;
+}
 
 export const SwapHistoryScreen: React.FC = () => {
   const { isDark } = useTheme();
@@ -41,6 +48,7 @@ export const SwapHistoryScreen: React.FC = () => {
     surface: isDark ? 'rgba(255,255,255,0.08)' : '#FFFFFF',
     textPrimary: isDark ? '#FFFFFF' : '#0F172A',
     textSecondary: isDark ? 'rgba(255,255,255,0.7)' : '#64748B',
+    sectionBg: isDark ? '#0F1515' : '#F1F5F9',
     accent: '#0D9488', 
     teal: '#0D4A4A',
     tealLight: '#1A6B6B',
@@ -51,7 +59,7 @@ export const SwapHistoryScreen: React.FC = () => {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
-        // 1. Fetch Substitute Requests (Created by me)
+        // Fetch Substitute Requests (Created by me)
         const { data: subs, error: subError } = await supabase
             .from('substitutions')
             .select(`
@@ -60,13 +68,12 @@ export const SwapHistoryScreen: React.FC = () => {
                 subject:subject_id(name, code)
             `)
             .eq('original_faculty_id', user.id)
-            .order('requested_at', { ascending: false });
+            .order('date', { ascending: false });
 
         if (subError) throw subError;
         setSubRequests(subs || []);
 
-        // 2. Fetch Swap Requests (Initiated by me)
-        // Note: Assuming 'faculty_a_id' is the initiator
+        // Fetch Swap Requests (Initiated by me)
         const { data: swaps, error: swapError } = await supabase
             .from('class_swaps')
             .select(`
@@ -96,6 +103,41 @@ export const SwapHistoryScreen: React.FC = () => {
     setRefreshing(false);
   }, []);
 
+  // Group items by date
+  const sections = useMemo(() => {
+    const items = activeTab === 'substitute' ? subRequests : swapRequests;
+    
+    const today: any[] = [];
+    const yesterday: any[] = [];
+    const thisWeek: any[] = [];
+    const thisMonth: any[] = [];
+    const older: any[] = [];
+    
+    items.forEach(item => {
+      const itemDate = new Date(item.date);
+      if (isToday(itemDate)) {
+        today.push(item);
+      } else if (isYesterday(itemDate)) {
+        yesterday.push(item);
+      } else if (isThisWeek(itemDate)) {
+        thisWeek.push(item);
+      } else if (isThisMonth(itemDate)) {
+        thisMonth.push(item);
+      } else {
+        older.push(item);
+      }
+    });
+    
+    const result = [];
+    if (today.length > 0) result.push({ title: 'Today', data: today });
+    if (yesterday.length > 0) result.push({ title: 'Yesterday', data: yesterday });
+    if (thisWeek.length > 0) result.push({ title: 'This Week', data: thisWeek });
+    if (thisMonth.length > 0) result.push({ title: 'This Month', data: thisMonth });
+    if (older.length > 0) result.push({ title: 'Older', data: older });
+    
+    return result;
+  }, [activeTab, subRequests, swapRequests]);
+
   const getStatusColor = (status: string) => {
     switch (status) {
         case 'accepted': return '#22C55E';
@@ -112,10 +154,10 @@ export const SwapHistoryScreen: React.FC = () => {
     </View>
   );
 
-  const renderSubItem = (item: any) => (
-    <View key={item.id} style={[styles.requestCard, { backgroundColor: colors.surface, borderColor: 'rgba(255,255,255,0.1)' }]}>
+  const renderSubItem = ({ item }: { item: any }) => (
+    <View style={[styles.requestCard, { backgroundColor: colors.surface, borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#E2E8F0', marginHorizontal: 16, marginBottom: 8 }]}>
         <View style={styles.requestHeader}>
-            <View>
+            <View style={{ flex: 1 }}>
                 <Text style={[styles.requestTitle, { color: colors.textPrimary }]}>
                     {item.subject?.name || 'Class'}
                 </Text>
@@ -139,8 +181,8 @@ export const SwapHistoryScreen: React.FC = () => {
     </View>
   );
 
-  const renderSwapItem = (item: any) => (
-    <View key={item.id} style={[styles.requestCard, { backgroundColor: colors.surface, borderColor: 'rgba(255,255,255,0.1)' }]}>
+  const renderSwapItem = ({ item }: { item: any }) => (
+    <View style={[styles.requestCard, { backgroundColor: colors.surface, borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#E2E8F0', marginHorizontal: 16, marginBottom: 8 }]}>
         <View style={styles.requestHeader}>
             <View>
                 <Text style={[styles.requestTitle, { color: colors.textPrimary }]}>
@@ -165,6 +207,26 @@ export const SwapHistoryScreen: React.FC = () => {
                 </Text>
             </View>
         </View>
+    </View>
+  );
+
+  const renderSectionHeader = ({ section }: { section: { title: string } }) => (
+    <View style={[localStyles.sectionHeader, { backgroundColor: colors.sectionBg }]}>
+      <Text style={[localStyles.sectionTitle, { color: colors.textSecondary }]}>
+        {section.title}
+      </Text>
+    </View>
+  );
+
+  const renderEmpty = () => (
+    <View style={styles.emptyContainer}>
+        <Text style={styles.emptyEmoji}>{activeTab === 'substitute' ? '📪' : '🔄'}</Text>
+        <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>
+          No {activeTab === 'substitute' ? 'Requests' : 'Swaps'}
+        </Text>
+        <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+            You haven't sent any {activeTab === 'substitute' ? 'substitution' : 'swap'} requests yet.
+        </Text>
     </View>
   );
 
@@ -206,43 +268,39 @@ export const SwapHistoryScreen: React.FC = () => {
         </View>
       </LinearGradient>
 
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.teal} />
-        }
-      >
-        {loading ? (
-           <View style={styles.loadingContainer}>
-             <ActivityIndicator size="large" color={colors.accent} />
-           </View>
-        ) : activeTab === 'substitute' ? (
-            subRequests.length > 0 ? (
-                subRequests.map(renderSubItem)
-            ) : (
-                <View style={styles.emptyContainer}>
-                    <Text style={styles.emptyEmoji}>📪</Text>
-                    <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>No Requests</Text>
-                    <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-                        You haven't sent any substitution requests yet.
-                    </Text>
-                </View>
-            )
-        ) : (
-            swapRequests.length > 0 ? (
-                swapRequests.map(renderSwapItem)
-            ) : (
-                <View style={styles.emptyContainer}>
-                    <Text style={styles.emptyEmoji}>🔄</Text>
-                    <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>No Swaps</Text>
-                    <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-                        You haven't sent any swap requests yet.
-                    </Text>
-                </View>
-            )
-        )}
-      </ScrollView>
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.accent} />
+        </View>
+      ) : (
+        <SectionList
+          sections={sections}
+          keyExtractor={(item) => item.id}
+          renderItem={activeTab === 'substitute' ? renderSubItem : renderSwapItem}
+          renderSectionHeader={renderSectionHeader}
+          ListEmptyComponent={renderEmpty}
+          stickySectionHeadersEnabled={false}
+          contentContainerStyle={{ paddingVertical: 8, flexGrow: 1 }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.teal} />
+          }
+          showsVerticalScrollIndicator={false}
+        />
+      )}
     </View>
   );
 };
+
+const localStyles = StyleSheet.create({
+  sectionHeader: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginTop: 8,
+  },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+});

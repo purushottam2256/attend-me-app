@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
+import { navigationRef } from './navigationRef';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as SplashScreenExpo from 'expo-splash-screen';
 import {
@@ -73,7 +74,7 @@ const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 const RootStack = createNativeStackNavigator<RootStackParamList>();
 
 // Auth Navigator
-const AuthNavigator: React.FC<{ onLoginSuccess: (userName: string) => void }> = ({ onLoginSuccess }) => {
+const AuthNavigator: React.FC<{ onLoginSuccess: (userName: string, role: string) => void }> = ({ onLoginSuccess }) => {
   return (
     <AuthStack.Navigator
       screenOptions={{
@@ -103,7 +104,7 @@ const AuthNavigator: React.FC<{ onLoginSuccess: (userName: string) => void }> = 
   );
 };
 
-// DashboardPlaceholder removed - using MainTabNavigator now
+// ...
 
 // App State Types
 type AppState = 'LOADING' | 'SPLASH' | 'AUTH' | 'MAIN';
@@ -145,8 +146,9 @@ export const RootNavigator: React.FC = () => {
     }
   };
 
-  const handleLoginSuccess = (name: string) => {
+  const handleLoginSuccess = (name: string, role: string) => {
     setUserName(name);
+    setUserRole((role as any) || 'faculty');
     setAppState('MAIN'); // Go directly to main dashboard
   };
 
@@ -173,7 +175,7 @@ export const RootNavigator: React.FC = () => {
 
   return (
     <View style={styles.container} onLayout={onLayoutRootView}>
-      <NavigationContainer>
+      <NavigationContainer ref={navigationRef}>
         <RootStack.Navigator screenOptions={{ headerShown: false }}>
           {appState === 'AUTH' ? (
             <RootStack.Screen name="Auth">

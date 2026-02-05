@@ -15,7 +15,6 @@ const getLocalDate = () => {
 
 // Constants
 const CRITICAL_ATTENDANCE_THRESHOLD = 75;
-const KEY_SLOTS = ['p1', 'p4'];
 
 // Types
 export interface StudentAggregate {
@@ -128,6 +127,7 @@ export const getKeyPeriodAttendance = async (
 ): Promise<{ p1: PeriodAttendance | null; p4: PeriodAttendance | null }> => {
   const today = getLocalDate();
   
+  // Fetch all sessions for today to handle variable slot_ids (e.g., '1', 'p1', 'P1')
   const { data, error } = await supabase
     .from('attendance_sessions')
     .select(`
@@ -138,16 +138,21 @@ export const getKeyPeriodAttendance = async (
     .eq('target_dept', dept)
     .eq('target_year', year)
     .eq('target_section', section)
-    .eq('date', today)
-    .in('slot_id', KEY_SLOTS);
+    .eq('date', today);
 
   if (error) {
     console.error('[InchargeService] Error fetching period attendance:', error);
     throw error;
   }
 
-  const p1Session = data?.find(s => s.slot_id === 'p1');
-  const p4Session = data?.find(s => s.slot_id === 'p4');
+  // Helper to normalize slot_id for comparison
+  const normalize = (id: string) => id.toString().toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  const p1Variants = ['p1', '1', 'period1', '09:00', '9:00'];
+  const p4Variants = ['p4', '4', 'period4', '13:00', '13:20', '01:00']; // Common afternoon times
+
+  const p1Session = data?.find(s => p1Variants.includes(normalize(s.slot_id)));
+  const p4Session = data?.find(s => p4Variants.includes(normalize(s.slot_id)));
 
   return {
     p1: p1Session ? {
@@ -197,13 +202,27 @@ export const getClassTrends = async (
        return [];
     }
     
-    // Sort slots P1-P8
+    // Normalization Map
+    const slotMap: Record<string, string> = {
+        '1': 'P1', 'p1': 'P1', '09:00': 'P1', '9:00': 'P1',
+        '2': 'P2', 'p2': 'P2', '09:50': 'P2', '9:50': 'P2',
+        '3': 'P3', 'p3': 'P3', '10:50': 'P3',
+        '4': 'P4', 'p4': 'P4', '11:40': 'P4', '13:00': 'P4', '13:20': 'P4',
+        '5': 'P5', 'p5': 'P5', '14:10': 'P5',
+        '6': 'P6', 'p6': 'P6', '15:10': 'P6',
+    };
+    
+    // Sort and Normalize
     const sorted = (data || []).sort((a, b) => a.slot_id.localeCompare(b.slot_id));
     
-    return sorted.map(s => ({
-        label: s.slot_id.toUpperCase(),
-        value: s.total_students > 0 ? Math.round((s.present_count / s.total_students) * 100) : 0
-    }));
+    return sorted.map(s => {
+        const normId = s.slot_id.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const label = slotMap[normId] || slotMap[s.slot_id] || s.slot_id.toUpperCase();
+        return {
+            label: label,
+            value: s.total_students > 0 ? Math.round((s.present_count / s.total_students) * 100) : 0
+        };
+    });
 
   } else if (range === 'month') {
     // Last 4 weeks (grouped by week)

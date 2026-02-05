@@ -1,133 +1,495 @@
+/**
+ * NotificationService - Production-grade Push Notification System
+ * 
+ * Architecture:
+ * - Uses native FCM tokens (not Expo Push tokens) for free unlimited pushes
+ * - Supabase Edge Function sends FCM pushes on backend
+ * - Local notifications for reminders and scheduled alerts
+ * - Multiple Android channels for different notification types
+ * 
+ * @author Senior Dev Implementation
+ */
+
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { supabase } from '../config/supabase';
 
-// Configure behavior (Foreground)
+// ============================================================================
+// TYPES
+// ============================================================================
+
+export interface PushTokenData {
+  type: 'fcm' | 'apns' | 'expo';
+  token: string;
+}
+
+export interface LocalNotificationPayload {
+  title: string;
+  body: string;
+  data?: Record<string, any>;
+  channelId?: string;
+  categoryId?: string;
+}
+
+export interface ScheduledNotificationPayload extends LocalNotificationPayload {
+  triggerDate: Date;
+}
+
+// ============================================================================
+// CONFIGURATION
+// ============================================================================
+
+// Configure foreground notification behavior
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
     shouldPlaySound: true,
-    shouldSetBadge: false,
+    shouldSetBadge: true,
     shouldShowBanner: true,
     shouldShowList: true,
   }),
 });
 
+// Android Notification Channels
+const CHANNELS = {
+  DEFAULT: {
+    id: 'default',
+    name: 'General',
+    description: 'General notifications',
+    importance: Notifications.AndroidImportance.DEFAULT,
+  },
+  REQUESTS: {
+    id: 'requests',
+    name: 'Requests',
+    description: 'Substitution and swap requests',
+    importance: Notifications.AndroidImportance.HIGH,
+    sound: 'default',
+    vibrationPattern: [0, 250, 250, 250],
+  },
+  REMINDERS: {
+    id: 'reminders',
+    name: 'Reminders',
+    description: 'Class and event reminders',
+    importance: Notifications.AndroidImportance.HIGH,
+  },
+  ALERTS: {
+    id: 'alerts',
+    name: 'Alerts',
+    description: 'Important alerts and warnings',
+    importance: Notifications.AndroidImportance.MAX,
+    sound: 'default',
+    vibrationPattern: [0, 500, 250, 500],
+    lightColor: '#FF0000',
+  },
+};
+
+// ============================================================================
+// NOTIFICATION SERVICE
+// ============================================================================
+
 export const NotificationService = {
+  // --------------------------------------------------------------------------
+  // INITIALIZATION
+  // --------------------------------------------------------------------------
   
-  // 1. Setup Categories (Interactive Buttons)
-  async setupNotificationCategories() {
+  /**
+   * Initialize the notification system
+   * Call this once when the app starts (in NotificationContext)
+   */
+  async init(): Promise<void> {
+    console.log('[NotificationService] Initializing...');
+    
+    // Setup Android channels
+    if (Platform.OS === 'android') {
+      await this.setupAndroidChannels();
+    }
+    
+    // Setup interactive notification categories
+    await this.setupNotificationCategories();
+    
+    console.log('[NotificationService] Initialized successfully');
+  },
+
+  /**
+   * Setup Android notification channels
+   * Different channels for different notification priorities
+   */
+  async setupAndroidChannels(): Promise<void> {
+    for (const channel of Object.values(CHANNELS)) {
+      await Notifications.setNotificationChannelAsync(channel.id, {
+        name: channel.name,
+        description: channel.description,
+        importance: channel.importance,
+        sound: (channel as any).sound,
+        vibrationPattern: (channel as any).vibrationPattern,
+        lightColor: (channel as any).lightColor,
+      });
+    }
+    console.log('[NotificationService] Android channels configured');
+  },
+
+  /**
+   * Setup interactive notification categories (action buttons)
+   */
+  async setupNotificationCategories(): Promise<void> {
+    // Substitution Request Actions
     await Notifications.setNotificationCategoryAsync('SUB_REQUEST', [
       {
         identifier: 'ACCEPT',
         buttonTitle: 'Accept',
-        options: { opensAppToForeground: true }, // Must open app to verify location/auth
+        options: { opensAppToForeground: true },
       },
       {
         identifier: 'DECLINE',
         buttonTitle: 'Decline',
-        options: { isDestructive: true, opensAppToForeground: false }, // Can decline in background
+        options: { isDestructive: true, opensAppToForeground: false },
+      },
+    ]);
+
+    // Swap Request Actions
+    await Notifications.setNotificationCategoryAsync('SWAP_REQUEST', [
+      {
+        identifier: 'ACCEPT',
+        buttonTitle: 'Accept',
+        options: { opensAppToForeground: true },
+      },
+      {
+        identifier: 'DECLINE',
+        buttonTitle: 'Decline',
+        options: { isDestructive: true, opensAppToForeground: false },
+      },
+    ]);
+
+    // Reminder Actions
+    await Notifications.setNotificationCategoryAsync('REMINDER', [
+      {
+        identifier: 'SNOOZE',
+        buttonTitle: 'Snooze 5 min',
+        options: { opensAppToForeground: false },
+      },
+      {
+        identifier: 'OPEN',
+        buttonTitle: 'Open App',
+        options: { opensAppToForeground: true },
       },
     ]);
   },
-  
-  async registerForPushNotificationsAsync() {
-    let token;
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
-    if (existingStatus !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
+
+  // --------------------------------------------------------------------------
+  // PUSH TOKEN REGISTRATION (FCM)
+  // --------------------------------------------------------------------------
+
+  /**
+   * Register for push notifications and get FCM token
+   * Returns the native FCM token (not Expo push token)
+   */
+  async registerForPushNotifications(): Promise<PushTokenData | null> {
+    try {
+      // 1. Check/Request permissions
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+      
+      if (finalStatus !== 'granted') {
+        console.log('[NotificationService] Permission denied');
+        return null;
+      }
+
+      // 2. Get NATIVE device token (FCM on Android, APNs on iOS)
+      // This is the key difference - we use getDevicePushTokenAsync, not getExpoPushTokenAsync
+      const tokenData = await Notifications.getDevicePushTokenAsync();
+      
+      console.log('[NotificationService] Token obtained:', {
+        type: tokenData.type,
+        tokenPreview: tokenData.data.substring(0, 20) + '...',
+      });
+
+      return {
+        type: tokenData.type as 'fcm' | 'apns',
+        token: tokenData.data,
+      };
+    } catch (error: any) {
+      console.error('[NotificationService] Token registration failed:', error.message);
+      return null;
     }
-    if (finalStatus !== 'granted') {
-      return undefined;
+  },
+
+  /**
+   * Save push token to Supabase
+   */
+  async saveTokenToDatabase(userId: string, tokenData: PushTokenData): Promise<boolean> {
+    if (!userId || !tokenData) return false;
+    
+    const { error } = await supabase
+      .from('profiles')
+      .update({ 
+        push_token: tokenData.token,
+        push_token_type: tokenData.type, // Store token type for backend to know how to send
+        push_token_updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    if (error) {
+      console.error('[NotificationService] Failed to save token:', error.message);
+      return false;
     }
     
-    // Project ID check would go here if using EAS
-    token = (await Notifications.getExpoPushTokenAsync()).data;
-    return token;
+    console.log('[NotificationService] Token saved to database');
+    return true;
   },
 
-  async updateUserPushToken(userId: string, token: string) {
-      await supabase.from('profiles').update({ push_token: token }).eq('id', userId);
+  /**
+   * Clear push token from database (on logout)
+   */
+  async clearTokenFromDatabase(userId: string): Promise<void> {
+    if (!userId) return;
+    
+    await supabase
+      .from('profiles')
+      .update({ 
+        push_token: null,
+        push_token_type: null,
+      })
+      .eq('id', userId);
+    
+    console.log('[NotificationService] Token cleared from database');
   },
 
-  async scheduleClassReminder(
-    subjectName: string, 
-    classDetails: string, // "Year-Sec-Dept"
-    startTime: Date
-  ) {
-    const triggerDate = new Date(startTime);
-    triggerDate.setMinutes(triggerDate.getMinutes() - 10); // 10 mins before
+  // --------------------------------------------------------------------------
+  // LOCAL NOTIFICATIONS
+  // --------------------------------------------------------------------------
 
-    // Don't schedule if already passed
-    if (triggerDate.getTime() < Date.now()) return;
-
-    await Notifications.scheduleNotificationAsync({
+  /**
+   * Show an immediate local notification
+   */
+  async showLocalNotification(payload: LocalNotificationPayload): Promise<string> {
+    const notificationId = await Notifications.scheduleNotificationAsync({
       content: {
-        title: `Upcoming Class: ${subjectName}`,
-        body: `Your class for ${classDetails} starts in 10 minutes. Don't forget to take attendance!`,
+        title: payload.title,
+        body: payload.body,
+        data: payload.data || {},
         sound: true,
-        data: { type: 'CLASS_REMINDER' },
+        categoryIdentifier: payload.categoryId,
       },
-      trigger: { 
-          type: Notifications.SchedulableTriggerInputTypes.DATE,
-          date: triggerDate 
+      trigger: null, // Immediate
+    });
+    
+    return notificationId;
+  },
+
+  /**
+   * Schedule a notification for a future time
+   */
+  async scheduleNotification(payload: ScheduledNotificationPayload): Promise<string | null> {
+    // Don't schedule if already passed
+    if (payload.triggerDate.getTime() < Date.now()) {
+      console.log('[NotificationService] Skipping past notification');
+      return null;
+    }
+
+    const notificationId = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: payload.title,
+        body: payload.body,
+        data: payload.data || {},
+        sound: true,
+        categoryIdentifier: payload.categoryId,
       },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: payload.triggerDate,
+        channelId: payload.channelId || CHANNELS.REMINDERS.id,
+      },
+    });
+
+    return notificationId;
+  },
+
+  /**
+   * Schedule a class reminder (10 minutes before)
+   */
+  async scheduleClassReminder(
+    subjectName: string,
+    classDetails: string,
+    startTime: Date
+  ): Promise<string | null> {
+    const triggerDate = new Date(startTime);
+    triggerDate.setMinutes(triggerDate.getMinutes() - 10);
+
+    return this.scheduleNotification({
+      title: `📚 Upcoming: ${subjectName}`,
+      body: `${classDetails} starts in 10 minutes`,
+      triggerDate,
+      data: { type: 'CLASS_REMINDER' },
+      channelId: CHANNELS.REMINDERS.id,
+      categoryId: 'REMINDER',
     });
   },
 
-  async cancelAll() {
-    await Notifications.cancelAllScheduledNotificationsAsync();
+  /**
+   * Schedule an event reminder (morning of the event)
+   */
+  async scheduleEventReminder(
+    title: string,
+    description: string | null,
+    date: string
+  ): Promise<string | null> {
+    const triggerDate = new Date(date);
+    triggerDate.setHours(8, 0, 0, 0);
+
+    return this.scheduleNotification({
+      title: `🎓 College Event: ${title}`,
+      body: description || `Today is ${title}`,
+      triggerDate,
+      data: { type: 'COLLEGE_EVENT' },
+      channelId: CHANNELS.REMINDERS.id,
+    });
   },
 
-  async getAllScheduled() {
-    return await Notifications.getAllScheduledNotificationsAsync();
-  },
-  
-  // Weekly Cleanup Routine
-  async cleanupOldNotifications() {
-     try {
-       // Client-side fallback:
-       const sevenDaysAgo = new Date();
-       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-       
-       const { error: deleteError } = await supabase
-         .from('notifications')
-         .delete()
-         .lt('created_at', sevenDaysAgo.toISOString());
-         
-       if (deleteError) console.log('Cleanup Error:', deleteError);
-     } catch (e) {
-       console.log('Cleanup Exception:', e);
-     }
-  },
+  // --------------------------------------------------------------------------
+  // PUSH NOTIFICATION SENDING (via Supabase Edge Function)
+  // --------------------------------------------------------------------------
 
-  // 4. Send Push Notification (Client-to-Client)
-  async sendPushNotification(expoPushToken: string, title: string, body: string, data?: any) {
-    if (!expoPushToken) return;
-    
-    const message = {
-      to: expoPushToken,
-      sound: 'default',
-      title: title,
-      body: body,
-      data: data || {},
-      _displayInForeground: true,
-    };
+  /**
+   * Send a push notification via Supabase Edge Function
+   * This calls the backend which then sends via FCM
+   */
+  async sendPushNotification(
+    recipientToken: string,
+    title: string,
+    body: string,
+    data?: Record<string, any>
+  ): Promise<boolean> {
+    if (!recipientToken) {
+      console.log('[NotificationService] No recipient token provided');
+      return false;
+    }
 
     try {
-      await fetch('https://exp.host/--/api/v2/push/send', {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Accept-encoding': 'gzip, deflate',
-          'Content-Type': 'application/json',
+      // Call Supabase Edge Function
+      const { data: response, error } = await supabase.functions.invoke('send-push', {
+        body: {
+          token: recipientToken,
+          title,
+          body,
+          data: data || {},
         },
-        body: JSON.stringify(message),
       });
-    } catch (error) {
-      console.log('Push Error:', error);
+
+      if (error) {
+        console.error('[NotificationService] Edge function error:', error.message);
+        return false;
+      }
+
+      console.log('[NotificationService] Push sent successfully');
+      return true;
+    } catch (error: any) {
+      console.error('[NotificationService] Push failed:', error.message);
+      return false;
     }
-  }
+  },
+
+  // --------------------------------------------------------------------------
+  // UTILITY METHODS
+  // --------------------------------------------------------------------------
+
+  /**
+   * Cancel all scheduled notifications
+   */
+  async cancelAllScheduled(): Promise<void> {
+    await Notifications.cancelAllScheduledNotificationsAsync();
+    console.log('[NotificationService] All scheduled notifications cancelled');
+  },
+
+  /**
+   * Get all scheduled notifications
+   */
+  async getAllScheduled(): Promise<Notifications.NotificationRequest[]> {
+    return await Notifications.getAllScheduledNotificationsAsync();
+  },
+
+  /**
+   * Set badge count (iOS)
+   */
+  async setBadgeCount(count: number): Promise<void> {
+    await Notifications.setBadgeCountAsync(count);
+  },
+
+  /**
+   * Clear badge (iOS)
+   */
+  async clearBadge(): Promise<void> {
+    await Notifications.setBadgeCountAsync(0);
+  },
+
+  /**
+   * Weekly cleanup of old notifications from database
+   */
+  async cleanupOldNotifications(): Promise<void> {
+    try {
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      
+      const { error } = await supabase
+        .from('notifications')
+        .delete()
+        .lt('created_at', sevenDaysAgo.toISOString());
+        
+      if (error) {
+        console.log('[NotificationService] Cleanup error:', error.message);
+      } else {
+        console.log('[NotificationService] Old notifications cleaned up');
+      }
+    } catch (e: any) {
+      console.log('[NotificationService] Cleanup exception:', e.message);
+    }
+  },
+
+  // --------------------------------------------------------------------------
+  // LEGACY SUPPORT (for backward compatibility)
+  // --------------------------------------------------------------------------
+
+  /**
+   * @deprecated Use registerForPushNotifications instead
+   */
+  async registerForPushNotificationsAsync(): Promise<string | undefined> {
+    const tokenData = await this.registerForPushNotifications();
+    return tokenData?.token;
+  },
+
+  /**
+   * @deprecated Use saveTokenToDatabase instead
+   */
+  async updateUserPushToken(userId: string, token: string | null): Promise<void> {
+    if (token) {
+      await this.saveTokenToDatabase(userId, { type: 'fcm', token });
+    } else {
+      await this.clearTokenFromDatabase(userId);
+    }
+  },
+
+  /**
+   * @deprecated Use clearTokenFromDatabase instead
+   */
+  async unregisterForPushNotificationsAsync(userId: string): Promise<void> {
+    await this.clearTokenFromDatabase(userId);
+    await this.cancelAllScheduled();
+  },
+
+  /**
+   * Test notification (for debugging)
+   */
+  async testLocalNotification(): Promise<void> {
+    await this.showLocalNotification({
+      title: '✅ Test Notification',
+      body: 'If you see this, notifications are working!',
+      channelId: CHANNELS.DEFAULT.id,
+    });
+  },
 };
+
+export default NotificationService;

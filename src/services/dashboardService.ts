@@ -180,12 +180,21 @@ export async function getScheduleWithStatus(facultyId: string): Promise<(Timetab
 export interface SwapInfo {
   id: string;
   date: string;
-  slot_id: string;
+  slot_id: string; // usually null or derived
   faculty_a_id: string;
   faculty_b_id: string;
   slot_a_id: string;
   slot_b_id: string;
   status: string;
+  acquiredClass?: {
+    start_time: string;
+    end_time: string;
+    room: string | null;
+    target_dept: string;
+    target_year: number;
+    target_section: string;
+    subject: { id: string; name: string; code: string };
+  } | null;
 }
 
 export interface SubstitutionInfo {
@@ -225,6 +234,36 @@ export async function getSwapsAndSubstitutions(
       .eq('status', 'accepted')
       .or(`faculty_a_id.eq.${facultyId},faculty_b_id.eq.${facultyId}`);
 
+    // Enrich swaps with acquired class details
+    const enrichedSwaps = await Promise.all((swaps || []).map(async (swap: any) => {
+      // Determine which slot I am acquiring
+      // If I am A, I acquire B's slot. If I am B, I acquire A's slot.
+      const isFacultyA = swap.faculty_a_id === facultyId;
+      const targetFacultyId = isFacultyA ? swap.faculty_b_id : swap.faculty_a_id;
+      const targetSlotId = isFacultyA ? swap.slot_b_id : swap.slot_a_id;
+      
+      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const dayName = days[new Date(date).getDay()];
+
+      const { data: details } = await supabase
+         .from('master_timetables')
+         .select(`
+            id, slot_id,
+            start_time, end_time, room, 
+            target_dept, target_year, target_section,
+            subjects:subject_id(id, name, code)
+         `)
+         .eq('faculty_id', targetFacultyId)
+         .eq('slot_id', targetSlotId)
+         .eq('day', dayName)
+         .maybeSingle();
+      
+      return {
+        ...swap,
+        acquiredClass: details ? { ...details, subject: details.subjects } : null
+      };
+    }));
+
     // Fetch substitutions where faculty is the substitute
     const { data: subs } = await supabase
       .from('substitutions')
@@ -245,7 +284,7 @@ export async function getSwapsAndSubstitutions(
       .eq('substitute_faculty_id', facultyId);
 
     return {
-      swaps: swaps || [],
+      swaps: enrichedSwaps as SwapInfo[],
       substitutions: (subs || []).map((s: any) => ({
         ...s,
         subject: s.subject,
@@ -460,7 +499,8 @@ export async function submitAttendance(
     }
 
     // Update session counts
-    const presentCount = records.filter(r => r.status === 'present' || r.status === 'od').length;
+    // IMPORTANT: Count each status EXACTLY once to satisfy valid_counts constraint
+    const presentCount = records.filter(r => r.status === 'present').length;
     const absentCount = records.filter(r => r.status === 'absent').length;
     const odCount = records.filter(r => r.status === 'od').length;
     const leaveCount = records.filter(r => r.status === 'leave').length;

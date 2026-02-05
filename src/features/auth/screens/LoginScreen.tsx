@@ -24,16 +24,17 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import { supabase } from '../../../config/supabase';
 
 import { useNetwork } from '../../../contexts';
 import { SlideToLogin, SlideToLoginRef } from '../../../components/ui';
 import { Colors } from '../../../constants';
-import { signIn, isBiometricEnabled, getStoredProfile } from '../../../services/authService';
+import { signIn, isBiometricEnabled, getStoredProfile, getCurrentSession } from '../../../services/authService';
 
 const { width, height } = Dimensions.get('window');
 
 interface LoginScreenProps {
-  onLoginSuccess: (userName: string) => void;
+  onLoginSuccess: (userName: string, role: string) => void;
   onForgotPassword: () => void;
 }
 
@@ -170,7 +171,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       } else if (user) {
         await AsyncStorage.setItem('last_email', email.trim());
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        onLoginSuccess(user.full_name || email.split('@')[0]);
+        onLoginSuccess(user.full_name || email.split('@')[0], user.role || 'faculty');
       }
     } catch (err) {
       setError('Something went wrong. Please try again.');
@@ -190,12 +191,29 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       });
 
       if (result.success) {
+        // If Online: Verify valid session with server
+        // If Offline: Trust local profile (cache mode)
+        if (isOnline) {
+            const { data: { user }, error } = await supabase.auth.getUser();
+            
+            if (error || !user) {
+                await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                setError("Session expired. Please log in with password.");
+                return;
+            }
+        }
+
         const profile = await getStoredProfile();
-        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        onLoginSuccess(profile?.full_name || 'User');
+        if (profile) {
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            onLoginSuccess(profile.full_name || 'User', (profile.role as any) || 'faculty');
+        } else {
+            setError("Profile not found locally.");
+        }
       }
     } catch (error) {
       console.error('Biometric error:', error);
+      setError("Biometric authentication failed");
     }
   };
 

@@ -92,12 +92,13 @@ CREATE TABLE public.profiles (
     faculty_id TEXT UNIQUE,
     mobile TEXT,
     is_biometric_enabled BOOLEAN DEFAULT FALSE,
-    is_biometric_enabled BOOLEAN DEFAULT FALSE,
     device_token TEXT, -- For FCM push notifications (Legacy)
-    push_token TEXT, -- For Expo Push Notifications
-    avatar_url TEXT, -- Profile picture URL
+    push_token TEXT, -- For Push Notifications
+    push_token_type TEXT, -- Type: 'fcm' (Android), 'apns' (iOS), or 'expo'
+    push_token_updated_at TIMESTAMPTZ, -- When push token was last updated
     avatar_url TEXT, -- Profile picture URL
     is_on_leave BOOLEAN DEFAULT FALSE,
+    notifications_enabled BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -1428,7 +1429,138 @@ RECOMMENDATIONS:
 */
 
 -- ============================================================================
--- END OF SCHEMA
+-- HIDDEN ITEMS TABLE (For Soft Delete)
 -- ============================================================================
 
+-- Create hidden_items table to store "deleted" requests by specific users
+CREATE TABLE IF NOT EXISTS public.hidden_items (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    item_id UUID NOT NULL, -- Target ID (Requests/Swaps)
+    item_type TEXT NOT NULL, -- 'substitution' or 'swap'
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT unique_hide UNIQUE (user_id, item_id)
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_hidden_items_user ON public.hidden_items(user_id);
+CREATE INDEX IF NOT EXISTS idx_hidden_items_item ON public.hidden_items(item_id);
+
+-- RLS
+ALTER TABLE public.hidden_items ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage their own hidden items" ON public.hidden_items
+    FOR ALL USING (auth.uid() = user_id);
+
+-- Grant permissions
+GRANT ALL ON public.hidden_items TO authenticated;
+GRANT ALL ON public.hidden_items TO service_role;
+
+-- ============================================================================
+-- TIMETABLE RLS POLICIES (Fixed for Swap Feature)
+-- ============================================================================
+
+-- Drop the restrictive policy
+DROP POLICY IF EXISTS "timetables_own" ON public.master_timetables;
+
+-- Create a new policy that allows ALL authenticated users to READ all timetables
+-- This is necessary for the 'Swap' feature to find other faculty schedules.
+CREATE POLICY "timetables_read_all" ON public.master_timetables 
+    FOR SELECT TO authenticated 
+    USING (true);
+
+-- Ensure modification is still restricted to owner
+CREATE POLICY "timetables_update_own" ON public.master_timetables 
+    FOR UPDATE USING (faculty_id = auth.uid());
+
+CREATE POLICY "timetables_insert_own" ON public.master_timetables 
+    FOR INSERT WITH CHECK (faculty_id = auth.uid());
+
+CREATE POLICY "timetables_delete_own" ON public.master_timetables 
+    FOR DELETE USING (faculty_id = auth.uid());
+
+-- ============================================================================
+-- AUTOMATED NOTIFICATION TRIGGERS
+-- ============================================================================
+
+-- Function to handle New Substitution Requests
+CREATE OR REPLACE FUNCTION public.handle_new_substitution()
+RETURNS TRIGGER AS $$
+DECLARE
+  sender_name TEXT;
+  slot_display TEXT;
+BEGIN
+  -- Get sender name
+  SELECT full_name INTO sender_name FROM public.profiles WHERE id = NEW.original_faculty_id;
+  
+  -- Format Slot ID (e.g. "p1" -> "Period 1")
+  slot_display := UPPER(NEW.slot_id);
+
+  -- Insert Notification for the Substitute Faculty
+  INSERT INTO public.notifications (
+    user_id,
+    type,
+    title,
+    body,
+    priority,
+    data
+  ) VALUES (
+    NEW.substitute_faculty_id,
+    'substitute_request',
+    'Substitute Request',
+    COALESCE(sender_name, 'A Faculty') || ' requests you to cover ' || slot_display || ' (' || NEW.target_dept || '-' || NEW.target_year || '-' || NEW.target_section || ')',
+    'high',
+    jsonb_build_object('requestId', NEW.id, 'type', 'request')
+  );
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger for Substitutions
+DROP TRIGGER IF EXISTS on_substitution_created ON public.substitutions;
+CREATE TRIGGER on_substitution_created
+  AFTER INSERT ON public.substitutions
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_new_substitution();
+
+-- Function to handle Swap Requests
+CREATE OR REPLACE FUNCTION public.handle_new_swap()
+RETURNS TRIGGER AS $$
+DECLARE
+  sender_name TEXT;
+BEGIN
+  SELECT full_name INTO sender_name FROM public.profiles WHERE id = NEW.faculty_a_id;
+
+  -- Notify Faculty B
+  INSERT INTO public.notifications (
+    user_id,
+    type,
+    title,
+    body,
+    priority,
+    data
+  ) VALUES (
+    NEW.faculty_b_id,
+    'swap_request',
+    'Swap Request',
+    COALESCE(sender_name, 'A Faculty') || ' wants to swap ' || UPPER(NEW.slot_a_id) || ' with your ' || UPPER(NEW.slot_b_id),
+    'high',
+    jsonb_build_object('swapId', NEW.id, 'type', 'swap')
+  );
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger for Swaps
+DROP TRIGGER IF EXISTS on_swap_created ON public.class_swaps;
+CREATE TRIGGER on_swap_created
+  AFTER INSERT ON public.class_swaps
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_new_swap();
+
+-- ============================================================================
+-- END OF SCHEMA
+-- ============================================================================
 

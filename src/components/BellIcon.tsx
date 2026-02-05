@@ -1,9 +1,8 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { TouchableOpacity, View, StyleSheet, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNotifications } from '../contexts/NotificationContext';
 import { useNavigation } from '@react-navigation/native';
-import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, withSequence } from 'react-native-reanimated';
 
 interface BellIconProps {
   style?: any;
@@ -14,28 +13,6 @@ interface BellIconProps {
 export const BellIcon = ({ style, size = 24, color = '#FFF' }: BellIconProps) => {
   const { unreadCount } = useNotifications();
   const navigation = useNavigation();
-  const pulse = useSharedValue(1);
-
-  // Pulse animation logic
-  useEffect(() => {
-    if (unreadCount > 0) {
-      pulse.value = withRepeat(
-        withSequence(
-          withTiming(1.2, { duration: 500 }),
-          withTiming(1, { duration: 500 })
-        ),
-        -1, // Infinite
-        true
-      );
-    } else {
-      pulse.value = withTiming(1);
-    }
-  }, [unreadCount]);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: pulse.value }],
-  }));
-
   const handlePress = () => {
       // @ts-ignore
       navigation.navigate('Notifications');
@@ -45,9 +22,9 @@ export const BellIcon = ({ style, size = 24, color = '#FFF' }: BellIconProps) =>
     <TouchableOpacity onPress={handlePress} style={[styles.container, style]}>
       <Ionicons name="notifications-outline" size={size} color={color} />
       {unreadCount > 0 && (
-        <Animated.View style={[styles.badge, animatedStyle]}>
+        <View style={styles.badge}>
            <Text style={styles.badgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
-        </Animated.View>
+        </View>
       )}
     </TouchableOpacity>
   );

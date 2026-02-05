@@ -7,6 +7,7 @@ import { ZenToast } from '../../../components/ZenToast';
 import { ResolverEngine, SyncResult } from '../../../services/ResolverEngine';
 import { getPendingCount } from '../../../services/offlineService';
 import NetInfo from '@react-native-community/netinfo';
+import { LinearGradient } from 'expo-linear-gradient';
 
 export const SyncManagerScreen = ({ navigation }: any) => {
     const { isDark } = useTheme();
@@ -79,12 +80,20 @@ export const SyncManagerScreen = ({ navigation }: any) => {
         <View style={[styles.container, { backgroundColor: isDark ? '#0F172A' : '#F8FAFC', paddingTop: insets.top }]}>
             
             {/* Header */}
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-                    <Ionicons name="arrow-back" size={24} color={isDark ? '#FFF' : '#0F172A'} />
-                </TouchableOpacity>
-                <Text style={[styles.headerTitle, { color: isDark ? '#FFF' : '#0F172A' }]}>Sync Manager</Text>
-            </View>
+            <LinearGradient
+                colors={['#0D4A4A', '#1A6B6B', '#0F3D3D']}
+                style={{ paddingTop: insets.top + 16, paddingBottom: 16, paddingHorizontal: 20 }}
+            >
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', gap: 16 }}>
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' }}>
+                        <Ionicons name="chevron-back" size={24} color="#FFF" />
+                    </TouchableOpacity>
+                    <View>
+                        <Text style={{ fontSize: 20, fontWeight: '700', color: '#FFF' }}>Sync Manager</Text>
+                        <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)' }}>Data & Cloud Status</Text>
+                    </View>
+                </View>
+            </LinearGradient>
 
             <ScrollView contentContainerStyle={styles.content}>
                 

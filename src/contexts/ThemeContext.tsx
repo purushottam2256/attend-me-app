@@ -4,10 +4,11 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { useColorScheme } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LightTheme, DarkTheme } from '../constants/Theme';
 
-// Theme type definition
-export type Theme = typeof LightTheme;
+// Theme type definition - allow compatible string values
+export type Theme = { [K in keyof typeof LightTheme]: string };
 
 // Theme context value
 interface ThemeContextValue {
@@ -34,9 +35,30 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   const [mode, setMode] = useState<'light' | 'dark' | 'system'>('system');
 
   // Determine actual dark mode state
+  // Check system preference immediately (default)
   const isDark = mode === 'system' 
     ? systemColorScheme === 'dark' 
     : mode === 'dark';
+
+  // Load saved theme on mount
+  useEffect(() => {
+    const loadTheme = async () => {
+      try {
+        const saved = await AsyncStorage.getItem('@attend_me/theme');
+        if (saved && (saved === 'light' || saved === 'dark' || saved === 'system')) {
+          setMode(saved as any);
+        }
+      } catch (error) {
+        console.log('Error loading theme:', error);
+      }
+    };
+    loadTheme();
+  }, []);
+
+  // Save theme on change
+  useEffect(() => {
+    AsyncStorage.setItem('@attend_me/theme', mode);
+  }, [mode]);
 
   // Get the active theme
   const theme = isDark ? DarkTheme : LightTheme;
@@ -44,10 +66,12 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   // Toggle between light and dark
   const toggleTheme = useCallback(() => {
     setMode(prev => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      // If currently system, we switch to the OPPOSITE of system
       if (prev === 'system') {
-        return systemColorScheme === 'dark' ? 'light' : 'dark';
+         return systemColorScheme === 'dark' ? 'light' : 'dark';
       }
-      return prev === 'dark' ? 'light' : 'dark';
+      return next;
     });
   }, [systemColorScheme]);
 

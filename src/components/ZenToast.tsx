@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 interface ZenToastProps {
   message: string;
@@ -19,6 +20,7 @@ export const ZenToast: React.FC<ZenToastProps> = ({
   onAction,
   type = "success",
 }) => {
+  const insets = useSafeAreaInsets();
   const onHideRef = React.useRef(onHide);
   const onActionRef = React.useRef(onAction);
 
@@ -41,32 +43,24 @@ export const ZenToast: React.FC<ZenToastProps> = ({
 
   const getIcon = () => {
     switch (type) {
-      case "error":
-        return "alert-circle";
-      case "warning":
-        return "warning";
-      case "info":
-        return "information-circle";
-      default:
-        return "checkmark-circle";
+      case "error": return "alert-circle";
+      case "warning": return "warning";
+      case "info": return "information-circle";
+      default: return "checkmark-circle";
     }
   };
 
   const getColor = () => {
     switch (type) {
-      case "error":
-        return "#EF4444";
-      case "warning":
-        return "#F59E0B";
-      case "info":
-        return "#3B82F6";
-      default:
-        return "#0F766E";
+      case "error": return "#EF4444";
+      case "warning": return "#F59E0B";
+      case "info": return "#3B82F6";
+      default: return "#0F766E";
     }
   };
 
   return (
-    <View style={styles.toastContainer}>
+    <View style={[styles.toastContainer, { top: insets.top + 20 }]}>
       <View
         style={[
           styles.toastContent,
@@ -83,8 +77,6 @@ export const ZenToast: React.FC<ZenToastProps> = ({
               style={[styles.actionText, { color: getColor() }]} 
               onPress={() => {
                 onAction();
-                // Optionally hide after action
-                // onHide(); 
               }}
             >
               {actionLabel || "Retry"}
@@ -99,8 +91,6 @@ export const ZenToast: React.FC<ZenToastProps> = ({
 const styles = StyleSheet.create({
   toastContainer: {
     position: "absolute",
-    // Top position controlled by parent wrapper or default
-    // top: 60, 
     left: 20,
     right: 20,
     zIndex: 9999,
