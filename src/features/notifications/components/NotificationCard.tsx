@@ -1,7 +1,24 @@
+
 import React, { useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Swipeable, GestureHandlerRootView } from 'react-native-gesture-handler';
+import { formatDistanceToNow } from 'date-fns';
+
+const safeDate = (dateString: any) => {
+    if (!dateString) return new Date();
+    const date = new Date(dateString);
+    return isNaN(date.getTime()) ? new Date() : date;
+};
+
+const getRelativeTime = (dateString: any) => {
+    try {
+        const date = safeDate(dateString);
+        return formatDistanceToNow(date, { addSuffix: true });
+    } catch (e) {
+        return 'Just now';
+    }
+};
 
 interface NotificationCardProps {
   title: string;
@@ -45,12 +62,11 @@ export const NotificationCard = React.memo(({
 
   // WhatsApp-inspired colors
   const colors = {
-    bg: isDark ? '#0B141A' : '#FFFFFF',
-    border: isDark ? '#1F2C34' : '#E8E8E8',
-    textPrimary: isDark ? '#E9EDEF' : '#111B21',
-    textSecondary: isDark ? '#8696A0' : '#667781',
-    textMuted: isDark ? '#667781' : '#8696A0',
-    accent: '#00A884', // WhatsApp green
+    background: isSelected ? 'rgba(61, 220, 151, 0.1)' 
+               : isDark ? '#082020' : '#FFFFFF', // Zen Black / White
+    textPrimary: isDark ? '#FFFFFF' : '#000000',
+    textSecondary: isDark ? 'rgba(255,255,255,0.6)' : '#666666',
+    border: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
     unreadBg: isDark ? 'rgba(0, 168, 132, 0.08)' : 'rgba(0, 168, 132, 0.05)',
     selectedBg: isDark ? 'rgba(0, 168, 132, 0.15)' : 'rgba(0, 168, 132, 0.1)',
     deleteRed: '#F15C6D',
@@ -59,9 +75,10 @@ export const NotificationCard = React.memo(({
   // Type icon colors
   const getIconColor = () => {
     switch (type) {
-      case 'request': return '#00A884';
-      case 'alert': return '#FFA500';
-      default: return '#53BDEB';
+      case 'request': return '#8B5CF6'; // Purple (Swapped/Sub)
+      case 'alert': return '#F59E0B';   // Orange (Incomplete/Alert)
+      case 'info': return '#10B981';    // Green (Live/Active)
+      default: return '#3B82F6';        // Blue (Upcoming/Info)
     }
   };
 
@@ -75,24 +92,22 @@ export const NotificationCard = React.memo(({
   };
 
   // Render delete action (swipe right-to-left reveals this)
-  const renderRightActions = (progress: Animated.AnimatedInterpolation<number>) => {
-    const translateX = progress.interpolate({
-      inputRange: [0, 1],
-      outputRange: [80, 0],
-    });
-    
+  // Render delete action - Simple reveal
+  const renderRightActions = (_progress: any, dragX: any) => {
+    // Optional: Animate opacity or scale based on drag, but keeping it simple ensures clickability
     return (
-      <Animated.View style={[styles.deleteAction, { transform: [{ translateX }] }]}>
+      <View style={styles.deleteAction}>
         <TouchableOpacity 
           style={[styles.deleteButton, { backgroundColor: colors.deleteRed }]}
           onPress={() => {
             swipeableRef.current?.close();
             onDelete?.();
           }}
+          activeOpacity={0.7}
         >
-          <Ionicons name="trash-outline" size={22} color="#FFF" />
+          <Ionicons name="trash-outline" size={24} color="#FFF" />
         </TouchableOpacity>
-      </Animated.View>
+      </View>
     );
   };
 
@@ -105,7 +120,7 @@ export const NotificationCard = React.memo(({
       style={[
         styles.card,
         { 
-          backgroundColor: isSelected ? colors.selectedBg : (isRead ? colors.bg : colors.unreadBg),
+          backgroundColor: isSelected ? colors.selectedBg : (isRead ? colors.background : colors.unreadBg),
           borderBottomColor: colors.border,
         }
       ]}
@@ -115,8 +130,8 @@ export const NotificationCard = React.memo(({
         <View style={[
           styles.checkbox,
           { 
-            backgroundColor: isSelected ? colors.accent : 'transparent',
-            borderColor: isSelected ? colors.accent : colors.textMuted,
+            backgroundColor: isSelected ? '#3DDC97' : 'transparent', // Accent green
+            borderColor: isSelected ? '#3DDC97' : colors.textSecondary,
           }
         ]}>
           {isSelected && <Ionicons name="checkmark" size={14} color="#FFF" />}
@@ -131,31 +146,22 @@ export const NotificationCard = React.memo(({
       {/* Content */}
       <View style={styles.content}>
         <View style={styles.headerRow}>
-          <Text 
-            style={[
-              styles.title, 
-              { 
-                color: colors.textPrimary,
-                fontWeight: isRead ? '500' : '600' 
-              }
-            ]} 
-            numberOfLines={1}
-          >
+          <Text style={[styles.title, { color: colors.textPrimary }]} numberOfLines={1}>
             {title}
           </Text>
-          <Text style={[styles.time, { color: isRead ? colors.textMuted : colors.accent }]}>
-            {timestamp}
+          <Text style={[styles.time, { color: colors.textSecondary }]}>
+            {getRelativeTime(timestamp)}
           </Text>
         </View>
         
         <View style={styles.bodyRow}>
           {/* Unread indicator */}
           {!isRead && (
-            <View style={[styles.unreadDot, { backgroundColor: colors.accent }]} />
+            <View style={[styles.unreadDot, { backgroundColor: '#3DDC97' }]} />
           )}
           <Text 
             style={[styles.body, { color: colors.textSecondary }]} 
-            numberOfLines={1}
+            // Flexible height
           >
             {body}
           </Text>
@@ -164,7 +170,7 @@ export const NotificationCard = React.memo(({
           {status && status !== 'pending' && (
             <View style={[
               styles.statusBadge, 
-              { backgroundColor: status === 'accepted' ? '#00A884' : '#F15C6D' }
+              { backgroundColor: status === 'accepted' ? '#3DDC97' : '#F15C6D' }
             ]}>
               <Ionicons 
                 name={status === 'accepted' ? 'checkmark' : 'close'} 
@@ -200,43 +206,48 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     borderBottomWidth: 0.5,
+    minHeight: 50,
   },
   checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    marginRight: 12,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1.5,
+    marginRight: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
   iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32, 
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginRight: 10,
+    backgroundColor: 'rgba(255,255,255,0.05)', // Subtle background for icon
   },
   content: {
     flex: 1,
+    justifyContent: 'center',
   },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   title: {
-    fontSize: 15,
+    fontSize: 14,
+    fontWeight: '600',
     flex: 1,
-    marginRight: 8,
   },
   time: {
-    fontSize: 12,
+    fontSize: 11,
+    fontWeight: '400',
+    marginLeft: 8,
   },
   bodyRow: {
     flexDirection: 'row',
@@ -263,9 +274,10 @@ const styles = StyleSheet.create({
   deleteAction: {
     justifyContent: 'center',
     alignItems: 'flex-end',
+    width: 80, // Explicit width for Swipeable
   },
   deleteButton: {
-    width: 70,
+    width: 80, // Match action width
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',

@@ -47,34 +47,34 @@ export const SubstituteRequestCard: React.FC<SubstituteRequestCardProps> = ({
     // Data extraction
     const senderName = isSwap ? request.faculty_a?.full_name : request.original_faculty?.full_name;
     const title = isSwap ? 'SWAP REQUEST' : 'SUBSTITUTE REQUEST';
+    
+    // Professional Message (Matching Push Notification)
     const body = isSwap 
-        ? `${senderName || 'Faculty'} wants to swap classes with you`
-        : `${senderName || 'Faculty'} needs cover`;
+        ? `${senderName || 'Faculty'} requests a class swap for ${request.slot_a_id?.split('_')[1] || 'Slot A'}.`
+        : `${senderName || 'Faculty'} requests you to cover ${request.subject?.code || 'their class'}.`;
+        
     const details = isSwap 
-        ? `${request.slot_a_id?.toUpperCase() || 'Slot A'} ↔ ${request.slot_b_id?.toUpperCase() || 'Slot B'}`
-        : `${request.subject?.code || 'Class'} • ${request.target_dept || ''}-${request.target_year || ''}-${request.target_section || ''}`;
+        ? `${request.slot_a_id?.split('_')[1]} ↔ ${request.slot_b_id?.split('_')[1]}`
+        : `${request.target_dept}-${request.target_year}-${request.target_section} • ${request.slot_id?.split('_')[1] || 'Period'}`;
+
     const timeInfo = request.date || 'Pending';
     
     // Relative time
     const timeAgo = request.requested_at 
         ? formatDistanceToNow(new Date(request.requested_at), { addSuffix: true })
         : 'Just now';
-
-    // TEAL THEME COLORS
-    const getGradient = (): readonly [string, string, string] => {
-        if (isDone || isExpired) return ['#64748B', '#475569', '#334155'] as const; // Gray
-        return ['#0D4A4A', '#1A6B6B', '#0F3D3D'] as const; // Teal
-    };
     
-    const accentColor = '#3DDC97'; // Mint accent
+    const accentColor = '#3DDC97';
+
+    const cardBg = isDark ? '#082020' : '#FFFFFF';
+    const borderColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)';
+    const textColor = isDark ? '#FFF' : '#000';
+    const subTextColor = isDark ? 'rgba(255,255,255,0.6)' : '#666';
 
     return (
         <View style={styles.container}>
-            <LinearGradient
-                colors={getGradient()}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.card}
+            <View
+                style={[styles.card, { backgroundColor: cardBg, borderColor }]}
             >
                 {/* Header */}
                 <View style={styles.header}>
@@ -82,21 +82,17 @@ export const SubstituteRequestCard: React.FC<SubstituteRequestCardProps> = ({
                         <Ionicons 
                             name={isSwap ? "swap-horizontal" : "person-add"} 
                             size={14} 
-                            color="#0D4A4A" 
+                            color="#3DDC97" 
                         />
                         <Text style={styles.badgeText}>{title}</Text>
                     </View>
-                    <Text style={styles.timeAgo}>{timeAgo}</Text>
+                    <Text style={[styles.timeAgo, { color: subTextColor }]}>{timeAgo}</Text>
                 </View>
 
                 {/* Content */}
                 <View style={styles.content}>
-                    <Text style={styles.facultyName}>{body}</Text>
-                    <Text style={styles.classDetails}>{details}</Text>
-                    <View style={styles.timeRow}>
-                        <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.8)" />
-                        <Text style={styles.timeText}>{timeInfo}</Text>
-                    </View>
+                    <Text style={[styles.facultyName, { color: textColor }]}>{body}</Text>
+                    <Text style={[styles.classDetails, { color: subTextColor }]}>{details}</Text>
                 </View>
 
                 {/* Actions or Status */}
@@ -106,20 +102,20 @@ export const SubstituteRequestCard: React.FC<SubstituteRequestCardProps> = ({
                             styles.statusBadge, 
                             { 
                                 backgroundColor: isExpired 
-                                    ? 'rgba(255,255,255,0.15)' 
+                                    ? 'rgba(100,100,100,0.1)' 
                                     : request.status === 'accepted' 
-                                        ? 'rgba(61, 220, 151, 0.25)' 
-                                        : 'rgba(239, 68, 68, 0.25)' 
+                                        ? 'rgba(61, 220, 151, 0.1)' 
+                                        : 'rgba(239, 68, 68, 0.1)' 
                             }
                         ]}>
                             <Ionicons 
                                 name={isExpired ? "time" : (request.status === 'accepted' ? "checkmark-circle" : "close-circle")} 
                                 size={16} 
-                                color={isExpired ? '#FFF' : (request.status === 'accepted' ? accentColor : '#EF4444')} 
+                                color={isExpired ? subTextColor : (request.status === 'accepted' ? accentColor : '#EF4444')} 
                             />
                             <Text style={[
                                 styles.statusText,
-                                { color: isExpired ? '#FFF' : (request.status === 'accepted' ? accentColor : '#EF4444') }
+                                { color: isExpired ? subTextColor : (request.status === 'accepted' ? accentColor : '#EF4444') }
                             ]}>
                                 {isExpired ? "EXPIRED" : request.status?.toUpperCase()}
                             </Text>
@@ -127,37 +123,15 @@ export const SubstituteRequestCard: React.FC<SubstituteRequestCardProps> = ({
                     </View>
                 ) : (
                     <View style={styles.actions}>
-                        <TouchableOpacity 
-                            onPress={() => handleAction('decline')} 
-                            disabled={!!loading}
-                            style={styles.declineBtn}
-                            activeOpacity={0.85}
-                        >
-                            {loading === 'decline' ? (
-                                <ActivityIndicator size="small" color="#FFF" />
-                            ) : (
-                                <Text style={styles.declineBtnText}>Decline</Text>
-                            )}
+                        <TouchableOpacity onPress={() => handleAction('decline')} style={[styles.declineBtn, { borderColor: '#F15C6D' }]} disabled={!!loading}>
+                           {loading === 'decline' ? <ActivityIndicator size="small" color="#F15C6D" /> : <Text style={[styles.declineBtnText, { color: '#F15C6D' }]}>Decline</Text>}
                         </TouchableOpacity>
-
-                        <TouchableOpacity 
-                            onPress={() => handleAction('accept')} 
-                            disabled={!!loading}
-                            style={styles.acceptBtn}
-                            activeOpacity={0.85}
-                        >
-                            {loading === 'accept' ? (
-                                <ActivityIndicator size="small" color="#0D4A4A" />
-                            ) : (
-                                <>
-                                    <Ionicons name="checkmark" size={18} color="#0D4A4A" />
-                                    <Text style={styles.acceptBtnText}>Accept</Text>
-                                </>
-                            )}
+                        <TouchableOpacity onPress={() => handleAction('accept')} style={[styles.acceptBtn, { backgroundColor: '#3DDC97' }]} disabled={!!loading}>
+                           {loading === 'accept' ? <ActivityIndicator size="small" color="#FFF" /> : <Text style={styles.acceptBtnText}>Accept</Text>}
                         </TouchableOpacity>
                     </View>
                 )}
-            </LinearGradient>
+            </View>
         </View>
     );
 };
@@ -174,103 +148,81 @@ const styles = StyleSheet.create({
         elevation: 6 
     },
     card: { 
-        padding: 16, 
-        borderRadius: 16 
+        padding: 8,
+        borderRadius: 12,
+        borderWidth: 0.5,
     },
     header: { 
         flexDirection: 'row', 
         justifyContent: 'space-between', 
         alignItems: 'center', 
-        marginBottom: 14 
+        marginBottom: 2
     },
     badge: { 
         flexDirection: 'row', 
         alignItems: 'center', 
-        backgroundColor: '#3DDC97', 
-        paddingHorizontal: 10, 
-        paddingVertical: 5, 
+        backgroundColor: 'rgba(61, 220, 151, 0.2)', 
+        paddingHorizontal: 6, 
+        paddingVertical: 2, 
         borderRadius: 100, 
-        gap: 5 
+        gap: 4 
     },
     badgeText: { 
-        fontSize: 10, 
-        fontWeight: '800',
-        color: '#0D4A4A',
-        letterSpacing: 0.5
+        fontSize: 9, 
+        fontWeight: '700',
+        color: '#3DDC97',
     },
     timeAgo: { 
-        color: 'rgba(255,255,255,0.6)', 
-        fontSize: 12,
+        fontSize: 10,
         fontWeight: '500'
     },
     content: { 
-        marginBottom: 16 
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 8
     },
     facultyName: { 
-        color: '#FFF', 
-        fontSize: 18, 
-        fontWeight: '700', 
-        marginBottom: 6,
-        letterSpacing: -0.3
+        fontSize: 14,
+        fontWeight: '600', 
     },
     classDetails: { 
-        color: 'rgba(255,255,255,0.85)', 
-        fontSize: 14, 
-        fontWeight: '600', 
-        marginBottom: 10 
-    },
-    timeRow: { 
-        flexDirection: 'row', 
-        alignItems: 'center', 
-        gap: 8, 
-        backgroundColor: 'rgba(255,255,255,0.1)', 
-        alignSelf: 'flex-start', 
-        paddingHorizontal: 12, 
-        paddingVertical: 7, 
-        borderRadius: 8 
-    },
-    timeText: { 
-        color: '#FFF', 
-        fontSize: 13, 
-        fontWeight: '600' 
+        fontSize: 12,
+        fontWeight: '400', 
     },
     actions: { 
         flexDirection: 'row', 
-        gap: 12 
+        justifyContent: 'flex-end',
+        gap: 12,
+        marginTop: 4
     },
     declineBtn: { 
-        flex: 1, 
-        height: 46, 
-        borderRadius: 12, 
+        paddingHorizontal: 16,
+        paddingVertical: 6,
+        borderRadius: 100, 
         justifyContent: 'center', 
         alignItems: 'center',
-        backgroundColor: 'rgba(255,255,255,0.1)', 
         borderWidth: 1, 
-        borderColor: 'rgba(255,255,255,0.2)' 
     },
     declineBtnText: {
-        color: '#FFF',
-        fontWeight: '700',
-        fontSize: 14
+        fontWeight: '600',
+        fontSize: 12
     },
     acceptBtn: { 
-        flex: 1, 
-        height: 46, 
-        borderRadius: 12, 
+        paddingHorizontal: 20,
+        paddingVertical: 6,
+        borderRadius: 100, 
         justifyContent: 'center', 
-        alignItems: 'center',
-        backgroundColor: '#3DDC97',
-        flexDirection: 'row',
-        gap: 6
+        alignItems: 'center' 
     },
-    acceptBtnText: {
-        color: '#0D4A4A',
-        fontWeight: '700',
-        fontSize: 14
+    acceptBtnText: { 
+        color: '#000', 
+        fontWeight: '700', 
+        fontSize: 12 
     },
     statusRow: { 
         flexDirection: 'row', 
-        justifyContent: 'center', 
+        justifyContent: 'flex-end', // Aligned to right 
         marginTop: 4 
     },
     statusBadge: { 

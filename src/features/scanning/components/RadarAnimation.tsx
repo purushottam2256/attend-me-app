@@ -4,21 +4,29 @@
  */
 
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
+import { View, Text, StyleSheet, Animated, Easing, Image } from 'react-native';
 import { useTheme } from '../../../contexts';
 
 interface RadarAnimationProps {
   detected: number;
   total: number;
   isScanning: boolean;
+  detected: number;
+  total: number;
+  isScanning: boolean;
   isAutoPilot?: boolean;
+  centerImage?: any; // Allow passing an image source
 }
 
 export const RadarAnimation: React.FC<RadarAnimationProps> = ({
   detected,
   total,
   isScanning,
+  detected,
+  total,
+  isScanning,
   isAutoPilot = false,
+  centerImage,
 }) => {
   const { isDark } = useTheme();
   const pulse1 = useRef(new Animated.Value(0)).current;
@@ -142,13 +150,24 @@ export const RadarAnimation: React.FC<RadarAnimationProps> = ({
         borderColor: colors.border 
       }]}>
         <View style={[styles.innerCircle, { 
-          backgroundColor: colors.innerCircle,
+          backgroundColor: centerImage ? (isDark ? '#000' : '#FFF') : colors.innerCircle,
           shadowColor: colors.accent,
+          overflow: 'hidden' // Ensure image stays inside
         }]}>
-          {/* Counter */}
-          <Text style={[styles.detectedCount, { color: colors.detectedText }]}>{detected}</Text>
-          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
-          <Text style={[styles.totalCount, { color: colors.totalText }]}>{total}</Text>
+          {centerImage ? (
+            <Image 
+              source={centerImage} 
+              style={{ width: '85%', height: '85%', opacity: 0.9 }} 
+              resizeMode="contain" 
+            />
+          ) : (
+            <>
+              {/* Counter */}
+              <Text style={[styles.detectedCount, { color: colors.detectedText }]}>{detected}</Text>
+              <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+              <Text style={[styles.totalCount, { color: colors.totalText }]}>{total}</Text>
+            </>
+          )}
         </View>
       </View>
 

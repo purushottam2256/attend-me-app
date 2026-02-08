@@ -94,6 +94,48 @@ export async function getTodaySchedule(facultyId: string): Promise<TimetableSlot
   }
 }
 
+
+
+/**
+ * Get full schedule for the week
+ */
+export async function getWeeklySchedule(facultyId: string): Promise<TimetableSlot[]> {
+  try {
+    const { data, error } = await supabase
+      .from('master_timetables')
+      .select(`
+        id,
+        day,
+        slot_id,
+        start_time,
+        end_time,
+        room,
+        target_dept,
+        target_year,
+        target_section,
+        batch,
+        subjects:subject_id (id, name, code)
+      `)
+      .eq('faculty_id', facultyId)
+      .eq('is_active', true)
+      .order('day')
+      .order('start_time');
+
+    if (error) {
+      console.error('Error fetching schedule for day:', error);
+      return [];
+    }
+
+    return (data || []).map((item: any) => ({
+      ...item,
+      subject: item.subjects,
+    }));
+  } catch (error) {
+    console.error('Schedule fetch error:', error);
+    return [];
+  }
+}
+
 /**
  * Get schedule for a specific day
  */
@@ -746,6 +788,54 @@ export async function getClassPermissions(
     }));
   } catch (error) {
     console.error('Permissions fetch error:', error);
+    return [];
+  }
+}
+
+// =====================================================
+// UTILITIES
+// =====================================================
+
+/**
+ * Get ALL unique classes (Dept-Year-Section) a faculty teaches.
+ * Used for Smart Roster Sync to cache students for these classes.
+ */
+export async function getAllFacultyClasses(facultyId: string): Promise<{ target_dept: string; target_year: number; target_section: string; subject_name: string }[]> {
+  try {
+    const { data, error } = await supabase
+      .from('master_timetables')
+      .select(`
+        target_dept,
+        target_year,
+        target_section,
+        subjects:subject_id (name)
+      `)
+      .eq('faculty_id', facultyId)
+      .eq('is_active', true);
+
+    if (error) {
+      console.error('Error fetching all faculty classes:', error);
+      return [];
+    }
+
+    // Deduplicate based on Dept-Year-Section key
+    const uniqueClasses = new Map<string, any>();
+    
+    (data || []).forEach((item: any) => {
+      const key = `${item.target_dept}-${item.target_year}-${item.target_section}`;
+      if (!uniqueClasses.has(key)) {
+        uniqueClasses.set(key, {
+            target_dept: item.target_dept,
+            target_year: item.target_year,
+            target_section: item.target_section,
+            subject_name: item.subjects?.name || 'Class'
+        });
+      }
+    });
+
+    return Array.from(uniqueClasses.values());
+  } catch (error) {
+    console.error('getFacultyClasses error:', error);
     return [];
   }
 }

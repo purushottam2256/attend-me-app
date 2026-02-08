@@ -25,6 +25,7 @@ import { useTheme } from '../../../contexts';
 import { NotificationService } from '../../../services/NotificationService';
 import { supabase } from '../../../config/supabase';
 import { getTodaySchedule, getTomorrowSchedule, TimetableSlot } from '../../../services/dashboardService';
+import { useConnectionStatus } from '../../../hooks/useConnectionStatus'; // Added import
 import { swapStyles as styles } from '../styles/SwapScreen.styles';
 
 type SwapScreenRouteProp = RouteProp<{
@@ -43,6 +44,7 @@ interface Faculty {
 
 export const SwapScreen: React.FC = () => {
   const { isDark } = useTheme();
+  const { status: connectionStatus } = useConnectionStatus(); // Corrected property name
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
   const route = useRoute<SwapScreenRouteProp>();
@@ -307,9 +309,18 @@ export const SwapScreen: React.FC = () => {
   const loadTargetSchedule = async (facultyId: string) => {
     setLoadingTarget(true);
     try {
-      const schedule = await getTodaySchedule(facultyId);
+      let schedule: TimetableSlot[] = [];
+      if (isShowingTomorrow) {
+          schedule = await getTomorrowSchedule(facultyId);
+      } else {
+          schedule = await getTodaySchedule(facultyId);
+      }
+
       const now = new Date();
       const remaining = schedule.filter(slot => {
+        // If showing tomorrow, allow all slots (no time filtering needed)
+        if (isShowingTomorrow) return slot.slot_id !== swapMyClass?.slot_id;
+
         const [hour, min] = slot.end_time.split(':').map(Number);
         const endTime = new Date();
         endTime.setHours(hour, min, 0, 0);
@@ -346,16 +357,22 @@ export const SwapScreen: React.FC = () => {
       showFeedback('warning', 'Missing Selection', 'Please select a class and faculty');
       return;
     }
+
+    if (connectionStatus === 'offline') {
+        showFeedback('warning', 'Offline Mode', 'Cannot send requests while offline');
+        return;
+    }
     
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Date();
+      const targetDate = isShowingTomorrow 
+          ? new Date(today.setDate(today.getDate() + 1)).toISOString().split('T')[0]
+          : today.toISOString().split('T')[0];
       
-
-
       const { error } = await supabase
         .from('substitutions')
         .insert({
-          date: today,
+          date: targetDate, // Use calculated date
           slot_id: selectedClass.slot_id,
           original_faculty_id: userId,
           substitute_faculty_id: selectedFaculty.id,
@@ -377,13 +394,21 @@ export const SwapScreen: React.FC = () => {
       // Notification created via Realtime trigger or NotificationScreen fetches 'substitutions' directly
       // Removed redundant manual notification insert to prevent duplicates
 
-      // Send Real Push
+      // Send Real Push (Formal)
       if (selectedFaculty.push_token) {
+          const { data: { user } } = await supabase.auth.getUser();
+          const senderName = user?.user_metadata?.full_name || 'A Faculty Member';
+          
+          // Hosted Splash Logo
+          const logoUrl = 'https://xxemwolzhhwkiwvjyniv.supabase.co/storage/v1/object/public/avatars/5cb62ec2-fc11-4b6d-abe1-cf76a21f9570/app-images/splash-logo.jpg';
+
           NotificationService.sendPushNotification(
               selectedFaculty.push_token,
-              'Substitute Request',
-              `${selectedClass.subject?.name || 'Class'} at ${selectedClass.start_time}`,
-              { requestId: selectedClass.slot_id, type: 'SUB_REQUEST' } // Add type for action buttons
+              'Formal Substitution Request',
+              `Dear ${selectedFaculty.full_name},\n\nProf. ${senderName} requests you to substitute for their ${selectedClass.target_dept}-${selectedClass.target_year}-${selectedClass.target_section} class (${selectedClass.start_time}).\n\nPlease verify your availability and respond.`,
+              { type: 'SUB_REQUEST', requestId: selectedClass.slot_id },
+              'SUB_REQUEST', // Category ID
+              logoUrl // Add Logo
           );
       }
       
@@ -405,14 +430,22 @@ export const SwapScreen: React.FC = () => {
       showFeedback('warning', 'Missing Selection', 'Please select your class, faculty, and their slot');
       return;
     }
+
+    if (connectionStatus === 'offline') {
+        showFeedback('warning', 'Offline Mode', 'Cannot send requests while offline');
+        return;
+    }
     
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Date();
+      const targetDate = isShowingTomorrow 
+          ? new Date(today.setDate(today.getDate() + 1)).toISOString().split('T')[0]
+          : today.toISOString().split('T')[0];
       
       const { error } = await supabase
         .from('class_swaps')
         .insert({
-          date: today,
+          date: targetDate,
           faculty_a_id: userId,
           faculty_b_id: swapTargetFaculty.id,
           slot_a_id: swapMyClass.slot_id,
@@ -428,11 +461,19 @@ export const SwapScreen: React.FC = () => {
 
       // Send Real Push
       if (swapTargetFaculty.push_token) {
+          const { data: { user: currentUser } } = await supabase.auth.getUser();
+          const senderName = currentUser?.user_metadata?.full_name || 'A Faculty Member';
+          
+          // Hosted Splash Logo
+          const logoUrl = 'https://xxemwolzhhwkiwvjyniv.supabase.co/storage/v1/object/public/avatars/5cb62ec2-fc11-4b6d-abe1-cf76a21f9570/app-images/splash-logo.jpg';
+
           NotificationService.sendPushNotification(
               swapTargetFaculty.push_token,
-              'Swap Request',
-              `Swap ${swapMyClass.slot_id?.toUpperCase()} ↔️ ${swapTargetSlot?.toUpperCase()}`,
-              { type: 'SWAP_REQUEST' }
+              'Class Swap Proposal',
+              `Dear ${swapTargetFaculty.full_name},\n\nProf. ${senderName} proposes a class swap.\n\nYou give: ${swapTargetSlot}\nThey give: ${swapMyClass.target_dept}-${swapMyClass.target_year}-${swapMyClass.target_section} (${swapMyClass.slot_id})\n\nKindly respond at your earliest convenience.`,
+              { type: 'SWAP_REQUEST' },
+              'SWAP_REQUEST', // Category ID
+              logoUrl // Add Logo
           );
       }
       

@@ -17,6 +17,10 @@ import {
   Modal,
   TouchableWithoutFeedback,
   Animated,
+  Dimensions,
+  Easing,
+  Image,
+  Alert
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
@@ -26,6 +30,11 @@ import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../../../contexts';
 import { supabase } from '../../../config/supabase';
 import { getAttendanceHistory, AttendanceSession } from '../../../services/dashboardService';
+import { cacheHistory, getCachedHistory, getCacheAge,  getPendingSubmissions,
+  removePendingSubmission,
+  syncPendingSubmissions
+} from '../../../services/offlineService';
+import { useConnectionStatus } from '../../../hooks';
 import { EditAttendanceModal, FilterBar } from '../components';
 import { historyStyles as styles, DATE_TILE_WIDTH } from '../styles';
 import { ZenToast } from '../../../components/ZenToast';
@@ -37,7 +46,7 @@ export const HistoryScreen: React.FC = () => {
   const { isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
-  
+
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [sessions, setSessions] = useState<AttendanceSession[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -49,12 +58,15 @@ export const HistoryScreen: React.FC = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editSession, setEditSession] = useState<AttendanceSession | null>(null);
   const [editStudents, setEditStudents] = useState<any[]>([]);
-  
+
   // Filter state for year, section, and period
   const [filterYear, setFilterYear] = useState<string>('all');
   const [filterSection, setFilterSection] = useState<string>('all');
   const [filterPeriod, setFilterPeriod] = useState<string>('all');
   const [showFilters, setShowFilters] = useState(false);
+  const [isOfflineData, setIsOfflineData] = useState(false);
+
+  const { status: connectionStatus } = useConnectionStatus();
 
   // Toast State
   const [toast, setToast] = useState<{ visible: boolean, type: 'success' | 'error', message: string }>({ visible: false, type: 'success', message: '' });
@@ -91,7 +103,7 @@ export const HistoryScreen: React.FC = () => {
     const year = selectedDate.getFullYear();
     const month = selectedDate.getMonth();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-    
+
     // Generate all dates of the selected month
     for (let day = 1; day <= daysInMonth; day++) {
       dates.push(new Date(year, month, day));
@@ -111,12 +123,12 @@ export const HistoryScreen: React.FC = () => {
   // Get no-class reason for a date
   const getNoClassReason = (date: Date): { isNoClass: boolean; reason: string; emoji: string } => {
     const day = date.getDay();
-    
+
     // Sunday only (Saturday is working day)
     if (day === 0) {
       return { isNoClass: true, reason: 'Sunday', emoji: '☀️' };
     }
-    
+
     // Check for holidays (example - could be from API)
     const dateStr = date.toISOString().split('T')[0];
     const holidays: Record<string, string> = {
@@ -125,11 +137,11 @@ export const HistoryScreen: React.FC = () => {
       '2026-10-02': 'Gandhi Jayanti',
       // Add more holidays as needed
     };
-    
+
     if (holidays[dateStr]) {
       return { isNoClass: true, reason: holidays[dateStr], emoji: '🎊' };
     }
-    
+
     return { isNoClass: false, reason: '', emoji: '' };
   };
 
@@ -137,26 +149,89 @@ export const HistoryScreen: React.FC = () => {
   const loadHistory = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      // 1. Get Pending Submissions (Offline Queue)
+      const pendingSubmissions = await getPendingSubmissions();
+      const pendingSessions = pendingSubmissions
+        .filter(p => isSameDay(new Date(p.submittedAt), selectedDate))
+        .map(p => ({
+            id: `pending-${p.id}`, // Prefix to distinguish from synced sessions
+            date: p.submittedAt,
+            slot_id: p.classData.slotId, // Ensure string/number match
+            subject: { name: p.classData.subjectName, code: '' },
+            target_dept: p.classData.dept || '???',
+            target_section: p.classData.section || p.classData.sectionLetter || '???',
+            target_year: p.classData.year || 0,
+            present_count: p.attendance.filter(a => a.status === 'present').length,
+            absent_count: p.attendance.filter(a => a.status === 'absent').length,
+            total_students: p.attendance.length,
+            isOfflinePending: true, // Custom flag for UI
+        } as any));
 
-      // Format date for query
-      const dateStr = selectedDate.toISOString().split('T')[0];
-      const data = await getAttendanceHistory(user.id, 'All');
-      
-      // Filter by selected date
-      const filtered = data.filter(session => {
-        const sessionDate = new Date(session.date);
-        return isSameDay(sessionDate, selectedDate);
-      });
-      
-      setSessions(filtered);
+      let historySessions: AttendanceSession[] = [];
+
+      // OFFLINE FALLBACK: Use cached data if offline
+      if (connectionStatus !== 'online') {
+        console.log('[HistoryScreen] Offline mode - loading from cache');
+        const cached = await getCachedHistory();
+        if (cached && cached.length > 0) {
+          // Convert cached format to AttendanceSession format
+          const converted: AttendanceSession[] = cached.map(c => ({
+            id: c.id,
+            date: c.date,
+            slot_id: c.slot_id,
+            subject: { name: c.subject_name, code: '' },
+            target_dept: '',
+            target_section: c.section,
+            target_year: 0,
+            present_count: c.present_count,
+            absent_count: c.absent_count,
+            total_students: c.total_students,
+          }));
+          // Filter by selected date
+          historySessions = converted.filter(session => {
+            const sessionDate = new Date(session.date);
+            return isSameDay(sessionDate, selectedDate);
+          });
+          setIsOfflineData(true);
+        }
+      } else {
+        // ONLINE: Fetch from Supabase
+        setIsOfflineData(false);
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+           const data = await getAttendanceHistory(user.id, 'All');
+
+           // Cache for offline use
+           const cacheData = data.map(s => ({
+             id: s.id,
+             date: s.date,
+             slot_id: s.slot_id || '',
+             subject_name: s.subject?.name || '',
+             section: s.target_section || '',
+             present_count: s.present_count,
+             absent_count: s.absent_count,
+             total_students: s.total_students,
+             created_at: new Date().toISOString(),
+           }));
+           await cacheHistory(cacheData);
+
+           // Filter by selected date
+           historySessions = data.filter(session => {
+             const sessionDate = new Date(session.date);
+             return isSameDay(sessionDate, selectedDate);
+           });
+        }
+      }
+
+      // Merge: Pending first, then History
+      setSessions([...pendingSessions, ...historySessions]);
+
     } catch (error) {
       console.error('Error loading history:', error);
     } finally {
       setLoading(false);
     }
-  }, [selectedDate]);
+  }, [selectedDate, connectionStatus]);
 
   useEffect(() => {
     loadHistory();
@@ -182,17 +257,53 @@ export const HistoryScreen: React.FC = () => {
     setRefreshing(false);
   }, [loadHistory]);
 
+  const handleShareSession = async (session: AttendanceSession) => {
+    try {
+      const message = `Attendance Report\nDate: ${new Date(session.date).toLocaleDateString()}\nClass: ${session.target_dept}-${session.target_year}${session.target_section}\nPresent: ${session.present_count}\nAbsent: ${session.absent_count}`;
+      await Share.share({ message });
+    } catch (error) {
+      console.error('Error sharing:', error);
+    }
+  };
+
+  const handleDeletePending = async (sessionId: string) => {
+    // Session ID for pending starts with 'pending-'
+    const submissionId = sessionId.replace('pending-', '');
+    Alert.alert(
+        "Discard Offline Record?",
+        "This will permanently delete this unsynced attendance record.",
+        [
+            { text: "Cancel", style: "cancel" },
+            {
+                text: "Delete",
+                style: "destructive",
+                onPress: async () => {
+                    await removePendingSubmission(submissionId);
+                    loadHistory();
+                }
+            }
+        ]
+    );
+  };
+
+  const handleRetrySync = async () => {
+    setRefreshing(true);
+    await syncPendingSubmissions();
+    await loadHistory();
+    setRefreshing(false);
+  };
+
   // Generate WhatsApp report
   const generateWhatsAppReport = (session: AttendanceSession) => {
-    const dateStr = new Date(session.date).toLocaleDateString('en-GB', { 
-      day: '2-digit', month: 'short' 
+    const dateStr = new Date(session.date).toLocaleDateString('en-GB', {
+      day: '2-digit', month: 'short'
     });
-    
+
     const report = `${dateStr} | ${session.subject?.name || 'Class'}\n` +
       `${session.target_dept}-${session.target_year}-${session.target_section}\n` +
       `✅ Present: ${session.present_count}/${session.total_students}\n` +
       `❌ Absent: ${session.absent_count}`;
-    
+
     Share.share({
       message: report,
       title: `Attendance Report`,
@@ -452,6 +563,7 @@ export const HistoryScreen: React.FC = () => {
     const isUserSubstitute = sessionAny.isUserSubstitute;
     const substituteFacultyName = sessionAny.substituteFacultyName;
     const originalFacultyName = sessionAny.originalFacultyName;
+    const isOfflinePending = sessionAny.isOfflinePending;
 
     return (
       <TouchableOpacity
@@ -506,11 +618,24 @@ export const HistoryScreen: React.FC = () => {
                 </View>
               )}
             </View>
-            <Ionicons 
-              name="cloud-done" 
-              size={16} 
-              color={colors.success} 
-            />
+            {isOfflinePending ? (
+               <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(245, 158, 11, 0.15)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, gap: 8 }}>
+                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Ionicons name="cloud-upload" size={14} color={colors.warning} />
+                    <Text style={{ marginLeft: 4, color: colors.warning, fontSize: 10, fontWeight: '700' }}>PENDING</Text>
+                 </View>
+                 {/* Quick Actions for Pending */}
+                 <TouchableOpacity onPress={() => handleDeletePending(session.id)} style={{ padding: 2 }}>
+                    <Ionicons name="trash-outline" size={16} color={colors.danger} />
+                 </TouchableOpacity>
+               </View>
+            ) : (
+              <Ionicons 
+                name="cloud-done" 
+                size={16} 
+                color={colors.success} 
+              />
+            )}
           </View>
 
           {/* Stats Grid */}
@@ -557,7 +682,7 @@ export const HistoryScreen: React.FC = () => {
                   </TouchableOpacity>
                 ) : (
                   <View style={[styles.actionBtn, { backgroundColor: colors.buttonBg, opacity: 0.5 }]}>
-                    <Ionicons name="lock-closed-outline" size={14} color={colors.textMuted} />
+                    <Ionicons name={isOfflinePending ? "cloud-upload-outline" : "lock-closed-outline"} size={14} color={colors.textMuted} />
                   </View>
                 )}
               </View>

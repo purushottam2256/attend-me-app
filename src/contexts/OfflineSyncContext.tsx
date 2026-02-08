@@ -16,6 +16,7 @@ import {
   getSyncStatus,
   getPendingCount,
   type SyncStatus,
+  syncRosters as syncRostersService,
 } from '../services/offlineService';
 import { getTodaySchedule } from '../services/dashboardService';
 import { supabase } from '../config/supabase';
@@ -67,7 +68,10 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
     }
   }, [justCameOnline, syncStatus.pendingCount]);
 
-  // Sync rosters (call in morning)
+  // Auto-sync rosters on launch (once per session)
+
+
+  // Sync rosters (Smart Sync)
   const syncRosters = useCallback(async () => {
     if (!isOnline) {
       setLastError('No internet connection');
@@ -78,28 +82,17 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
     setLastError(null);
 
     try {
-      // Get current user's schedule
+      // Get current user
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         throw new Error('Not authenticated');
       }
 
-      // Fetch today's schedule
-      const schedule = await getTodaySchedule(user.id);
-      
-      // Cache all rosters - map to correct format
-      const mappedSchedule = schedule.map(slot => ({
-        slot_id: typeof slot.slot_id === 'string' ? parseInt(slot.slot_id) : slot.slot_id,
-        subject: slot.subject,
-        target_dept: slot.target_dept || 'CSE',
-        target_year: slot.target_year || 3,
-        target_section: slot.target_section || 'A',
-      }));
-      
-      const result = await cacheAllRosters(mappedSchedule);
+      // Use Smart Sync Service
+      const result = await syncRostersService(user.id);
       
       if (!result.success) {
-        setLastError(result.error || 'Failed to cache rosters');
+        setLastError(result.error || 'Failed to sync rosters');
       }
       
       await refreshStatus();
@@ -112,6 +105,16 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
       setIsSyncing(false);
     }
   }, [isOnline, refreshStatus]);
+
+  // Auto-sync rosters on launch (once per session)
+  const [hasInitialSynced, setHasInitialSynced] = useState(false);
+  useEffect(() => {
+    if (isOnline && !hasInitialSynced) {
+      console.log('[OfflineSync] Triggering initial Smart Roster Sync');
+      syncRosters();
+      setHasInitialSynced(true);
+    }
+  }, [isOnline, hasInitialSynced, syncRosters]);
 
   // Sync pending submissions
   const syncPending = useCallback(async () => {

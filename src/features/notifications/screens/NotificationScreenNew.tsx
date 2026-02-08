@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, SectionList, RefreshControl, TouchableOpacity, 
   LayoutAnimation, Platform, UIManager, ScrollView, Alert, Animated, Dimensions 
 } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,7 +15,7 @@ import { SubstituteRequestCard } from '../components/SubstituteRequestCard';
 import { NotificationDetailModal } from '../components/NotificationDetailModal';
 import { ConfirmationModal } from '../../../components/ConfirmationModal';
 import { ZenToast } from '../../../components/ZenToast';
-import { formatDistanceToNow, isToday, isYesterday } from 'date-fns';
+import { formatDistanceToNow, isToday, isYesterday, format } from 'date-fns';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -61,12 +61,30 @@ const ListItem = React.memo(({
       );
     }
     return (
-      <SubstituteRequestCard
-        request={item.data}
-        type={item.type === 'swap' ? 'swap' : 'substitution'}
-        onAccept={() => onAction(item.id, 'accept')}
-        onDecline={() => onAction(item.id, 'decline')}
-      />
+      <Swipeable
+        renderRightActions={(_progress, _dragX) => (
+          <View style={{ width: 80, justifyContent: 'center', alignItems: 'center', marginBottom: 12 }}>
+            <TouchableOpacity 
+              style={{
+                width: 60, height: 60, borderRadius: 30, backgroundColor: '#EF4444', 
+                justifyContent: 'center', alignItems: 'center',
+                shadowColor: '#EF4444', shadowOpacity: 0.3, shadowRadius: 5
+              }}
+              onPress={() => onAction(item.id, 'delete')}
+            >
+              <Ionicons name="trash-outline" size={24} color="#FFF" />
+            </TouchableOpacity>
+          </View>
+        )}
+        overshootRight={false}
+      >
+        <SubstituteRequestCard
+          request={item.data}
+          type={item.type === 'swap' ? 'swap' : 'substitution'}
+          onAccept={() => onAction(item.id, 'accept')}
+          onDecline={() => onAction(item.id, 'decline')}
+        />
+      </Swipeable>
     );
   }
 
@@ -87,14 +105,6 @@ const ListItem = React.memo(({
       }}
       onDelete={() => onAction(item.id, 'delete')}
     />
-  );
-}, (prev, next) => {
-  // Simplified comparison - forces re-render when selection changes
-  return (
-    prev.isSelected === next.isSelected && 
-    prev.selectionMode === next.selectionMode &&
-    prev.item.id === next.item.id &&
-    prev.isDark === next.isDark
   );
 });
 
@@ -402,7 +412,10 @@ export const NotificationScreen = ({ navigation }: any) => {
     await refreshNotifications();
   };
 
-  const handleRequestAction = async (id: string, action: 'accept' | 'decline' | 'delete') => {
+  const handleRequestAction = async (id: string, action: 'accept' | 'decline' | 'delete' | 'view') => {
+    // Ignore view for now (cards show full details)
+    if (action === 'view') return;
+
     // Handle single item delete (swipe-to-delete)
     if (action === 'delete') {
       const notification = notifications.find(n => n.id === id);
@@ -530,7 +543,8 @@ export const NotificationScreen = ({ navigation }: any) => {
         type: 'request',
         status: req.status,
         title: req.original_faculty?.full_name ? `${req.original_faculty.full_name}` : 'Substitute Request',
-        body: `Cover ${req.slot_id?.split('_')[1] || 'class'} • ${req.target_dept || ''}-${req.target_year || ''}-${req.target_section || ''}`,
+        // Professional Message
+        body: `${req.original_faculty?.full_name || 'Faculty'} requests you to cover ${req.subject?.code || 'their class'}.`,
         timestamp: req.requested_at || req.created_at || new Date().toISOString(),
         isRead: req.status !== 'pending',
         data: req,
@@ -543,16 +557,18 @@ export const NotificationScreen = ({ navigation }: any) => {
         type: 'swap',
         status: s.status,
         title: s.faculty_a?.full_name || 'Swap Request',
-        body: `${s.slot_a_id?.split('_')[1] || 'slot'} ↔ ${s.slot_b_id?.split('_')[1] || 'slot'}`,
+        // Professional Message
+        body: `${s.faculty_a?.full_name || 'Faculty'} requests a class swap for ${s.slot_a_id?.split('_')[1] || 'Slot A'}.`,
         timestamp: s.requested_at || s.created_at || new Date().toISOString(),
         isRead: s.status !== 'pending',
         data: s,
       }));
 
-    const notifItems = (notifications || []).map(n => ({
+    const notifItems = (notifications || [])
+      .filter(n => n.type !== 'substitute_request' && n.type !== 'swap_request') // Remove duplicates that are already in 'requests'/'swaps'
+      .map(n => ({
       id: n.id,
-      type: n.type === 'substitute_request' || n.type === 'swap_request' ? 'request' : 
-            n.type === 'class_reminder' ? 'alert' : 'info',
+      type: n.type === 'class_reminder' ? 'alert' : 'info',
       status: n.data?.status || null,
       title: n.title,
       body: n.body,
@@ -577,26 +593,48 @@ export const NotificationScreen = ({ navigation }: any) => {
     // Sort by timestamp
     allItems.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
-    // Group by date
-    const today: any[] = [];
-    const yesterday: any[] = [];
-    const earlier: any[] = [];
+    // Group by Date - Enhanced
+    const groups: { [key: string]: any[] } = {};
 
     allItems.forEach(item => {
       const date = safeDate(item.timestamp);
+      let key = 'Earlier';
+      
       if (isToday(date)) {
-        today.push(item);
+        key = 'Today';
       } else if (isYesterday(date)) {
-        yesterday.push(item);
+        key = 'Yesterday';
       } else {
-        earlier.push(item);
+        key = format(date, 'MMM d, yyyy');
       }
+
+      if (!groups[key]) {
+        groups[key] = [];
+      }
+      groups[key].push(item);
     });
 
-    const result = [];
-    if (today.length > 0) result.push({ title: 'Today', data: today });
-    if (yesterday.length > 0) result.push({ title: 'Yesterday', data: yesterday });
-    if (earlier.length > 0) result.push({ title: 'Earlier', data: earlier });
+    const result = Object.keys(groups).map(key => ({
+      title: key,
+      data: groups[key]
+    }));
+
+    // Sort sections: Today, Yesterday, then date descending
+    result.sort((a, b) => {
+      if (a.title === 'Today') return -1;
+      if (b.title === 'Today') return 1;
+      if (a.title === 'Yesterday') return -1;
+      if (b.title === 'Yesterday') return 1;
+      
+      // Parse dates for sorting other keys
+      const dateA = new Date(a.title); // 'MMM d, yyyy' works with Date constructor usually
+      const dateB = new Date(b.title);
+      
+      // Fallback for sorting if date parsing fails (though unlikely with format)
+      if (isNaN(dateA.getTime()) || isNaN(dateB.getTime())) return 0;
+
+      return dateB.getTime() - dateA.getTime();
+    });
 
     return result;
   }, [notifications, requests, swaps, activeFilter]);
@@ -677,7 +715,7 @@ export const NotificationScreen = ({ navigation }: any) => {
   );
 
   return (
-    <View style={[styles.container, { backgroundColor: isDark ? '#0A0F0F' : '#F5F5F5' }]}>
+    <GestureHandlerRootView style={[styles.container, { backgroundColor: isDark ? '#0A0F0F' : '#F5F5F5' }]}>
       {/* Teal Gradient Header - Matching History Screen */}
       <LinearGradient
         colors={['#0D4A4A', '#1A6B6B', '#0F3D3D']}
@@ -724,12 +762,6 @@ export const NotificationScreen = ({ navigation }: any) => {
                 >
                   <Ionicons name="checkmark-done" size={22} color="#FFFFFF" />
                 </TouchableOpacity>
-                <TouchableOpacity 
-                  onPress={deleteSelected} 
-                  style={[styles.headerBtn, { backgroundColor: 'rgba(239, 68, 68, 0.25)' }]}
-                >
-                  <Ionicons name="trash-outline" size={22} color="#FFFFFF" />
-                </TouchableOpacity>
               </>
             ) : (
               <>
@@ -738,12 +770,6 @@ export const NotificationScreen = ({ navigation }: any) => {
                   style={styles.headerBtn}
                 >
                   <Ionicons name="checkmark-done" size={22} color="#FFFFFF" />
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  onPress={toggleSelectionMode} 
-                  style={styles.headerBtn}
-                >
-                  <Ionicons name="trash-outline" size={22} color="#FFFFFF" />
                 </TouchableOpacity>
               </>
             )}
@@ -763,6 +789,15 @@ export const NotificationScreen = ({ navigation }: any) => {
           <FilterPill id="events" label="Reminders" count={counts.events} />
           <FilterPill id="system" label="System" count={counts.system} />
         </ScrollView>
+        <Text style={{ 
+          textAlign: 'center', 
+          color: 'rgba(255,255,255,0.6)', 
+          fontSize: 10, 
+          marginTop: 8,
+          marginBottom: 4 
+        }}>
+         -- Swipe left to delete.
+        </Text>
       </LinearGradient>
 
       {/* Content */}
@@ -803,6 +838,8 @@ export const NotificationScreen = ({ navigation }: any) => {
         }
         showsVerticalScrollIndicator={false}
       />
+
+
 
       {/* Toast */}
       <ZenToast
@@ -871,7 +908,7 @@ export const NotificationScreen = ({ navigation }: any) => {
           </TouchableOpacity>
         </View>
       )}
-    </View>
+    </GestureHandlerRootView>
   );
 };
 

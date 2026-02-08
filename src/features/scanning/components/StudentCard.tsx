@@ -56,6 +56,9 @@ export const StudentCard: React.FC<StudentCardProps> = ({
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_, gestureState) => {
+        // LOCK: Disable swipe for OD/Leave
+        if (status === 'od' || status === 'leave') return false;
+
         const isHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 2;
         return isHorizontal && Math.abs(gestureState.dx) > 12;
       },
@@ -131,7 +134,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({
   // Text colors
   const textColors = {
     name: isDark ? '#FFFFFF' : '#1C1C1E',
-    rollNo: isDark ? 'rgba(255,255,255,0.5)' : '#8E8E93',
+    rollNo: status === 'od' ? '#A855F7' : (isDark ? 'rgba(255,255,255,0.5)' : '#8E8E93'),
   };
 
   // Background reveal
@@ -148,6 +151,12 @@ export const StudentCard: React.FC<StudentCardProps> = ({
   });
 
   const handleTap = () => {
+    // LOCK: Disable tap for OD/Leave
+    if (status === 'od' || status === 'leave') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      return; 
+    }
+
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (status === 'pending') onStatusChange('present');
     else if (status === 'present') onStatusChange('absent');

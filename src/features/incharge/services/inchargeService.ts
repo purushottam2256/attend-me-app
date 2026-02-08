@@ -40,6 +40,11 @@ export interface PeriodAttendance {
   percentage: number;
 }
 
+export interface WatchlistStudent extends StudentAggregate {
+  student_mobile?: string;
+  parent_mobile?: string;
+}
+
 export interface Permission {
   id: string;
   student_id: string;
@@ -98,7 +103,22 @@ export const getWatchlist = async (
     throw error;
   }
 
-  return data || [];
+  // Enrich with mobile numbers from students table
+  const studentsWithMobile = await Promise.all((data || []).map(async (student: any) => {
+     const { data: profile } = await supabase
+        .from('students')
+        .select('mobile, parent_mobile')
+        .eq('id', student.student_id)
+        .single();
+     
+     return {
+        ...student,
+        student_mobile: profile?.mobile,
+        parent_mobile: profile?.parent_mobile
+     };
+  }));
+
+  return studentsWithMobile;
 };
 
 // Get assigned class for a faculty
@@ -172,6 +192,42 @@ export const getKeyPeriodAttendance = async (
         : 0,
     } : null,
   };
+};
+
+// Get all period attendance for today
+export const getAllPeriodAttendance = async (
+  dept: string,
+  year: number,
+  section: string
+): Promise<PeriodAttendance[]> => {
+  const today = getLocalDate();
+  
+  const { data, error } = await supabase
+    .from('attendance_sessions')
+    .select(`
+      slot_id,
+      present_count,
+      total_students
+    `)
+    .eq('target_dept', dept)
+    .eq('target_year', year)
+    .eq('target_section', section)
+    .eq('date', today)
+    .order('slot_id');
+
+  if (error) {
+    console.error('[InchargeService] Error fetching all period attendance:', error);
+    return [];
+  }
+
+  return (data || []).map(s => ({
+    slot_id: s.slot_id, // Normalize later if needed
+    present_count: s.present_count || 0,
+    total_count: s.total_students || 0,
+    percentage: s.total_students > 0 
+      ? Math.round((s.present_count / s.total_students) * 100) 
+      : 0,
+  }));
 };
 
 // Get weekly attendance trend
@@ -459,6 +515,7 @@ export default {
   getClassStudents,
   getWatchlist,
   getKeyPeriodAttendance,
+  getAllPeriodAttendance,
   checkPermissionOverlap,
   addPermission,
   getStudentByRollNo,

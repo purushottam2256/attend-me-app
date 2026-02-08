@@ -61,6 +61,13 @@ export const DigitalIdCard: React.FC<DigitalIdCardProps> = ({
     ? "rgba(255,255,255,0.3)" 
     : "rgba(0,0,0,0.2)";
 
+  const [imageError, setImageError] = React.useState(false);
+  
+  // Reset error if url changes
+  React.useEffect(() => {
+      setImageError(false);
+  }, [user.photoUrl]);
+
   return (
     <View style={styles.container}>
       {/* Glow Effect */}
@@ -154,13 +161,17 @@ export const DigitalIdCard: React.FC<DigitalIdCardProps> = ({
               </LinearGradient>
 
               {/* Overlay Image if available */}
-              {user.photoUrl && (
+              {user.photoUrl && !imageError ? (
                 <Image
                   source={{ uri: user.photoUrl }}
                   style={[StyleSheet.absoluteFill, styles.photoImage]}
                   resizeMode="cover"
+                  onError={(e) => {
+                      console.log('Image load error:', e.nativeEvent.error);
+                      setImageError(true);
+                  }}
                 />
-              )}
+              ) : null}
             </View>
 
             {/* Right: Details */}

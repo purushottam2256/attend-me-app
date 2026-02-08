@@ -320,6 +320,18 @@ export const NotificationService = {
     const triggerDate = new Date(startTime);
     triggerDate.setMinutes(triggerDate.getMinutes() - 10);
 
+    // If we are within the 10-minute window (trigger passed but class hasn't started)
+    const now = new Date();
+    if (triggerDate.getTime() < now.getTime() && startTime.getTime() > now.getTime()) {
+      const minutesLeft = Math.ceil((startTime.getTime() - now.getTime()) / 60000);
+      return this.showLocalNotification({
+        title: `📚 Upcoming: ${subjectName}`,
+        body: `${classDetails} starts in ${minutesLeft} min`,
+        data: { type: 'CLASS_REMINDER' },
+        categoryId: 'REMINDER',
+      });
+    }
+
     return this.scheduleNotification({
       title: `📚 Upcoming: ${subjectName}`,
       body: `${classDetails} starts in 10 minutes`,
@@ -362,7 +374,9 @@ export const NotificationService = {
     recipientToken: string,
     title: string,
     body: string,
-    data?: Record<string, any>
+    data?: Record<string, any>,
+    categoryId?: string, // Added parameter
+    imageUrl?: string // Added parameter for image
   ): Promise<boolean> {
     if (!recipientToken) {
       console.log('[NotificationService] No recipient token provided');
@@ -377,11 +391,30 @@ export const NotificationService = {
           title,
           body,
           data: data || {},
+          categoryId, // Pass to backend
+          imageUrl, // Pass image URL
         },
       });
 
       if (error) {
-        console.error('[NotificationService] Edge function error:', error.message);
+        console.warn('[NotificationService] Push failed (Backend):', error.message);
+        
+        // Try to extract the backend error message from the response context
+        if (error.context && typeof error.context.json === 'function') {
+           try {
+             const errorBody = await error.context.json();
+             console.warn('👇 BACKEND ERROR RESPONSE 👇');
+             console.warn(JSON.stringify(errorBody, null, 2));
+             if (errorBody && errorBody.error && errorBody.error.includes("secret")) {
+                 console.warn("💡 HINT: Your Supabase secret might be missing or invalid.");
+             }
+           } catch (readError) {
+             console.warn('Could not read error body:', readError);
+           }
+        } else {
+             console.warn('Full Error Object:', JSON.stringify(error, null, 2));
+        }
+        
         return false;
       }
 

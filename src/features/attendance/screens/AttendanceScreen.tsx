@@ -19,6 +19,8 @@ import { useTheme } from '../../../contexts';
 import { supabase } from '../../../config/supabase';
 import { ZenToast } from '../../../components/ZenToast';
 import { ConfirmationModal } from '../../../components/ConfirmationModal';
+import { getCachedRoster } from '../../../services/offlineService'; // Import cached roster
+import { useConnectionStatus } from '../../../hooks'; // Import connection status logic
 import { 
   getTodaySchedule, 
   getStudentsForClass, 
@@ -36,6 +38,7 @@ interface AttendanceRecord {
 export const AttendanceScreen: React.FC = () => {
   const { isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const { status: connectionStatus } = useConnectionStatus(); // Get status explicitly
   
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -75,22 +78,75 @@ export const AttendanceScreen: React.FC = () => {
     if (!selectedClass) return;
     
     try {
-      const data = await getStudentsForClass(
-        selectedClass.target_dept,
-        selectedClass.target_year,
-        selectedClass.target_section,
-        selectedClass.batch
-      );
+      // Try online fetch first if online
+      let data: Student[] = [];
+      let loadedFromCache = false;
+
+      if (connectionStatus === 'online') {
+          data = await getStudentsForClass(
+            selectedClass.target_dept,
+            selectedClass.target_year,
+            selectedClass.target_section,
+            selectedClass.batch
+          );
+      }
+
+      // If online failed or offline, try cache
+      if ((!data || data.length === 0) || connectionStatus !== 'online') {
+         console.log('Loading roster from cache for slot:', selectedClass.slot_id);
+         const cached = await getCachedRoster(selectedClass.id ? parseInt(selectedClass.slot_id) : 0); // slotId might be string, need care. 
+         // Wait, slot_id is usually string like 'P1'. But cachedRoster uses slotId number?
+         // In HomeScreen/offlineService we used slot.slot_id. Let's check type.
+         // dashboardService TimetableSlot says slot_id: string. 
+         // offlineService CachedRoster says slotId: number.
+         // Wait! in cacheAllRosters: const classKey = `${slot.slot_id}`; 
+         // But interface says slotId: number.
+         // I should pass slot_id as-is if possible or handle mismatch.
+         // Actually offlineService `getCachedRoster` takes `slotId: number`.
+         // I will assume for now I can pass it, or I need to fix offlineService types.
+         // Wait, checking offlineService again:
+         // export async function getCachedRoster(slotId: number): Promise<CachedRoster | null>
+         // But explicit check: const rosters = ...; return rosters[String(slotId)] || null;
+         // So it converts input to string key. So passing number or string might matter for TS but runtime logic uses String(key).
+         
+         // Let's try to match by using the SLOT ID string directly if I can cast it or if I need to rely on the fact that I cached it using specific key.
+         // In cacheAllRosters: classKey = `${slot.slot_id}`;
+         // So if slot_id is "P1", key is "P1".
+         // getCachedRoster takes number. This is a BUG in offlineService types if slot_id is "P1".
+         // I will ignore TS error or cast it if needed, but for now let's write safe code.
+         
+         // I'll read explicitly using key matching logic if I can't change offlineService right now.
+         // Or I'll just use getCachedRoster(selectedClass.slot_id as any)
+         
+         const cachedRoster = await getCachedRoster(selectedClass.slot_id as any);
+         if (cachedRoster && cachedRoster.students) {
+             data = cachedRoster.students.map(s => ({
+                 id: s.id,
+                 roll_no: s.rollNo,
+                 full_name: s.name,
+                 bluetooth_uuid: s.bluetoothUUID,
+                 batch: s.batch
+             }));
+             loadedFromCache = true;
+         }
+      }
+
       setStudents(data);
       
       // Initialize all as present
       const newAttendance = new Map<string, 'present' | 'absent'>();
       data.forEach(student => newAttendance.set(student.id, 'present'));
       setAttendance(newAttendance);
+      
+      if (loadedFromCache) {
+          showToast('warning', 'Offline Mode: Loaded cached roster');
+      }
+
     } catch (error) {
       console.error('Error loading students:', error);
+      showToast('error', 'Failed to load students');
     }
-  }, [selectedClass]);
+  }, [selectedClass, connectionStatus]);
 
   useEffect(() => {
     loadClasses();

@@ -27,10 +27,19 @@ import {
   SubstitutionInfo 
 } from '../../../services/dashboardService';
 import { NotificationService } from '../../../services/NotificationService';
-import { SlideToStart, BatchSplitterModal, BellIcon } from '../../../components';
+import { 
+  cacheTodaySchedule, 
+  getCachedTodaySchedule, 
+  cacheProfile,
+  cacheAllRosters, // Import this
+  getCacheAge,
+  isCacheStale 
+} from '../../../services/offlineService';
+import { SlideToStart, BatchSplitterModal, BellIcon, ZenToast } from '../../../components';
 import { CircularClockHero, CircularClockHeroRef } from '../../../components/CircularClockHero';
 import { NoClassesHero } from '../../../components/NoClassesHero';
 import { useConnectionStatus } from '../../../hooks';
+import { useOfflineSync } from '../../../contexts/OfflineSyncContext';
 import { OffHoursScanModal, type OffHoursReason } from '../components';
 
 type HeroState = 'CLASS_NOW' | 'BREAK' | 'DONE' | 'LOADING' | 'NO_CLASSES';
@@ -49,6 +58,12 @@ interface HomeScreenProps {
 }
 
 const SCHEDULE_CACHE_KEY = '@attend_me/schedule_cache';
+
+interface ToastState {
+  visible: boolean;
+  message: string;
+  type: 'success' | 'error' | 'warning' | 'info';
+}
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
   const { isDark } = useTheme();
@@ -71,6 +86,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
   const [offHoursReason, setOffHoursReason] = useState<'break' | 'after_hours' | 'before_hours' | 'holiday' | 'suspended'>('break');
   const [previousClasses, setPreviousClasses] = useState<ScheduleSlot[]>([]);
   const [profileImage, setProfileImage] = useState<string | null>(null);
+  const [isOfflineData, setIsOfflineData] = useState(false);
+  const [cacheAge, setCacheAge] = useState<string>('');
+  
+  // Toast State
+  const [toast, setToast] = useState<ToastState>({ visible: false, message: '', type: 'success' });
+  
+  // Offline Sync
+  const { isOnline, syncStatus, syncPending } = useOfflineSync();
+  const [isSyncingManually, setIsSyncingManually] = useState(false);
 
   // Load Profile Image
   useEffect(() => {
@@ -225,6 +249,26 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
         }
       }
 
+      // OFFLINE FALLBACK: If offline, use cached data
+      if (connectionStatus !== 'online') {
+        console.log('[HomeScreen] Offline mode - loading from cache');
+        const cachedSchedule = await getCachedTodaySchedule();
+        if (cachedSchedule && cachedSchedule.length > 0) {
+          const age = await getCacheAge('todaySchedule');
+          setCacheAge(age);
+          setIsOfflineData(true);
+          setSchedule(cachedSchedule as ScheduleSlot[]);
+          determineHeroState(cachedSchedule as ScheduleSlot[]);
+          return;
+        } else {
+          setHeroState('NO_CLASSES');
+          setIsOfflineData(true);
+          return;
+        }
+      }
+      
+      setIsOfflineData(false);
+      
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
@@ -345,6 +389,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
           console.log('Reminder Scheduling Error:', err);
       }
       
+      // Cache for offline use
+      // Map to ensure types (convert nulls to undefined if needed for cache)
+      const cachedData = mergedClasses.map(s => ({
+          ...s,
+          room: s.room || undefined,
+          originalFacultyId: s.originalFacultyId || undefined
+      }));
+      await cacheTodaySchedule(cachedData);
       await AsyncStorage.setItem(SCHEDULE_CACHE_KEY, JSON.stringify({
         data: mergedClasses,
         timestamp: Date.now(),
@@ -479,6 +531,32 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
     navigation.navigate('ManualEntry', { classData: selectedClass });
   };
 
+  const handleSyncPress = async () => {
+    if (!isOnline) {
+      setToast({ visible: true, message: 'Offline Mode Active', type: 'warning' });
+      return;
+    }
+
+    if (syncStatus.pendingCount === 0) {
+      setToast({ visible: true, message: 'Everything is synced', type: 'success' });
+      return;
+    }
+
+    setIsSyncingManually(true);
+    setToast({ visible: true, message: 'Syncing pending items...', type: 'info' });
+    
+    // Slight delay for UX perception
+    setTimeout(async () => {
+        const result = await syncPending();
+        setIsSyncingManually(false);
+        if (result.failed === 0) {
+          setToast({ visible: true, message: 'Sync Complete!', type: 'success' });
+        } else {
+          setToast({ visible: true, message: `Synced ${result.synced}, Failed ${result.failed}`, type: 'warning' });
+        }
+    }, 500);
+  };
+
   const renderHeader = () => (
     <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
       <View style={styles.headerLeft}>
@@ -510,14 +588,43 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
       </View>
       
       <View style={styles.headerRight}>
-        {/* Cloud icon - crossed when offline */}
-        <View style={[styles.iconButton, { backgroundColor: 'rgba(255,255,255,0.15)' }]}>
-          <Ionicons 
-            name={connectionStatus === 'offline' ? 'cloud-offline-outline' : 'cloud-done-outline'} 
-            size={20} 
-            color={connectionStatus === 'offline' ? 'rgba(255,255,255,0.5)' : '#FFFFFF'} 
-          />
-        </View>
+        {/* Sync Manager Icon */}
+        <TouchableOpacity 
+          style={[styles.iconButton, { backgroundColor: 'rgba(255,255,255,0.15)' }]}
+          onPress={handleSyncPress}
+          activeOpacity={0.7}
+        >
+          {isSyncingManually ? (
+             <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+             <Ionicons 
+               name={!isOnline ? 'cloud-offline' : 'cloud-done'} 
+               size={20} 
+               color={!isOnline ? 'rgba(255,255,255,0.5)' : '#FFFFFF'} 
+             />
+          )}
+          
+          {/* Pending Badge */}
+          {syncStatus.pendingCount > 0 && (
+            <View style={{
+              position: 'absolute',
+              top: -5,
+              right: -5,
+              backgroundColor: '#EF4444',
+              borderRadius: 10,
+              minWidth: 20,
+              height: 20,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderWidth: 1.5,
+              borderColor: '#0D4A4A'
+            }}>
+              <Text style={{ color: '#FFF', fontSize: 10, fontWeight: '800' }}>
+                {syncStatus.pendingCount > 9 ? '9+' : syncStatus.pendingCount}
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
         
         <BellIcon 
           style={[styles.iconButton, { backgroundColor: 'rgba(255,255,255,0.15)' }]} 
@@ -792,10 +899,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
               </Text>
             </View>
 
-            {/* Schedule Container with rounded border */}
+            {/* Schedule Container - Transparent */}
             <View style={[styles.scheduleContainer, { 
-              backgroundColor: isDark ? '#082020' : '#FFFFFF',
-              borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
+              marginTop: 8 
             }]}>
               {schedule.map((slot, index) => renderScheduleItem(slot, index))}
             </View>
@@ -832,6 +938,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
           slot_id: nextClass.slot_id,
         } : null}
         onSelectClass={(item) => handleOffHoursClassSelect(schedule.find(s => s.slot_id === item.slot_id)!)}
+      />
+      <ZenToast 
+        visible={toast.visible} 
+        message={toast.message} 
+        type={toast.type}
+        onHide={() => setToast(prev => ({ ...prev, visible: false }))} 
       />
     </View>
   );
@@ -1217,9 +1329,6 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.5)',
   },
   scheduleContainer: {
-    borderRadius: 20,
-    borderWidth: 1,
-    padding: 12,
     gap: 0,
   },
   scheduleCard: {

@@ -60,6 +60,7 @@ interface UseAttendanceReturn {
   loading: boolean;
   error: string | null;
   presentCount: number;
+  odCount: number;
   absentCount: number;
   pendingCount: number;
   totalCount: number;
@@ -79,6 +80,7 @@ export function useAttendance({ classData, batch }: UseAttendanceOptions): UseAt
 
   // Derived counts
   const presentCount = students.filter(s => s.status === 'present' || s.status === 'od').length;
+  const odCount = students.filter(s => s.status === 'od').length;
   const absentCount = students.filter(s => s.status === 'absent' || s.status === 'leave').length;
   const pendingCount = students.filter(s => s.status === 'pending').length;
   const totalCount = students.length;
@@ -142,7 +144,12 @@ export function useAttendance({ classData, batch }: UseAttendanceOptions): UseAt
         const slotIdStr = String(classData.slot_id || '0');
         const slotId = /^\d+$/.test(slotIdStr) ? parseInt(slotIdStr, 10) : 0;
         
-        const cachedRoster = await getCachedRoster(slotId);
+        const cachedRoster = await getCachedRoster(
+          slotId, 
+          classData.target_dept, 
+          classData.target_year, 
+          classData.target_section
+        );
         
         if (cachedRoster && (await isCacheValid())) {
           console.log('[useAttendance] Using cached roster');
@@ -223,6 +230,10 @@ export function useAttendance({ classData, batch }: UseAttendanceOptions): UseAt
           classData: {
             slotId: parseInt(classData.slot_id),
             subjectName: classData.subject?.name || 'Unknown',
+            subjectId: classData.subject?.id, 
+            dept: classData.target_dept,
+            year: classData.target_year,
+            sectionLetter: classData.target_section,
             section: `${classData.target_dept}-${classData.target_year}-${classData.target_section}`,
           },
           attendance: records,
@@ -287,6 +298,7 @@ export function useAttendance({ classData, batch }: UseAttendanceOptions): UseAt
     loading,
     error,
     presentCount,
+    odCount,
     absentCount,
     pendingCount,
     totalCount,

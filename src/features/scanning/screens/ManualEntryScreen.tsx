@@ -106,6 +106,7 @@ export const ManualEntryScreen: React.FC = () => {
     loading,
     updateStudentStatus,
     submitAttendance,
+    isOfflineMode,
   } = useAttendance({ classData, batch: 'full' });
 
   // Filter Logic
@@ -226,6 +227,23 @@ export const ManualEntryScreen: React.FC = () => {
             <Text style={styles.headerSubtitle}>
                 {classData?.target_dept} • {classData?.target_year} • {classData?.target_section}
             </Text>
+            {isOfflineMode && (
+                <View style={{ 
+                    marginTop: 4,
+                    paddingHorizontal: 8, 
+                    paddingVertical: 2, 
+                    backgroundColor: 'rgba(245, 158, 11, 0.2)', 
+                    borderRadius: 4,
+                    borderWidth: 1,
+                    borderColor: '#F59E0B',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4
+                }}>
+                    <Ionicons name="cloud-offline" size={10} color="#F59E0B" />
+                    <Text style={{ color: '#F59E0B', fontSize: 10, fontWeight: '700' }}>OFFLINE MODE</Text>
+                </View>
+            )}
         </View>
 
         {/* Filter Button (Replacing Save) */}

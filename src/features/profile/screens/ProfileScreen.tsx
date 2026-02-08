@@ -12,6 +12,7 @@ import {
   Platform,
   Vibration,
   Image,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,6 +22,7 @@ import { DigitalIdCard } from '../components/DigitalIdCard';
 import { SlideToLogout } from '../components/SlideToLogout';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
+import { safeHaptic } from '../../../utils/haptics';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useNavigation } from '@react-navigation/native';
@@ -28,6 +30,9 @@ import { ZenToast } from '../../../components/ZenToast';
 import { EditProfileModal } from '../components/EditProfileModal';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Colors } from '../../../constants';
+import { cacheProfile, getCachedProfile, cacheTimetable, getCachedTimetable } from '../../../services/offlineService';
+import { useConnectionStatus } from '../../../hooks';
+import { NotificationService } from '../../../services/NotificationService';
 
 interface ProfileScreenProps {
   userName: string;
@@ -68,6 +73,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
   const [userRole, setUserRole] = useState('');
   const [displayName, setDisplayName] = useState(userName);
   const [profileImage, setProfileImage] = useState<string | null>(null);
+  const [isOfflineData, setIsOfflineData] = useState(false);
+  
+  const { status: connectionStatus } = useConnectionStatus();
 
   // -- Modals --
   const [editProfileVisible, setEditProfileVisible] = useState(false);
@@ -76,6 +84,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
   const [leaveModalVisible, setLeaveModalVisible] = useState(false);
   const [scheduleModalVisible, setScheduleModalVisible] = useState(false);
   const [helpModalVisible, setHelpModalVisible] = useState(false);
+  const [helpTopic, setHelpTopic] = useState<string | null>(null); // Navigation state definition
   const [reportModalVisible, setReportModalVisible] = useState(false);
 
   // -- Toast State --
@@ -113,7 +122,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
     loadUserData();
     loadSettings();
     loadHolidays();
-  }, []);
+  }, [connectionStatus]);
 
   const loadHolidays = async () => {
       try {
@@ -156,23 +165,40 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
 
   const loadUserData = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        setUserEmail(user.email || '');
-        const { data: profile } = await supabase
-            .from('profiles')
-            .select('dept, role, full_name, avatar_url')
-            .eq('id', user.id)
-            .single();
-        if (profile) {
-            setUserDept(profile.dept || '');
-            setUserRole(profile.role || 'faculty');
-            if (profile.full_name) {
-                setDisplayName(profile.full_name);
+      if (connectionStatus === 'online') {
+          // Online: Fetch from Supabase
+          try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                setUserEmail(user.email || '');
+                
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('*')
+                    .eq('id', user.id)
+                    .single();
+                
+                if (profile) {
+                    setDisplayName(profile.full_name || '');
+                    setUserDept(profile.department || 'CSM'); 
+                    setUserRole(profile.role || 'faculty');
+                    setProfileImage(profile.avatar_url);
+                    
+                    // We can still cache it for other screens like Home/Notifications,
+                    // but we won't load it for the ID card if offline.
+                    await cacheProfile(profile);
+                }
             }
-            if (profile.avatar_url) setProfileImage(profile.avatar_url);
-        }
+          } catch (e) {
+              console.error('Error loading user data:', e);
+          }
+      } else {
+          // Offline Model Removed as per request
+          // We do not load from cache.
+          // Silently fail or just don't load. User requested "no need to know".
       }
+      // Ensure we treat this as "no offline data loaded"
+      setIsOfflineData(false); 
     } catch (error) { console.error(error); }
   };
 
@@ -189,7 +215,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
   const toggleHaptics = async (val: boolean) => {
       setHapticsEnabled(val);
       await AsyncStorage.setItem('hapticsEnabled', val.toString());
-      if (val) Haptics.selectionAsync();
+      if (val) await safeHaptic(Haptics.ImpactFeedbackStyle.Light);
   };
 
   const toggleNotifications = async (val: boolean) => {
@@ -429,7 +455,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
         showsVerticalScrollIndicator={false}
       >
         <DigitalIdCard 
-            user={{ name: displayName, email: userEmail, dept: userDept, role: userRole, photoUrl: profileImage || undefined }}
+            user={{ 
+                name: displayName || 'Faculty Member', 
+                email: userEmail || 'No Email', 
+                dept: userDept || 'CSM', 
+                role: userRole || 'Faculty', 
+                photoUrl: profileImage || undefined 
+            }}
             onEdit={() => setEditProfileVisible(true)}
         />
 
@@ -443,10 +475,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
         {renderSection('App Settings', [
           { icon: isDark ? 'moon' : 'sunny', label: 'Dark Mode', isToggle: true, toggleValue: isDark, onToggle: () => setTheme(isDark ? 'light' : 'dark'), color: isDark ? '#8B5CF6' : '#F59E0B' },
           { icon: 'notifications', label: 'Push Notifications', isToggle: true, toggleValue: notificationsEnabled, onToggle: toggleNotifications, color: '#EC4899' },
-          { icon: 'flask', label: 'Test Notification', onPress: async () => {
-              await import('../../../services/NotificationService').then(m => m.NotificationService.testLocalNotification());
-              showZenToast('Notification Sent!');
-          }, color: '#3B82F6' },
+
           { icon: 'phone-portrait', label: 'Haptic Feedback', isToggle: true, toggleValue: hapticsEnabled, onToggle: toggleHaptics, color: '#10B981' }
         ])}
 
@@ -741,159 +770,266 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
           </View>
       </Modal>
 
-      {/* --- Help Modal (Full Screen Detailed Guide) --- */}
-      <Modal visible={helpModalVisible} animationType="slide" transparent={false} onRequestClose={() => setHelpModalVisible(false)}>
-          <View style={{ flex: 1, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }}>
-              <LinearGradient
-                  colors={['#0D4A4A', '#1A6B6B', '#0F3D3D']}
-                  style={{ paddingTop: insets.top + 16, paddingBottom: 16, paddingHorizontal: 20 }}
-              >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', gap: 16 }}>
-                       <TouchableOpacity 
-                         style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' }}
-                         onPress={() => setHelpModalVisible(false)}
-                       >
-                         <Ionicons name="chevron-back" size={24} color="#FFF" />
-                       </TouchableOpacity>
-                       <View>
-                           <Text style={{ fontSize: 20, fontWeight: '700', color: '#FFF' }}>Help Center</Text>
-                           <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)' }}>Complete guide to Attend-Me</Text>
-                       </View>
-                  </View>
-              </LinearGradient>
-              
-              <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 60 }}>
-                   
-                   {/* 1. Getting Started */}
-                   <View style={{ marginBottom: 32 }}>
-                       <Text style={{ fontSize: 12, fontWeight: '800', color: '#0F766E', marginBottom: 16, letterSpacing: 1 }}>GETTING STARTED</Text>
-                       <View style={{ backgroundColor: isDark ? '#1E293B' : '#FFF', borderRadius: 16, padding: 20, borderWidth: 1, borderColor: isDark ? '#334155' : '#E2E8F0' }}>
-                           <View style={{ flexDirection: 'row', marginBottom: 16 }}>
-                               <View style={{ width: 32, height: 32, borderRadius: 100, backgroundColor: '#cffafe', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
-                                   <Text style={{ fontWeight: '700', color: '#0F766E' }}>1</Text>
-                               </View>
-                               <View style={{ flex: 1 }}>
-                                   <Text style={{ fontWeight: '700', fontSize: 15, color: isDark ? '#FFF' : '#0F172A', marginBottom: 4 }}>Select Your Class</Text>
-                                   <Text style={{ fontSize: 13, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 20 }}>
-                                       On the Home Screen, tap "Select Class" to choose the Department, Year, and Section you are teaching.
-                                   </Text>
-                               </View>
-                           </View>
-                           <View style={{ flexDirection: 'row' }}>
-                               <View style={{ width: 32, height: 32, borderRadius: 100, backgroundColor: '#dcfce7', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
-                                   <Text style={{ fontWeight: '700', color: '#166534' }}>2</Text>
-                               </View>
-                               <View style={{ flex: 1 }}>
-                                   <Text style={{ fontWeight: '700', fontSize: 15, color: isDark ? '#FFF' : '#0F172A', marginBottom: 4 }}>Start Attendance</Text>
-                                   <Text style={{ fontSize: 13, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 20 }}>
-                                       Tap "Take Attendance". The app looks for the class beacon. If found, students are marked present automatically.
-                                   </Text>
-                               </View>
-                           </View>
-                       </View>
+      {/* --- Help Modal (Interactive Guide) --- */}
+      <Modal 
+        visible={helpModalVisible} 
+        animationType="slide" 
+        transparent={false} 
+        onRequestClose={() => {
+            if (helpTopic) setHelpTopic(null);
+            else setHelpModalVisible(false);
+        }}
+      >
+           <View style={{ flex: 1, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }}>
+               <LinearGradient
+                   colors={['#0D4A4A', '#1A6B6B', '#0F3D3D']}
+                   style={{ paddingTop: insets.top + 16, paddingBottom: 16, paddingHorizontal: 20 }}
+               >
+                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', gap: 16 }}>
+                        <TouchableOpacity 
+                          style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' }}
+                          onPress={() => {
+                              if (helpTopic) setHelpTopic(null);
+                              else setHelpModalVisible(false);
+                          }}
+                        >
+                          <Ionicons name={helpTopic ? "arrow-back" : "close"} size={24} color="#FFF" />
+                        </TouchableOpacity>
+                        <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 20, fontWeight: '700', color: '#FFF' }}>
+                                {helpTopic === 'home' ? 'Home & Schedule' : 
+                                 helpTopic === 'notifs' ? 'Notifications' : 
+                                 helpTopic === 'swaps' ? 'Swaps & Subs' : 
+                                 helpTopic === 'profile' ? 'Profile & Tools' : 'Help Center'}
+                            </Text>
+                            <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)' }}>
+                                {helpTopic ? 'Detailed Info' : 'Complete User Guide'}
+                            </Text>
+                        </View>
                    </View>
+               </LinearGradient>
 
-                   {/* 2. Troubleshooting */}
-                   <View style={{ marginBottom: 32 }}>
-                       <Text style={{ fontSize: 12, fontWeight: '800', color: '#F59E0B', marginBottom: 16, letterSpacing: 1 }}>TROUBLESHOOTING</Text>
-                       
-                       <View style={{ flexDirection: 'row', marginBottom: 20 }}>
-                           <Ionicons name="bluetooth" size={24} color={isDark ? '#94A3B8' : '#64748B'} style={{ marginRight: 16, marginTop: 2 }} />
-                           <View style={{ flex: 1 }}>
-                               <Text style={{ fontWeight: '700', fontSize: 15, color: isDark ? '#FFF' : '#0F172A' }}>Bluetooth Issues</Text>
-                               <Text style={{ fontSize: 13, color: isDark ? '#94A3B8' : '#64748B', marginTop: 4, lineHeight: 18 }}>
-                                   Always keep Bluetooth ON. If scanning fails, try toggling Airplane Mode or use the <Text style={{ fontWeight: '700', color: '#10B981' }}>Beacon Doctor</Text> feature in Profile to diagnose hardware.
+                <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 60 }}>
+                    {!helpTopic && (
+                        /* --- MAIN MENU --- */
+                        <View>
+                           <View style={{ marginBottom: 24 }}>
+                               <Text style={{ fontSize: 16, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 24 }}>
+                                   Select a topic below to view the detailed user manual.
                                </Text>
                            </View>
-                       </View>
-                       
-                       <View style={{ flexDirection: 'row' }}>
-                           <Ionicons name="wifi" size={24} color={isDark ? '#94A3B8' : '#64748B'} style={{ marginRight: 16, marginTop: 2 }} />
-                           <View style={{ flex: 1 }}>
-                               <Text style={{ fontWeight: '700', fontSize: 15, color: isDark ? '#FFF' : '#0F172A' }}>Offline Mode</Text>
-                               <Text style={{ fontSize: 13, color: isDark ? '#94A3B8' : '#64748B', marginTop: 4, lineHeight: 18 }}>
-                                   No internet? No problem. Attendance is saved locally and auto-synced when you reconnect.
-                               </Text>
-                           </View>
-                       </View>
-                   </View>
 
-                   {/* 3. Detailed Features Guide */}
-                   <View style={{ marginBottom: 32 }}>
-                       <Text style={{ fontSize: 12, fontWeight: '800', color: '#8B5CF6', marginBottom: 16, letterSpacing: 1 }}>DETAILED USER GUIDE</Text>
-                       
-                       {/* Attendance & Class Management */}
-                       <View style={{ backgroundColor: isDark ? '#1E293B' : '#F9FAFB', borderRadius: 12, overflow: 'hidden', marginBottom: 16, borderWidth: 1, borderColor: isDark ? '#334155' : '#E2E8F0' }}>
-                           <View style={{ padding: 16, backgroundColor: isDark ? '#334155' : '#F1F5F9' }}>
-                               <Text style={{ fontWeight: '800', fontSize: 14, color: isDark ? '#FFF' : '#0F172A' }}>ATTENDANCE & CLASSES</Text>
-                           </View>
-                           <View style={{ padding: 16 }}>
-                               <Text style={{ fontWeight: '700', fontSize: 13, color: isDark ? '#CBD5E1' : '#334155', marginBottom: 4 }}>Live Scanning</Text>
-                               <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', marginBottom: 12, lineHeight: 18 }}>
-                                   When a class is "Live", tap the card to start scanning. The app detects student beacons via Bluetooth. Ensure Bluetooth is ON. A green circle indicates detecting; blue dots are students found.
-                               </Text>
+                           {[
+                               { id: 'home', icon: 'home', title: 'Home & Timetable', desc: 'Managing your daily schedule and attendance.' },
+                               { id: 'myclass', icon: 'school', title: 'My Class Hub', desc: 'Comprehensive monitoring for Class Incharges.' },
+                               { id: 'notifs', icon: 'notifications', title: 'Notifications & Alerts', desc: 'Managing requests and system updates.' },
+                               { id: 'swaps', icon: 'swap-horizontal', title: 'Swaps & Substitutions', desc: 'Workflows for exchanging classes.' },
+                               { id: 'history', icon: 'time', title: 'History & Logs', desc: 'Tracking your past classes and swaps.' },
+                               { id: 'profile', icon: 'person', title: 'Profile & Utilities', desc: 'Digital ID, Leaves, and Reports.' },
+                           ].map((item, idx) => (
+                               <TouchableOpacity 
+                                    key={idx}
+                                    onPress={() => setHelpTopic(item.id)}
+                                    activeOpacity={0.7}
+                                    style={{ 
+                                        flexDirection: 'row', 
+                                        alignItems: 'center', 
+                                        padding: 16, 
+                                        backgroundColor: isDark ? '#1E293B' : '#FFF',
+                                        marginBottom: 16,
+                                        borderRadius: 16,
+                                        borderWidth: 1,
+                                        borderColor: isDark ? '#334155' : '#E2E8F0',
+                                        elevation: 2
+                                    }}
+                               >
+                                   <View style={{ width: 48, height: 48, borderRadius: 12, backgroundColor: isDark ? '#334155' : '#F0FDFA', alignItems: 'center', justifyContent: 'center', marginRight: 16 }}>
+                                        <Ionicons name={item.icon as any} size={24} color="#0D9488" />
+                                   </View>
+                                   <View style={{ flex: 1 }}>
+                                       <Text style={{ fontSize: 16, fontWeight: '700', color: isDark ? '#FFF' : '#0F172A', marginBottom: 4 }}>{item.title}</Text>
+                                       <Text style={{ fontSize: 13, color: isDark ? '#94A3B8' : '#64748B' }}>{item.desc}</Text>
+                                   </View>
+                                   <Ionicons name="chevron-forward" size={20} color={isDark ? '#64748B' : '#CBD5E1'} />
+                               </TouchableOpacity>
+                           ))}
+                        </View>
+                    )}
 
-                               <Text style={{ fontWeight: '700', fontSize: 13, color: isDark ? '#CBD5E1' : '#334155', marginBottom: 4 }}>Manual Entry</Text>
-                               <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', marginBottom: 12, lineHeight: 18 }}>
-                                   If a student's ID card is missing or damaged, tap "Manual Entry". Search by Roll Number or Name and mark them Present manually. 
-                               </Text>
+                    {helpTopic && (
+                        /* --- DETAILED VIEWS --- */
+                        <View>
+                           {helpTopic === 'home' && (
+                               <>
+                                 <View style={{ marginBottom: 24 }}>
+                                     <Text style={{ fontSize: 15, color: isDark ? '#E2E8F0' : '#475569', lineHeight: 26 }}>
+                                         The **Home Screen** is designed to give you instant access to your classes without clutter.
+                                     </Text>
+                                 </View>
+                                 
+                                 <View style={{ backgroundColor: isDark ? '#1E293B' : '#FFF', padding: 20, borderRadius: 16, marginBottom: 20 }}>
+                                     <Text style={{ fontWeight: '800', color: '#0D9488', marginBottom: 12, fontSize: 18 }}>1. Live Timetable</Text>
+                                     <Text style={{ fontSize: 14, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 24 }}>
+                                         Your daily classes are displayed in a vertical timeline. {"\n\n"}
+                                         • **Current Class**: Highlighted with a large card at the top. This represents the class happening *right now*. Tap anywhere on this card to immediately open the Attendance Scanner. {"\n"}
+                                         • **Upcoming Classes**: Listed below with time slots (e.g., 10:00 AM - 11:00 AM). You can tap these to view details or request a swap ahead of time. {"\n"}
+                                         • **Past Classes**: Dimmed out to indicate completion.
+                                     </Text>
+                                 </View>
 
-                               <Text style={{ fontWeight: '700', fontSize: 13, color: isDark ? '#CBD5E1' : '#334155', marginBottom: 4 }}>Grace Period</Text>
-                               <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 18 }}>
-                                   You can continue taking attendance for up to 10 minutes after the class end time. After that, the class is marked "Incomplete" if no attendance was taken.
-                               </Text>
-                           </View>
-                       </View>
+                                 <View style={{ backgroundColor: isDark ? '#1E293B' : '#FFF', padding: 20, borderRadius: 16, marginBottom: 20 }}>
+                                     <Text style={{ fontWeight: '800', color: '#0D9488', marginBottom: 12, fontSize: 18 }}>2. Sync Status</Text>
+                                     <Text style={{ fontSize: 14, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 24 }}>
+                                         It is vital to know if your attendance data is reaching the server. {"\n\n"}
+                                         • **Cloud Icon (Solid)**: You are online. All changes sync instantly. {"\n"}
+                                         • **Cloud Icon (Slashed)**: You are offline. Don't worry, the app automatically saves everything to local storage. It will push the data to the server the moment you reconnect.
+                                     </Text>
+                                 </View>
+                               </>
+                           )}
 
-                       {/* Swaps & Substitutions */}
-                       <View style={{ backgroundColor: isDark ? '#1E293B' : '#F9FAFB', borderRadius: 12, overflow: 'hidden', marginBottom: 16, borderWidth: 1, borderColor: isDark ? '#334155' : '#E2E8F0' }}>
-                            <View style={{ padding: 16, backgroundColor: isDark ? '#334155' : '#F1F5F9' }}>
-                               <Text style={{ fontWeight: '800', fontSize: 14, color: isDark ? '#FFF' : '#0F172A' }}>SWAPS & SUBSTITUTIONS</Text>
-                           </View>
-                           <View style={{ padding: 16 }}>
-                               <Text style={{ fontWeight: '700', fontSize: 13, color: isDark ? '#CBD5E1' : '#334155', marginBottom: 4 }}>Requesting a Swap</Text>
-                               <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', marginBottom: 12, lineHeight: 18 }}>
-                                   Tap on an "Upcoming" class card to enter Delegate Mode. Select a faculty member and choose "Swap" (Mutual Exchange) or "Substitute" (One-way cover).
-                               </Text>
+                           {helpTopic === 'myclass' && (
+                               <>
+                                 <View style={{ marginBottom: 24 }}>
+                                     <Text style={{ fontSize: 15, color: isDark ? '#E2E8F0' : '#475569', lineHeight: 26 }}>
+                                         The **My Class Hub** is a dashboard specifically for Class Incharges. It provides a bird's-eye view of your assigned class's performance.
+                                     </Text>
+                                 </View>
+                                 
+                                 <View style={{ backgroundColor: isDark ? '#1E293B' : '#FFF', padding: 20, borderRadius: 16, marginBottom: 20 }}>
+                                     <Text style={{ fontWeight: '800', color: '#0D9488', marginBottom: 12, fontSize: 18 }}>1. Class Metrics</Text>
+                                     <Text style={{ fontSize: 14, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 24 }}>
+                                         At the top, you see aggregate data for your section: {"\n"}
+                                         • **Total Strength**: Number of students enrolled. {"\n"}
+                                         • **Avg Attendance**: The class average for the current semester.
+                                     </Text>
+                                 </View>
 
-                               <Text style={{ fontWeight: '700', fontSize: 13, color: isDark ? '#CBD5E1' : '#334155', marginBottom: 4 }}>Handling Requests</Text>
-                               <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 18 }}>
-                                   Check your Notifications for incoming requests. 
-                                   {'\n'}• <Text style={{fontWeight:'700'}}>Swap:</Text> You take their class, they take yours.
-                                   {'\n'}• <Text style={{fontWeight:'700'}}>Substitute:</Text> You cover their class.
-                                   {'\n'}Once accepted, your Schedule automatically updates to reflect the new timings and classes.
-                               </Text>
-                           </View>
-                       </View>
+                                 <View style={{ backgroundColor: isDark ? '#1E293B' : '#FFF', padding: 20, borderRadius: 16 }}>
+                                     <Text style={{ fontWeight: '800', color: '#0D9488', marginBottom: 12, fontSize: 18 }}>2. Watchlist & Trends</Text>
+                                     <Text style={{ fontSize: 14, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 24 }}>
+                                         • **Watchlist**: Automatically flags students with low attendance (below 75%). Tap a student card to send a warning notification. {"\n"}
+                                         • **Weekly Trends**: A graph showing attendance patterns over the last 7 days. Use this to identify low-attendance days (e.g., Fridays or Mondays).
+                                     </Text>
+                                 </View>
+                               </>
+                           )}
 
-                       {/* Admin & Utilities */}
-                       <View style={{ backgroundColor: isDark ? '#1E293B' : '#F9FAFB', borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: isDark ? '#334155' : '#E2E8F0' }}>
-                            <View style={{ padding: 16, backgroundColor: isDark ? '#334155' : '#F1F5F9' }}>
-                               <Text style={{ fontWeight: '800', fontSize: 14, color: isDark ? '#FFF' : '#0F172A' }}>UTILITIES</Text>
-                           </View>
-                           <View style={{ padding: 16 }}>
-                               <Text style={{ fontWeight: '700', fontSize: 13, color: isDark ? '#CBD5E1' : '#334155', marginBottom: 4 }}>Leave Application</Text>
-                               <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', marginBottom: 12, lineHeight: 18 }}>
-                                   Go to Profile -&gt; Apply for Leave. Select Dates and providing a reason. Status will be pending until HOD approval.
-                               </Text>
-                               <Text style={{ fontWeight: '700', fontSize: 13, color: isDark ? '#CBD5E1' : '#334155', marginBottom: 4 }}>Reports & Issues</Text>
-                               <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 18 }}>
-                                   Use Profile -&gt; Report Issue for any bugs or hardware failures. Attaching a screenshot helps us resolve it faster.
-                               </Text>
-                           </View>
-                       </View>
-                   </View>
+                           {helpTopic === 'notifs' && (
+                               <>
+                                 <View style={{ marginBottom: 24 }}>
+                                     <Text style={{ fontSize: 15, color: isDark ? '#E2E8F0' : '#475569', lineHeight: 26 }}>
+                                         The **Notifications Screen** is where collaboration happens. It handles all incoming requests and system alerts.
+                                     </Text>
+                                 </View>
+                                 
+                                 <View style={{ backgroundColor: isDark ? '#1E293B' : '#FFF', padding: 20, borderRadius: 16, marginBottom: 20 }}>
+                                     <Text style={{ fontWeight: '800', color: '#0D9488', marginBottom: 12, fontSize: 18 }}>1. Handling Requests</Text>
+                                     <Text style={{ fontSize: 14, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 24 }}>
+                                         When a colleague Requests a Swap or Substitution, a dedicated card appears at the top. {"\n\n"}
+                                         • **ACCEPT**: By tapping this, you agree to take their class. The schedule is automatically updated for both of you. {"\n"}
+                                         • **DECLINE**: Removes the request. The requester will be notified that you are unavailable.
+                                     </Text>
+                                 </View>
 
-                   {/* 4. Footer */}
-                   <View style={{ alignItems: 'center', marginTop: 20 }}>
-                       <Text style={{ color: isDark ? '#475569' : '#94A3B8', fontSize: 12 }}>Still need help? Contact Admin.</Text>
-                       <TouchableOpacity onPress={() => { setHelpModalVisible(false); setReportModalVisible(true); }} style={{ marginTop: 12 }}>
-                           <Text style={{ color: '#0F766E', fontWeight: '700' }}>Contact Support</Text>
-                       </TouchableOpacity>
-                   </View>
+                                 <View style={{ backgroundColor: isDark ? '#1E293B' : '#FFF', padding: 20, borderRadius: 16 }}>
+                                     <Text style={{ fontWeight: '800', color: '#0D9488', marginBottom: 12, fontSize: 18 }}>2. Bulk Actions</Text>
+                                     <Text style={{ fontSize: 14, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 24 }}>
+                                         To manage a cluttered inbox: {"\n"}
+                                         • **Swipe Left**: Delete a single notification. {"\n"}
+                                         • **Long Press**: Enter "Selection Mode". Tap multiple items and delete them all at once.
+                                     </Text>
+                                 </View>
+                               </>
+                           )}
 
-              </ScrollView>
-          </View>
+                           {helpTopic === 'swaps' && (
+                               <>
+                                 <View style={{ marginBottom: 24 }}>
+                                     <Text style={{ fontSize: 15, color: isDark ? '#E2E8F0' : '#475569', lineHeight: 26 }}>
+                                         The **Swap System** is a formal way to exchange classes without administrative friction.
+                                     </Text>
+                                 </View>
+                                 
+                                 <View style={{ backgroundColor: isDark ? '#1E293B' : '#FFF', padding: 20, borderRadius: 16, marginBottom: 20 }}>
+                                     <Text style={{ fontWeight: '800', color: '#0D9488', marginBottom: 12, fontSize: 18 }}>1. Requesting a Substitution</Text>
+                                     <Text style={{ fontSize: 14, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 24 }}>
+                                         If you need to miss a class: {"\n"}
+                                         1. Navigate to **Home Screen {'->'} Timetable**. {"\n"}
+                                         2. Tap the class you want to give away. {"\n"}
+                                         3. Select **Request Substitution**. {"\n"}
+                                         4. Choose a faculty member from the list.
+                                     </Text>
+                                 </View>
+
+                                 <View style={{ backgroundColor: isDark ? '#1E293B' : '#FFF', padding: 20, borderRadius: 16 }}>
+                                     <Text style={{ fontWeight: '800', color: '#0D9488', marginBottom: 12, fontSize: 18 }}>2. History Tracking</Text>
+                                     <Text style={{ fontSize: 14, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 24 }}>
+                                         The **Swap History** screen acts as your logbook. {"\n\n"}
+                                         • **Sent Requests**: See if your requests have been Accepted, Declined, or are still Pending. {"\n"}
+                                         • **Received Requests**: Review classes you have taken for others. This is useful for year-end reporting.
+                                     </Text>
+                                 </View>
+                               </>
+                           )}
+
+                           {helpTopic === 'history' && (
+                               <>
+                                 <View style={{ marginBottom: 24 }}>
+                                     <Text style={{ fontSize: 15, color: isDark ? '#E2E8F0' : '#475569', lineHeight: 26 }}>
+                                         The **History Screen** acts as your digital register, archiving all classes you have conducted.
+                                     </Text>
+                                 </View>
+                                 
+                                 <View style={{ backgroundColor: isDark ? '#1E293B' : '#FFF', padding: 20, borderRadius: 16, marginBottom: 20 }}>
+                                     <Text style={{ fontWeight: '800', color: '#0D9488', marginBottom: 12, fontSize: 18 }}>1. Class logs</Text>
+                                     <Text style={{ fontSize: 14, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 24 }}>
+                                         Every time you submit attendance (Manual or Scan), a permanent log is created. {"\n"}
+                                         • **Details**: Tap any specific date to see the list of students present/absent. {"\n"}
+                                         • **Editing**: You generally cannot edit past logs once synced, but you can view them for reporting.
+                                     </Text>
+                                 </View>
+
+                                 <View style={{ backgroundColor: isDark ? '#1E293B' : '#FFF', padding: 20, borderRadius: 16 }}>
+                                     <Text style={{ fontWeight: '800', color: '#0D9488', marginBottom: 12, fontSize: 18 }}>2. Date Sorting</Text>
+                                     <Text style={{ fontSize: 14, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 24 }}>
+                                         • **Sections**: Logs are grouped by "Today", "Yesterday", "This Week", and "Older". {"\n"}
+                                         • **Offline**: These logs are cached locally, so you can view your teaching history even without internet.
+                                     </Text>
+                                 </View>
+                               </>
+                           )}
+
+                           {helpTopic === 'profile' && (
+                               <>
+                                 <View style={{ marginBottom: 24 }}>
+                                     <Text style={{ fontSize: 15, color: isDark ? '#E2E8F0' : '#475569', lineHeight: 26 }}>
+                                         Your personal settings and college services.
+                                     </Text>
+                                 </View>
+                                 
+                                 <View style={{ backgroundColor: isDark ? '#1E293B' : '#FFF', padding: 20, borderRadius: 16, marginBottom: 20 }}>
+                                     <Text style={{ fontWeight: '800', color: '#0D9488', marginBottom: 12, fontSize: 18 }}>1. Digital ID</Text>
+                                     <Text style={{ fontSize: 14, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 24 }}>
+                                         Your official ID. **Note**: For security, this card is now only available when you are online to ensure verification of active status. Offline access has been disabled.
+                                     </Text>
+                                 </View>
+
+                                 <View style={{ backgroundColor: isDark ? '#1E293B' : '#FFF', padding: 20, borderRadius: 16 }}>
+                                     <Text style={{ fontWeight: '800', color: '#0D9488', marginBottom: 12, fontSize: 18 }}>2. Leaves & Reports</Text>
+                                     <Text style={{ fontSize: 14, color: isDark ? '#94A3B8' : '#64748B', lineHeight: 24 }}>
+                                         • **Apply for Leave**: Submits a formal leave request to the HOD. Note that you should still arrange substitutions for your classes using the Swap feature. {"\n"}
+                                         • **Report Issue**: If you encounter a bug, use this to attach a screenshot and send it to our dev team.
+                                     </Text>
+                                 </View>
+                               </>
+                           )}
+
+                           <View style={{ height: 60 }} />
+                        </View>
+                    )}
+               </ScrollView>
+           </View>
       </Modal>
 
       {/* --- Report Modal --- */}

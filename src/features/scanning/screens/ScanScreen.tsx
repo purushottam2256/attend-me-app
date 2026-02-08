@@ -25,6 +25,7 @@ import {
   TouchableOpacity,
   Dimensions,
   Modal,
+  Vibration,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
@@ -316,12 +317,14 @@ export const ScanScreen: React.FC = () => {
     loading: studentsLoading,
     error: studentsError,
     presentCount,
+    odCount,
     absentCount,
     pendingCount,
     totalCount,
     updateStudentStatus,
     submitAttendance: submitToSupabase,
     refreshStudents,
+    isOfflineMode,
   } = useAttendance({ classData, batch: currentBatch });
 
   // Animations
@@ -611,6 +614,13 @@ export const ScanScreen: React.FC = () => {
     onStudentDetected: (studentId) => {
       console.log("[ScanScreen] 🎯 Student detected by BLE:", studentId);
       const student = students.find((s) => s.id === studentId);
+      
+      // FIX: Do not overwrite OD or Leave status
+      if (student?.status === 'od' || student?.status === 'leave') {
+        console.log(`[ScanScreen] 🔒 Skipping update for ${student.name} (Status: ${student.status})`);
+        return;
+      }
+
       console.log(
         "[ScanScreen] Student info:",
         student?.name,
@@ -798,6 +808,7 @@ export const ScanScreen: React.FC = () => {
         );
 
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Vibration.vibrate(400); // Strict vibration feedback
 
         // Redirect immediately
         if (navigation.canGoBack()) {
@@ -970,6 +981,23 @@ export const ScanScreen: React.FC = () => {
         </View>
         <View style={{ flexDirection: "row", gap: 8 }}>
 
+          {isOfflineMode && (
+            <View style={{
+                paddingHorizontal: 8,
+                paddingVertical: 4,
+                backgroundColor: 'rgba(255, 159, 10, 0.2)',
+                borderRadius: 8,
+                borderWidth: 1,
+                borderColor: 'rgba(255, 159, 10, 0.5)',
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4
+            }}>
+                <Ionicons name="cloud-offline" size={14} color="#FF9F0A" />
+                <Text style={{ color: '#FF9F0A', fontSize: 10, fontWeight: '700' }}>OFFLINE</Text>
+            </View>
+          )}
+
           <TouchableOpacity
             style={styles.menuButton}
             onPress={handleAutoPilotToggle}
@@ -1070,7 +1098,7 @@ export const ScanScreen: React.FC = () => {
           </View>
           <View style={styles.bottomStatItem}>
             <Text style={[styles.bottomStatValue, { color: "#3B82F6" }]}>
-              0
+              {odCount}
             </Text>
             <Text
               style={[

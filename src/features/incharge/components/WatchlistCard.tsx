@@ -52,8 +52,8 @@ export const WatchlistCard: React.FC<WatchlistCardProps> = ({
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const message = `Hi ${studentName}, your attendance is at ${percentage}%. Please ensure regular attendance.`;
-    await Linking.openURL(`whatsapp://send?phone=${studentMobile}&text=${encodeURIComponent(message)}`);
+    const message = `Dear ${studentName},\n\nThis is to inform you that your current attendance is ${percentage}%, which is below the required threshold of 75%. Please ensure you attend all upcoming classes to avoid any academic actions.\n\nRegards,\nClass Incharge`;
+    await Linking.openURL(`whatsapp://send?phone=+91${studentMobile.replace(/\D/g, '')}&text=${encodeURIComponent(message)}`);
   };
 
   return (
