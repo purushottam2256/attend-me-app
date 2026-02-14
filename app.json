@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "attend-me-app",
-    "slug": "attend-me-app",
+    "name": "attend-me",
+    "slug": "attend-me",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/college-logo.png",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "experiments": {
@@ -14,9 +14,9 @@
       "enabled": false
     },
     "splash": {
-      "image": "./assets/college-logo.png",
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#0F5C4E"
     },
     "ios": {
       "supportsTablet": true,
@@ -28,8 +28,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/android/college-logo.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0F5C4E"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -44,7 +44,7 @@
       ]
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/apple-devices/AppIcon.appiconset/icon-ios-1024x1024.png"
     },
     "plugins": [
       "react-native-ble-plx",
