@@ -19,7 +19,7 @@ import { useTheme } from '../../../contexts';
 import { supabase } from '../../../config/supabase';
 import { ZenToast } from '../../../components/ZenToast';
 import { ConfirmationModal } from '../../../components/ConfirmationModal';
-import { getCachedRoster } from '../../../services/offlineService'; // Import cached roster
+import { findCachedRoster, queueSubmission } from '../../../services/offlineService'; // Import cached roster and queue
 import { useConnectionStatus } from '../../../hooks'; // Import connection status logic
 import { 
   getTodaySchedule, 
@@ -93,32 +93,15 @@ export const AttendanceScreen: React.FC = () => {
 
       // If online failed or offline, try cache
       if ((!data || data.length === 0) || connectionStatus !== 'online') {
-         console.log('Loading roster from cache for slot:', selectedClass.slot_id);
-         const cached = await getCachedRoster(selectedClass.id ? parseInt(selectedClass.slot_id) : 0); // slotId might be string, need care. 
-         // Wait, slot_id is usually string like 'P1'. But cachedRoster uses slotId number?
-         // In HomeScreen/offlineService we used slot.slot_id. Let's check type.
-         // dashboardService TimetableSlot says slot_id: string. 
-         // offlineService CachedRoster says slotId: number.
-         // Wait! in cacheAllRosters: const classKey = `${slot.slot_id}`; 
-         // But interface says slotId: number.
-         // I should pass slot_id as-is if possible or handle mismatch.
-         // Actually offlineService `getCachedRoster` takes `slotId: number`.
-         // I will assume for now I can pass it, or I need to fix offlineService types.
-         // Wait, checking offlineService again:
-         // export async function getCachedRoster(slotId: number): Promise<CachedRoster | null>
-         // But explicit check: const rosters = ...; return rosters[String(slotId)] || null;
-         // So it converts input to string key. So passing number or string might matter for TS but runtime logic uses String(key).
-         
-         // Let's try to match by using the SLOT ID string directly if I can cast it or if I need to rely on the fact that I cached it using specific key.
-         // In cacheAllRosters: classKey = `${slot.slot_id}`;
-         // So if slot_id is "P1", key is "P1".
-         // getCachedRoster takes number. This is a BUG in offlineService types if slot_id is "P1".
-         // I will ignore TS error or cast it if needed, but for now let's write safe code.
-         
-         // I'll read explicitly using key matching logic if I can't change offlineService right now.
-         // Or I'll just use getCachedRoster(selectedClass.slot_id as any)
-         
-         const cachedRoster = await getCachedRoster(selectedClass.slot_id as any);
+         // Load from cache using robust lookup (Department, Year, Section)
+         // Assuming slot_id might not match cache key mechanism, use class details.
+         if (selectedClass) {
+             console.log(`Loading roster from cache for ${selectedClass.target_dept}-${selectedClass.target_year}-${selectedClass.target_section}`);
+             const cachedRoster = await findCachedRoster(
+                 selectedClass.target_dept, 
+                 selectedClass.target_year, 
+                 selectedClass.target_section
+             );
          if (cachedRoster && cachedRoster.students) {
              data = cachedRoster.students.map(s => ({
                  id: s.id,
@@ -128,6 +111,7 @@ export const AttendanceScreen: React.FC = () => {
                  batch: s.batch
              }));
              loadedFromCache = true;
+         }
          }
       }
 
@@ -189,6 +173,38 @@ export const AttendanceScreen: React.FC = () => {
 
     setSubmitting(true);
     try {
+      // OFFLINE SUBMISSION
+      if (connectionStatus !== 'online') {
+          // Queue submission
+          try {
+              await queueSubmission({
+                  classData: {
+                      slotId: selectedClass.slot_id || '0',
+                      subjectName: selectedClass.subject?.name || 'Unknown',
+                      subjectId: selectedClass.subject?.id,
+                      dept: selectedClass.target_dept,
+                      year: selectedClass.target_year,
+                      sectionLetter: selectedClass.target_section,
+                      section: `${selectedClass.target_dept}-${selectedClass.target_year}-${selectedClass.target_section}`,
+                  },
+                  attendance: records,
+                  submittedAt: new Date().toISOString(),
+                  id: `manual-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                  retryCount: 0,
+              });
+              
+              showToast('success', 'Attendance Saved Offline (Will sync when online)');
+              // Clear selection or stay? Maybe stay to confirm.
+              // Logic usually clears or refreshes.
+              setSelectedClass(null); // Return to class list
+          } catch (err) {
+              showToast('error', 'Failed to save offline attendance');
+              console.error(err);
+          }
+          return;
+      }
+      
+      // ONLINE SUBMISSION
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 

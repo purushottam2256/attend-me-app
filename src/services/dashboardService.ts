@@ -5,6 +5,9 @@
  */
 
 import { supabase } from '../config/supabase';
+import createLogger from '../utils/logger';
+
+const log = createLogger('DashboardService');
 
 // Types matching existing schema
 export interface TimetableSlot {
@@ -55,42 +58,121 @@ export interface AttendanceSession {
 /**
  * Get today's timetable for the logged-in faculty
  */
+/**
+ * Get today's timetable for the logged-in faculty
+ * Includes accepted swaps (removes swapped-out, adds swapped-in)
+ */
 export async function getTodaySchedule(facultyId: string): Promise<TimetableSlot[]> {
   try {
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const today = days[new Date().getDay()];
+    const todayDate = new Date();
+    const todayDay = days[todayDate.getDay()];
+    const todayStr = todayDate.toISOString().split('T')[0];
 
-    const { data, error } = await supabase
+    // 1. Fetch Base Schedule
+    const { data: baseSchedule, error } = await supabase
       .from('master_timetables')
       .select(`
-        id,
-        day,
-        slot_id,
-        start_time,
-        end_time,
-        room,
-        target_dept,
-        target_year,
-        target_section,
-        batch,
+        id, day, slot_id, start_time, end_time, room,
+        target_dept, target_year, target_section, batch,
         subjects:subject_id (id, name, code)
       `)
       .eq('faculty_id', facultyId)
-      .eq('day', today)
+      .eq('day', todayDay)
       .eq('is_active', true)
       .order('start_time');
 
     if (error) {
-      console.error('Error fetching timetable:', error);
+      log.error('Error fetching timetable:', error);
       return [];
     }
 
-    return (data || []).map((item: any) => ({
+    let finalSchedule = (baseSchedule || []).map((item: any) => ({
       ...item,
       subject: item.subjects,
     }));
+
+    // 2. Fetch Accepted Swaps for Today
+    const { data: swaps } = await supabase
+      .from('class_swaps')
+      .select('id, faculty_a_id, faculty_b_id, slot_a_id, slot_b_id')
+      .eq('date', todayStr)
+      .eq('status', 'accepted')
+      .or(`faculty_a_id.eq.${facultyId},faculty_b_id.eq.${facultyId}`);
+
+    if (swaps && swaps.length > 0) {
+      const swappedOutSlots = new Set<string>();
+      const acquiredSlots: TimetableSlot[] = [];
+
+      for (const swap of swaps) {
+        // CASE A: I am Faculty A (Requestor)
+        if (swap.faculty_a_id === facultyId) {
+          // I gave away slot_a_id -> Remove it
+          swappedOutSlots.add(swap.slot_a_id);
+          
+          // I acquired slot_b_id from Faculty B -> Add it
+          // Need to fetch details of Faculty B's slot
+          const { data: acquiredSlot } = await supabase
+            .from('master_timetables')
+            .select(`
+              id, day, slot_id, start_time, end_time, room,
+              target_dept, target_year, target_section, batch,
+              subjects:subject_id (id, name, code)
+            `)
+            .eq('faculty_id', swap.faculty_b_id)
+            .eq('slot_id', swap.slot_b_id)
+            .eq('day', todayDay) // Ensure it matches day to be safe
+            .maybeSingle();
+            
+          if (acquiredSlot) {
+            acquiredSlots.push({
+              ...acquiredSlot,
+              subject: Array.isArray(acquiredSlot.subjects) ? acquiredSlot.subjects[0] : acquiredSlot.subjects,
+              isSwap: true // Marker for UI
+            });
+          }
+        } 
+        // CASE B: I am Faculty B (Responder)
+        else if (swap.faculty_b_id === facultyId) {
+          // I gave away slot_b_id -> Remove it
+          swappedOutSlots.add(swap.slot_b_id);
+          
+          // I acquired slot_a_id from Faculty A -> Add it
+          const { data: acquiredSlot } = await supabase
+            .from('master_timetables')
+            .select(`
+              id, day, slot_id, start_time, end_time, room,
+              target_dept, target_year, target_section, batch,
+              subjects:subject_id (id, name, code)
+            `)
+            .eq('faculty_id', swap.faculty_a_id)
+            .eq('slot_id', swap.slot_a_id)
+            .eq('day', todayDay)
+            .maybeSingle();
+
+          if (acquiredSlot) {
+            acquiredSlots.push({
+              ...acquiredSlot,
+              subject: Array.isArray(acquiredSlot.subjects) ? acquiredSlot.subjects[0] : acquiredSlot.subjects,
+              isSwap: true
+            });
+          }
+        }
+      }
+
+      // Filter out swapped-out slots
+      finalSchedule = finalSchedule.filter((s: any) => !swappedOutSlots.has(s.slot_id));
+      
+      // Add acquired slots
+      finalSchedule = [...finalSchedule, ...acquiredSlots];
+      
+      // Re-sort by start time
+      finalSchedule.sort((a: any, b: any) => a.start_time.localeCompare(b.start_time));
+    }
+
+    return finalSchedule;
   } catch (error) {
-    console.error('Schedule fetch error:', error);
+    log.error('Schedule fetch error:', error);
     return [];
   }
 }
@@ -123,7 +205,7 @@ export async function getWeeklySchedule(facultyId: string): Promise<TimetableSlo
       .order('start_time');
 
     if (error) {
-      console.error('Error fetching schedule for day:', error);
+      log.error('Error fetching schedule for day:', error);
       return [];
     }
 
@@ -132,7 +214,7 @@ export async function getWeeklySchedule(facultyId: string): Promise<TimetableSlo
       subject: item.subjects,
     }));
   } catch (error) {
-    console.error('Schedule fetch error:', error);
+    log.error('Schedule fetch error:', error);
     return [];
   }
 }
@@ -163,7 +245,7 @@ export async function getScheduleForDay(facultyId: string, day: string): Promise
       .order('start_time');
 
     if (error) {
-      console.error('Error fetching schedule for day:', error);
+      log.error('Error fetching schedule for day:', error);
       return [];
     }
 
@@ -172,7 +254,7 @@ export async function getScheduleForDay(facultyId: string, day: string): Promise
       subject: item.subjects,
     }));
   } catch (error) {
-    console.error('Schedule fetch error:', error);
+    log.error('Schedule fetch error:', error);
     return [];
   }
 }
@@ -211,7 +293,7 @@ export async function getScheduleWithStatus(facultyId: string): Promise<(Timetab
       status: markedSlots.has(slot.slot_id) ? 'completed' : 'pending',
     }));
   } catch (error) {
-    console.error('Schedule status error:', error);
+    log.error('Schedule status error:', error);
     return [];
   }
 }
@@ -334,7 +416,7 @@ export async function getSwapsAndSubstitutions(
       })),
     };
   } catch (error) {
-    console.error('Error fetching swaps/subs:', error);
+    log.error('Error fetching swaps/subs:', error);
     return { swaps: [], substitutions: [] };
   }
 }
@@ -390,13 +472,13 @@ export async function getStudentsForClass(
     const { data, error } = await query;
 
     if (error) {
-      console.error('Error fetching students:', error);
+      log.error('Error fetching students:', error);
       return [];
     }
 
     return data || [];
   } catch (error) {
-    console.error('Students fetch error:', error);
+    log.error('Students fetch error:', error);
     return [];
   }
 }
@@ -436,7 +518,7 @@ export async function createAttendanceSession(
       .single();
     
     if (existingSession) {
-      console.log('[createAttendanceSession] Deleting existing session:', existingSession.id);
+      log.info('Deleting existing session:', existingSession.id);
       
       // First delete attendance logs for this session
       await supabase
@@ -475,13 +557,13 @@ export async function createAttendanceSession(
       .single();
 
     if (error) {
-      console.error('Error creating session:', error);
+      log.error('Error creating session:', error);
       return { sessionId: null, error: error.message };
     }
 
     return { sessionId: data?.id || null, error: null };
   } catch (error) {
-    console.error('Create session error:', error);
+    log.error('Create session error:', error);
     return { sessionId: null, error: 'Failed to create session' };
   }
 }
@@ -509,7 +591,7 @@ export async function checkExistingSession(
       
     return !!data;
   } catch (error) {
-    console.error('Error checking session:', error);
+    log.error('Error checking session:', error);
     return false;
   }
 }
@@ -537,7 +619,7 @@ export async function submitAttendance(
       .insert(insertData);
 
     if (logError) {
-      console.error('Error inserting logs:', logError);
+      log.error('Error inserting logs:', logError);
       return { success: false, error: logError.message };
     }
 
@@ -562,13 +644,13 @@ export async function submitAttendance(
       .eq('id', sessionId);
 
     if (updateError) {
-      console.error('Error updating session:', updateError);
+      log.error('Error updating session:', updateError);
       return { success: false, error: updateError.message };
     }
 
     return { success: true, error: null };
   } catch (error) {
-    console.error('Submit attendance error:', error);
+    log.error('Submit attendance error:', error);
     return { success: false, error: 'Failed to submit attendance' };
   }
 }
@@ -580,11 +662,15 @@ export async function submitAttendance(
 /**
  * Get attendance history for faculty
  * Includes substitution info - both when user substituted for someone and when someone substituted for user
+ * @param dateStr - Optional ISO date string to filter by specific date (YYYY-MM-DD)
+ * @param page - Page number for pagination (0-indexed)
  */
 export async function getAttendanceHistory(
   facultyId: string,
   classFilter?: string,
-  limit: number = 50
+  limit: number = 30,
+  dateStr?: string,
+  page: number = 0
 ): Promise<AttendanceSession[]> {
   try {
     // Query sessions where this faculty is the owner OR they substituted
@@ -611,7 +697,12 @@ export async function getAttendanceHistory(
       .or(`faculty_id.eq.${facultyId},substitute_faculty_id.eq.${facultyId}`)
       .order('date', { ascending: false })
       .order('start_time', { ascending: false })
-      .limit(limit);
+      .range(page * limit, (page + 1) * limit - 1);
+
+    // Server-side date filter — avoids loading ALL records
+    if (dateStr) {
+      query = query.eq('date', dateStr);
+    }
 
     if (classFilter && classFilter !== 'All') {
       query = query.ilike('target_section', classFilter);
@@ -620,37 +711,39 @@ export async function getAttendanceHistory(
     const { data, error } = await query;
 
     if (error) {
-      console.error('Error fetching history:', error);
+      log.error('Error fetching history:', error);
       return [];
     }
 
-    // Also fetch original faculty names for sessions where current user was substitute
-    const sessionsWithSubInfo = await Promise.all((data || []).map(async (item: any) => {
-      let originalFacultyName = null;
-      
-      // If current user was the substitute, fetch original faculty name
-      if (item.substitute_faculty_id === facultyId && item.faculty_id !== facultyId) {
-        const { data: origFaculty } = await supabase
-          .from('profiles')
-          .select('full_name')
-          .eq('id', item.faculty_id)
-          .single();
-        originalFacultyName = origFaculty?.full_name;
+    // Batch-fetch original faculty names instead of N+1 queries
+    const substituteItems = (data || []).filter(
+      (item: any) => item.substitute_faculty_id === facultyId && item.faculty_id !== facultyId
+    );
+    const uniqueFacultyIds = [...new Set(substituteItems.map((item: any) => item.faculty_id))];
+
+    let facultyNameMap: Record<string, string> = {};
+    if (uniqueFacultyIds.length > 0) {
+      const { data: faculties } = await supabase
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', uniqueFacultyIds);
+      if (faculties) {
+        facultyNameMap = Object.fromEntries(faculties.map((f: any) => [f.id, f.full_name]));
       }
-      
-      return {
-        ...item,
-        subject: item.subjects,
-        substituteFacultyName: item.substitute?.full_name || null,
-        originalFacultyName,
-        isUserSubstitute: item.substitute_faculty_id === facultyId && item.faculty_id !== facultyId,
-        isUserOriginal: item.faculty_id === facultyId && item.is_substitute,
-      };
+    }
+
+    const sessionsWithSubInfo = (data || []).map((item: any) => ({
+      ...item,
+      subject: item.subjects,
+      substituteFacultyName: item.substitute?.full_name || null,
+      originalFacultyName: facultyNameMap[item.faculty_id] || null,
+      isUserSubstitute: item.substitute_faculty_id === facultyId && item.faculty_id !== facultyId,
+      isUserOriginal: item.faculty_id === facultyId && item.is_substitute,
     }));
 
     return sessionsWithSubInfo;
   } catch (error) {
-    console.error('History fetch error:', error);
+    log.error('History fetch error:', error);
     return [];
   }
 }

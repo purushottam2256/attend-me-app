@@ -25,7 +25,7 @@ interface NotificationCardProps {
   title: string;
   body: string;
   timestamp: string;
-  type: 'request' | 'alert' | 'info';
+  type: 'request' | 'alert' | 'info' | 'leave' | 'swap';
   isRead: boolean;
   icon?: keyof typeof Ionicons.glyphMap;
   isDark?: boolean;
@@ -34,7 +34,7 @@ interface NotificationCardProps {
   onPress?: () => void;
   onDelete?: () => void;
   onLongPress?: () => void;
-  status?: 'accepted' | 'declined' | 'pending' | null;
+  status?: 'accepted' | 'declined' | 'pending' | 'approved' | 'rejected' | null;
 }
 
 /**
@@ -79,6 +79,8 @@ export const NotificationCard = React.memo(({
       case 'request': return '#8B5CF6'; // Purple (Swapped/Sub)
       case 'alert': return '#F59E0B';   // Orange (Incomplete/Alert)
       case 'info': return '#10B981';    // Green (Live/Active)
+      case 'leave': return '#EC4899';   // Pink (Leave)
+      case 'swap': return '#8B5CF6';    // Purple (Same as request)
       default: return '#3B82F6';        // Blue (Upcoming/Info)
     }
   };
@@ -87,6 +89,8 @@ export const NotificationCard = React.memo(({
     if (icon) return icon;
     switch (type) {
       case 'request': return 'swap-horizontal';
+      case 'swap': return 'swap-horizontal';
+      case 'leave': return 'calendar-outline';
       case 'alert': return 'warning';
       default: return 'notifications';
     }
@@ -171,10 +175,10 @@ export const NotificationCard = React.memo(({
           {status && status !== 'pending' && (
             <View style={[
               styles.statusBadge, 
-              { backgroundColor: status === 'accepted' ? '#3DDC97' : '#F15C6D' }
+              { backgroundColor: status === 'accepted' || status === 'approved' ? '#3DDC97' : '#F15C6D' }
             ]}>
               <Ionicons 
-                name={status === 'accepted' ? 'checkmark' : 'close'} 
+                name={status === 'accepted' || status === 'approved' ? 'checkmark' : 'close'} 
                 size={normalizeFont(10)} 
                 color="#FFF" 
               />
@@ -207,10 +211,10 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: verticalScale(8),
+    paddingVertical: verticalScale(12), // Increased padding
     paddingHorizontal: scale(12),
     borderBottomWidth: 0.5,
-    minHeight: verticalScale(50),
+    minHeight: verticalScale(72), // Enforce taller uniformity
   },
   checkbox: {
     width: scale(18),

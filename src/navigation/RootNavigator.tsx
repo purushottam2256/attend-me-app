@@ -32,7 +32,6 @@ import { BeaconDoctorScreen } from '../features/diagnostics/screens/BeaconDoctor
 import { SyncManagerScreen } from '../features/sync/screens/SyncManagerScreen';
 import { NotificationScreen } from '../features/notifications/screens/NotificationScreenNew';
 import { SwapHistoryScreen } from '../features/swap/screens/SwapHistoryScreen';
-
 // Keep native splash screen visible
 SplashScreenExpo.preventAutoHideAsync();
 
@@ -103,8 +102,6 @@ const AuthNavigator: React.FC<{ onLoginSuccess: (userName: string, role: string)
     </AuthStack.Navigator>
   );
 };
-
-// ...
 
 // App State Types
 type AppState = 'LOADING' | 'SPLASH' | 'AUTH' | 'MAIN';
@@ -254,6 +251,7 @@ const styles = StyleSheet.create({
     padding: 8,
     backgroundColor: 'rgba(255,255,255,0.2)',
     borderRadius: 8,
+    alignItems: 'center',
   },
   dashboardContent: {
     flex: 1,

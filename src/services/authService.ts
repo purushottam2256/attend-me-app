@@ -5,6 +5,9 @@
 
 import { supabase } from '../config/supabase';
 import * as SecureStore from 'expo-secure-store';
+import createLogger from '../utils/logger';
+
+const log = createLogger('AuthService');
 
 // Types
 export interface UserProfile {
@@ -61,7 +64,7 @@ export async function signIn(email: string, password: string): Promise<{ user: U
       .single();
 
     if (profileError) {
-      console.error('Profile fetch error:', profileError);
+      log.error('Profile fetch error:', profileError);
       
       // Profile not found - HOD hasn't added this faculty yet
       if (profileError.code === 'PGRST116') {
@@ -90,7 +93,7 @@ export async function signIn(email: string, password: string): Promise<{ user: U
 
     return { user: profile as UserProfile, error: null };
   } catch (error) {
-    console.error('Sign in error:', error);
+    log.error('Sign in error:', error);
     return { user: null, error: 'An unexpected error occurred' };
   }
 }
@@ -104,7 +107,7 @@ export async function signOut(): Promise<void> {
     // NOTE: We keep USER_PROFILE stored so biometric login works next time
     // Only clear BIOMETRIC_ENABLED if user explicitly disables it
   } catch (error) {
-    console.error('Sign out error:', error);
+    log.error('Sign out error:', error);
   }
 }
 
@@ -117,7 +120,7 @@ export async function signOutCompletely(): Promise<void> {
     await SecureStore.deleteItemAsync(STORAGE_KEYS.USER_PROFILE);
     await SecureStore.deleteItemAsync(STORAGE_KEYS.BIOMETRIC_ENABLED);
   } catch (error) {
-    console.error('Sign out error:', error);
+    log.error('Sign out error:', error);
   }
 }
 
@@ -132,7 +135,7 @@ export async function getCurrentSession() {
     }
     return session;
   } catch (error) {
-    console.error('Get session error:', error);
+    log.error('Get session error:', error);
     return null;
   }
 }
@@ -148,7 +151,7 @@ export async function getStoredProfile(): Promise<UserProfile | null> {
     }
     return null;
   } catch (error) {
-    console.error('Get stored profile error:', error);
+    log.error('Get stored profile error:', error);
     return null;
   }
 }
@@ -168,7 +171,7 @@ export async function requestPasswordReset(email: string): Promise<{ success: bo
 
     return { success: true, error: null };
   } catch (error) {
-    console.error('Password reset error:', error);
+    log.error('Password reset error:', error);
     return { success: false, error: 'Failed to send reset email' };
   }
 }
@@ -188,7 +191,7 @@ export async function updatePassword(newPassword: string): Promise<{ success: bo
 
     return { success: true, error: null };
   } catch (error) {
-    console.error('Update password error:', error);
+    log.error('Update password error:', error);
     return { success: false, error: 'Failed to update password' };
   }
 }

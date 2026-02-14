@@ -5,6 +5,9 @@
 
 import { createClient } from '@supabase/supabase-js';
 import * as SecureStore from 'expo-secure-store';
+import createLogger from '../utils/logger';
+
+const log = createLogger('Supabase');
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_KEY!;
@@ -15,7 +18,7 @@ const ExpoSecureStoreAdapter = {
         try {
             return await SecureStore.getItemAsync(key);
         } catch (error) {
-            console.error('SecureStore getItem error:', error);
+            log.error('SecureStore getItem error:', error);
             return null;
         }
     },
@@ -23,14 +26,14 @@ const ExpoSecureStoreAdapter = {
         try {
             await SecureStore.setItemAsync(key, value);
         } catch (error) {
-            console.error('SecureStore setItem error:', error);
+            log.error('SecureStore setItem error:', error);
         }
     },
     removeItem: async (key: string): Promise<void> => {
         try {
             await SecureStore.deleteItemAsync(key);
         } catch (error) {
-            console.error('SecureStore removeItem error:', error);
+            log.error('SecureStore removeItem error:', error);
         }
     },
 };

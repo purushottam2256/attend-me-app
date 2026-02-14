@@ -13,6 +13,9 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { supabase } from '../config/supabase';
+import createLogger from '../utils/logger';
+
+const log = createLogger('NotificationService');
 
 // ============================================================================
 // TYPES
@@ -97,7 +100,7 @@ export const NotificationService = {
    * Call this once when the app starts (in NotificationContext)
    */
   async init(): Promise<void> {
-    console.log('[NotificationService] Initializing...');
+    log.info('Initializing...');
     
     // Setup Android channels
     if (Platform.OS === 'android') {
@@ -107,7 +110,7 @@ export const NotificationService = {
     // Setup interactive notification categories
     await this.setupNotificationCategories();
     
-    console.log('[NotificationService] Initialized successfully');
+    log.info('Initialized successfully');
   },
 
   /**
@@ -125,7 +128,7 @@ export const NotificationService = {
         lightColor: (channel as any).lightColor,
       });
     }
-    console.log('[NotificationService] Android channels configured');
+    log.info('Android channels configured');
   },
 
   /**
@@ -195,7 +198,7 @@ export const NotificationService = {
       }
       
       if (finalStatus !== 'granted') {
-        console.log('[NotificationService] Permission denied');
+        log.warn('Permission denied');
         return null;
       }
 
@@ -203,9 +206,9 @@ export const NotificationService = {
       // This is the key difference - we use getDevicePushTokenAsync, not getExpoPushTokenAsync
       const tokenData = await Notifications.getDevicePushTokenAsync();
       
-      console.log('[NotificationService] Token obtained:', {
+      log.info('Token obtained:', {
         type: tokenData.type,
-        tokenPreview: tokenData.data.substring(0, 20) + '...',
+        token: tokenData.data.substring(0, 15) + '...'
       });
 
       return {
@@ -213,7 +216,7 @@ export const NotificationService = {
         token: tokenData.data,
       };
     } catch (error: any) {
-      console.error('[NotificationService] Token registration failed:', error.message);
+      log.error('Token registration failed:', error.message);
       return null;
     }
   },
@@ -234,11 +237,11 @@ export const NotificationService = {
       .eq('id', userId);
 
     if (error) {
-      console.error('[NotificationService] Failed to save token:', error.message);
+      log.error('Failed to save token:', error.message);
       return false;
     }
     
-    console.log('[NotificationService] Token saved to database');
+    log.info('Token saved to database');
     return true;
   },
 
@@ -256,7 +259,7 @@ export const NotificationService = {
       })
       .eq('id', userId);
     
-    console.log('[NotificationService] Token cleared from database');
+    log.info('Token cleared from database');
   },
 
   // --------------------------------------------------------------------------
@@ -287,7 +290,7 @@ export const NotificationService = {
   async scheduleNotification(payload: ScheduledNotificationPayload): Promise<string | null> {
     // Don't schedule if already passed
     if (payload.triggerDate.getTime() < Date.now()) {
-      console.log('[NotificationService] Skipping past notification');
+      log.info('Skipping past notification');
       return null;
     }
 
@@ -332,11 +335,12 @@ export const NotificationService = {
       });
     }
 
+    log.info(`Scheduling class reminder for ${subjectName} at ${triggerDate.toLocaleTimeString()}`);
     return this.scheduleNotification({
       title: `📚 Upcoming: ${subjectName}`,
       body: `${classDetails} starts in 10 minutes`,
       triggerDate,
-      data: { type: 'CLASS_REMINDER' },
+      data: { type: 'CLASS_REMINDER', subjectName },
       channelId: CHANNELS.REMINDERS.id,
       categoryId: 'REMINDER',
     });
@@ -379,7 +383,7 @@ export const NotificationService = {
     imageUrl?: string // Added parameter for image
   ): Promise<boolean> {
     if (!recipientToken) {
-      console.log('[NotificationService] No recipient token provided');
+      log.warn('No recipient token provided');
       return false;
     }
 
@@ -397,31 +401,31 @@ export const NotificationService = {
       });
 
       if (error) {
-        console.warn('[NotificationService] Push failed (Backend):', error.message);
+        log.warn('Push failed (Backend):', error.message);
         
         // Try to extract the backend error message from the response context
         if (error.context && typeof error.context.json === 'function') {
            try {
              const errorBody = await error.context.json();
-             console.warn('👇 BACKEND ERROR RESPONSE 👇');
-             console.warn(JSON.stringify(errorBody, null, 2));
+             log.warn('👇 BACKEND ERROR RESPONSE 👇');
+             log.warn(JSON.stringify(errorBody, null, 2));
              if (errorBody && errorBody.error && errorBody.error.includes("secret")) {
-                 console.warn("💡 HINT: Your Supabase secret might be missing or invalid.");
+                 log.warn("💡 HINT: Your Supabase secret might be missing or invalid.");
              }
            } catch (readError) {
-             console.warn('Could not read error body:', readError);
+             log.warn('Could not read error body:', readError);
            }
         } else {
-             console.warn('Full Error Object:', JSON.stringify(error, null, 2));
+             log.warn('Full Error Object:', JSON.stringify(error, null, 2));
         }
         
         return false;
       }
 
-      console.log('[NotificationService] Push sent successfully');
+      log.info('Push sent successfully');
       return true;
     } catch (error: any) {
-      console.error('[NotificationService] Push failed:', error.message);
+      log.error('Push failed:', error.message);
       return false;
     }
   },
@@ -435,7 +439,22 @@ export const NotificationService = {
    */
   async cancelAllScheduled(): Promise<void> {
     await Notifications.cancelAllScheduledNotificationsAsync();
-    console.log('[NotificationService] All scheduled notifications cancelled');
+    log.info('All scheduled notifications cancelled');
+  },
+
+  /**
+   * Cancel only CLASS_REMINDER notifications, preserving event reminders etc.
+   */
+  async cancelClassReminders(): Promise<void> {
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    let cancelled = 0;
+    for (const notification of scheduled) {
+      if (notification.content.data?.type === 'CLASS_REMINDER') {
+        await Notifications.cancelScheduledNotificationAsync(notification.identifier);
+        cancelled++;
+      }
+    }
+    log.info(`Cancelled ${cancelled} class reminders (preserved ${scheduled.length - cancelled} others)`);
   },
 
   /**
@@ -473,12 +492,12 @@ export const NotificationService = {
         .lt('created_at', sevenDaysAgo.toISOString());
         
       if (error) {
-        console.log('[NotificationService] Cleanup error:', error.message);
+        log.warn('Cleanup error:', error.message);
       } else {
-        console.log('[NotificationService] Old notifications cleaned up');
+        log.info('Old notifications cleaned up');
       }
     } catch (e: any) {
-      console.log('[NotificationService] Cleanup exception:', e.message);
+      log.error('Cleanup exception:', e.message);
     }
   },
 

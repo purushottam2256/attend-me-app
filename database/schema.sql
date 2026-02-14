@@ -360,6 +360,74 @@ CREATE INDEX idx_logs_status ON public.attendance_logs(status);
 CREATE INDEX idx_logs_marked_at ON public.attendance_logs(marked_at);
 
 -- ----------------------------------------------------------------------------
+-- 11b. LEAVES
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.leaves (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES public.profiles(id),
+    reason TEXT NOT NULL,
+    start_date TIMESTAMPTZ NOT NULL,
+    end_date TIMESTAMPTZ NOT NULL,
+    leave_type TEXT NOT NULL, -- 'full_day' | 'half_day'
+    status request_status DEFAULT 'pending',
+    admin_comment TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 2. Ensure columns exist (in case table existed but was old)
+DO $$
+BEGIN
+    -- Add status if missing
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='leaves' AND column_name='status') THEN
+        ALTER TABLE public.leaves ADD COLUMN status request_status DEFAULT 'pending';
+    END IF;
+
+    -- Add admin_comment if missing
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='leaves' AND column_name='admin_comment') THEN
+        ALTER TABLE public.leaves ADD COLUMN admin_comment TEXT;
+    END IF;
+END $$;
+
+-- 3. Safely Create Indexes
+CREATE INDEX IF NOT EXISTS idx_leaves_user ON public.leaves(user_id);
+CREATE INDEX IF NOT EXISTS idx_leaves_status ON public.leaves(status);
+
+-- 4. Create Notification Trigger Function (OR REPLACE handles updates)
+CREATE OR REPLACE FUNCTION public.handle_leave_status_update()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF (OLD.status != NEW.status) THEN
+        INSERT INTO public.notifications (
+            user_id,
+            type,
+            title,
+            body,
+            priority,
+            data
+        ) VALUES (
+            NEW.user_id,
+            'management_update',
+            'Leave Request Update',
+            'Your leave request has been ' || UPPER(NEW.status::text),
+            'high',
+            jsonb_build_object('leave_id', NEW.id, 'status', NEW.status, 'comment', NEW.admin_comment)
+        );
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 5. Attach Trigger (Drop first to ensure clean state)
+DROP TRIGGER IF EXISTS on_leave_status_change ON public.leaves;
+
+CREATE TRIGGER on_leave_status_change
+    AFTER UPDATE ON public.leaves
+    FOR EACH ROW
+    WHEN (OLD.status IS DISTINCT FROM NEW.status)
+    EXECUTE FUNCTION public.handle_leave_status_update();
+
+-- ----------------------------------------------------------------------------
 -- 12. ATTENDANCE PERMISSIONS (OD & Leave)
 -- ----------------------------------------------------------------------------
 CREATE TABLE public.attendance_permissions (
@@ -1559,6 +1627,137 @@ CREATE TRIGGER on_swap_created
   AFTER INSERT ON public.class_swaps
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_new_swap();
+
+-- ============================================================================
+-- PUSH NOTIFICATION TRIGGERS FOR MANAGEMENT ANNOUNCEMENTS
+-- ============================================================================
+-- These triggers auto-send push notifications when events/holidays/exams are added
+
+-- Enable pg_net extension (required for HTTP calls)
+CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions;
+
+-- Function to send push to ALL faculty when calendar event is created
+CREATE OR REPLACE FUNCTION notify_calendar_event()
+RETURNS TRIGGER AS $$
+DECLARE
+  faculty_token TEXT;
+  event_emoji TEXT;
+  notification_title TEXT;
+  notification_body TEXT;
+  supabase_url TEXT := 'YOUR_SUPABASE_URL'; -- e.g., 'https://xyz.supabase.co'
+  service_key TEXT := 'YOUR_SERVICE_ROLE_KEY';
+BEGIN
+  -- Determine emoji and title based on event type
+  CASE NEW.type
+    WHEN 'exam' THEN
+      event_emoji := '📝';
+      notification_title := event_emoji || ' Exam Scheduled';
+    WHEN 'holiday' THEN
+      event_emoji := '🎉';
+      notification_title := event_emoji || ' Holiday Announced';
+    WHEN 'event' THEN
+      event_emoji := '📢';
+      notification_title := event_emoji || ' College Event';
+    ELSE
+      event_emoji := '📌';
+      notification_title := event_emoji || ' Announcement';
+  END CASE;
+
+  notification_body := NEW.title || ' on ' || TO_CHAR(NEW.date, 'Mon DD, YYYY');
+
+  -- Loop through all faculty with push tokens
+  FOR faculty_token IN 
+    SELECT push_token FROM profiles 
+    WHERE push_token IS NOT NULL 
+      AND role = 'faculty'
+      AND notifications_enabled = true
+  LOOP
+    -- Send push via Edge Function
+    PERFORM net.http_post(
+      url := supabase_url || '/functions/v1/send-push',
+      headers := jsonb_build_object(
+        'Authorization', 'Bearer ' || service_key,
+        'Content-Type', 'application/json'
+      ),
+      body := jsonb_build_object(
+        'token', faculty_token,
+        'title', notification_title,
+        'body', notification_body,
+        'data', jsonb_build_object('type', 'CALENDAR_EVENT', 'eventId', NEW.id)
+      )
+    );
+  END LOOP;
+
+  -- Also create in-app notifications for all faculty
+  INSERT INTO notifications (user_id, type, title, body, is_read)
+  SELECT 
+    id, 
+    'alert', 
+    notification_title, 
+    notification_body, 
+    false
+  FROM profiles 
+  WHERE role = 'faculty' AND notifications_enabled = true;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger on academic_calendar
+DROP TRIGGER IF EXISTS on_calendar_insert ON academic_calendar;
+CREATE TRIGGER on_calendar_insert
+  AFTER INSERT ON academic_calendar
+  FOR EACH ROW
+  EXECUTE FUNCTION notify_calendar_event();
+
+-- ============================================================================
+-- IMPORTANT: REPLACE THESE VALUES IN notify_calendar_event() BEFORE RUNNING
+-- ============================================================================
+-- 1. supabase_url: Your Supabase project URL (e.g., 'https://abcd1234.supabase.co')
+-- 2. service_key: Your Service Role Key (from Settings → API → service_role)
+--
+-- SECURITY NOTE: The service_role key is embedded in the function. This is
+-- acceptable because the function runs with SECURITY DEFINER (database context).
+-- ============================================================================
+
+-- ============================================================================
+-- AUTO-DELETE OLD HISTORY RECORDS (3+ months) using pg_cron
+-- ============================================================================
+-- NOTE: pg_cron requires Pro plan or self-hosted Supabase.
+-- Go to: Supabase Dashboard → Database → Extensions → Search "pg_cron" → Enable
+
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+
+-- Cleanup function
+CREATE OR REPLACE FUNCTION cleanup_old_history()
+RETURNS void AS $$
+DECLARE
+  subs_deleted INTEGER;
+  swaps_deleted INTEGER;
+BEGIN
+  -- Delete substitution requests older than 3 months
+  DELETE FROM substitutions
+  WHERE date < NOW() - INTERVAL '3 months'
+    AND status IN ('accepted', 'declined');
+  GET DIAGNOSTICS subs_deleted = ROW_COUNT;
+  
+  -- Delete swap requests older than 3 months
+  DELETE FROM class_swaps
+  WHERE date < NOW() - INTERVAL '3 months'
+    AND status IN ('accepted', 'declined');
+  GET DIAGNOSTICS swaps_deleted = ROW_COUNT;
+  
+  -- Log the cleanup
+  RAISE NOTICE 'Cleanup complete: % substitutions, % swaps deleted', subs_deleted, swaps_deleted;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Schedule the cron job (runs every Sunday at 3:00 AM UTC)
+SELECT cron.schedule(
+  'cleanup-old-history',      -- Job name
+  '0 3 * * 0',                -- Cron expression: At 03:00 on Sunday
+  $$SELECT cleanup_old_history()$$
+);
 
 -- ============================================================================
 -- END OF SCHEMA

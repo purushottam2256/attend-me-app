@@ -193,19 +193,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({
           onPress={handleTap}
           activeOpacity={0.85}
         >
-          {/* Avatar */}
-          <View style={[styles.avatar, { 
-            backgroundColor: statusStyle.avatarBg,
-            borderColor: statusStyle.accent,
-          }]}>
-            {photoUrl ? (
-              <Image source={{ uri: photoUrl }} style={styles.avatarImage} />
-            ) : (
-              <Text style={[styles.avatarText, { color: statusStyle.text }]}>
-                {getInitials(name)}
-              </Text>
-            )}
-          </View>
+          {/* Avatar Removed */}
 
           {/* Info */}
           <View style={styles.info}>
@@ -287,7 +275,8 @@ const styles = StyleSheet.create({
   },
   info: {
     flex: 1,
-    marginLeft: scale(10),
+    flex: 1,
+    marginLeft: 0, // Removed margin since avatar is gone
   },
   name: {
     fontSize: normalizeFont(14),

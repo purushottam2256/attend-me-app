@@ -33,6 +33,7 @@ import { Colors } from '../../../constants';
 import { cacheProfile, getCachedProfile, cacheTimetable, getCachedTimetable } from '../../../services/offlineService';
 import { useConnectionStatus } from '../../../hooks';
 import { NotificationService } from '../../../services/NotificationService';
+import { LeaveHistory } from '../components/LeaveHistory';
 import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive'; // Import responsive utils
 
 interface ProfileScreenProps {
@@ -128,13 +129,24 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
 
   const loadHolidays = async () => {
       try {
+        // User requested 'holidays' table strictly
         const { data } = await supabase
-            .from('academic_calendar')
+            .from('holidays') 
             .select('*')
             .gte('date', new Date().toISOString())
             .order('date', { ascending: true })
             .limit(5);
-        if (data) setHolidays(data);
+            
+        if (data) {
+            // Map potential schema differences (e.g. name vs title)
+            const mappedData = data.map((h: any) => ({
+                ...h,
+                title: h.title || h.name || 'Holiday',
+                type: h.type || 'holiday',
+                description: h.description || ''
+            }));
+            setHolidays(mappedData);
+        }
       } catch (e) {
         console.error('Error loading holidays:', e);
       }
@@ -287,7 +299,36 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
         setLeaveModalVisible(false);
         showZenToast('Application Sent Successfully');
         setLeaveReason('');
-        // Notify HOD logic would be ideally backend trigger, but we simulate success here
+
+        // Trigger FCM Push Notification (Simulating backend trigger)
+        // In a real app, the backend would notify the HOD. 
+        // Here, we send a "Confirmation" push to the CURRENT USER to verify FCM works.
+        // Re-using user from outer scope if available, or just ensuring we don't redeclare
+        
+        if (user) {
+            // Get current user's token to self-notify
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('push_token')
+                .eq('id', user.id)
+                .single();
+                
+            if (profile?.push_token) {
+                await NotificationService.sendPushNotification(
+                    profile.push_token,
+                    'Leave Request Submitted',
+                    `Your leave for ${leaveFrom.toLocaleDateString()} has been sent to the HOD.`,
+                    { type: 'LEAVE_REQUEST', leaveId: 'pending' },
+                    'REQUESTS'
+                );
+            } else {
+                // Fallback if no token (e.g. emulator)
+                await NotificationService.showLocalNotification({
+                    title: 'Leave Request Submitted',
+                    body: `Your leave for ${leaveFrom.toLocaleDateString()} has been sent.`,
+                });
+            }
+        }
       } catch (err) {
         showZenToast('Failed to apply for leave.', 'error');
         console.error(err);
@@ -1123,6 +1164,14 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
                       <TouchableOpacity onPress={handleReportIssue} style={[styles.saveBtn, { backgroundColor: '#EF4444', paddingHorizontal: 32 }]}>
                           {isSubmittingReport ? <ActivityIndicator color="#FFF" /> : <Text style={styles.saveText}>Submit Report</Text>}
                       </TouchableOpacity>
+                  </View>
+
+                  <View style={{ marginTop: 24, height: 1, backgroundColor: isDark ? '#333' : '#E2E8F0' }} />
+                  
+                  <Text style={{ marginTop: 16, marginBottom: 12, fontWeight: '600', color: isDark ? '#94A3B8' : '#64748B', fontSize: 13, textTransform: 'uppercase', letterSpacing: 0.5 }}>Request History</Text>
+                  
+                  <View style={{ flex: 1, minHeight: 200 }}>
+                    <LeaveHistory />
                   </View>
               </View>
           </View>

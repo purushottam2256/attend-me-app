@@ -1,0 +1,5 @@
+{
+  "tasks": {
+    "verify": "deno check functions/process-reminders/index.ts"
+  }
+}

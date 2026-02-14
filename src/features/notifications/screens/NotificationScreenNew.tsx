@@ -11,8 +11,12 @@ import { useTheme } from '../../../contexts/ThemeContext';
 import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive';
 import { useNotifications } from '../../../contexts/NotificationContext';
 import { supabase } from '../../../config/supabase';
+import { NotificationService } from '../../../services/NotificationService';
+import { NotificationRepository } from '../../../services/NotificationRepository'; 
 import { NotificationCard } from '../components/NotificationCard';
 import { SubstituteRequestCard } from '../components/SubstituteRequestCard';
+import { LeaveRequestCard } from '../components/LeaveRequestCard';
+import { NotificationSkeleton } from '../../../components/ui/LoadingAnimation'; // Import Skeleton
 import { NotificationDetailModal } from '../components/NotificationDetailModal';
 import { ConfirmationModal } from '../../../components/ConfirmationModal';
 import { ZenToast } from '../../../components/ZenToast';
@@ -89,13 +93,38 @@ const ListItem = React.memo(({
     );
   }
 
+  // Leave Cards (New) or Proxy Notifications
+  if (item.type === 'leave' || item.type === 'leave_proxy') {
+      return (
+          <Swipeable
+            renderRightActions={(_progress, _dragX) => (
+              <View style={{ width: scale(80), justifyContent: 'center', alignItems: 'center', marginBottom: verticalScale(12) }}>
+                <TouchableOpacity 
+                  style={{
+                    width: scale(60), height: scale(60), borderRadius: moderateScale(30), backgroundColor: '#EF4444', 
+                    justifyContent: 'center', alignItems: 'center',
+                    shadowColor: '#EF4444', shadowOpacity: 0.3, shadowRadius: moderateScale(5)
+                  }}
+                  onPress={() => onAction(item.id, 'delete')}
+                >
+                  <Ionicons name="trash-outline" size={normalizeFont(24)} color="#FFF" />
+                </TouchableOpacity>
+              </View>
+            )}
+            overshootRight={false}
+          >
+             <LeaveRequestCard item={item} />
+          </Swipeable>
+      );
+  }
+
   // Notification Card - WhatsApp style
   return (
     <NotificationCard
       {...item}
       timestamp={formatDistanceToNow(new Date(item.timestamp), { addSuffix: true })}
       isDark={isDark}
-      icon={item.type === 'request' ? 'swap-horizontal' : item.type === 'alert' ? 'time-outline' : 'notifications-outline'}
+      icon={item.icon || (item.type === 'request' ? 'swap-horizontal' : item.type === 'alert' ? 'time-outline' : 'notifications-outline')}
       selectionMode={selectionMode}
       isSelected={isSelected}
       onPress={selectionMode ? () => onToggle(item.id) : () => onPressNotif(item)}
@@ -109,23 +138,33 @@ const ListItem = React.memo(({
   );
 });
 
-type FilterType = 'all' | 'requests' | 'accepted' | 'events' | 'system';
+import { getSlotLabel } from '../../../utils/timeUtils';
+
+
+type FilterType = 'all' | 'requests' | 'accepted' | 'events' | 'management' | 'leaves';
 
 export const NotificationScreen = ({ navigation }: any) => {
   const { isDark } = useTheme();
   const insets = useSafeAreaInsets();
-  const { refreshNotifications, respondToSubstituteRequest } = useNotifications();
+  const { refreshNotifications, respondToSubstituteRequest, markNotificationAsRead, markNotificationsAsRead } = useNotifications();
   
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [notifications, setNotifications] = useState<any[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
   const [swaps, setSwaps] = useState<any[]>([]);
+  const [leaves, setLeaves] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const NOTIFICATIONS_PER_PAGE = 20;
 
   // Selection Mode
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [processedIds] = useState<Set<string>>(new Set());
+  const viewableItemsRef = useRef<Set<string>>(new Set()); // For auto-read
 
   // Modals
   const [selectedNotification, setSelectedNotification] = useState<any>(null);
@@ -183,116 +222,160 @@ export const NotificationScreen = ({ navigation }: any) => {
     setToast({ visible: true, message, type });
   };
 
-  const loadData = async () => {
+  const loadData = async (pageNum = 0) => {
     try {
+      if (pageNum === 0 && !refreshing) setInitialLoading(true);
+      if (pageNum > 0) setLoadingMore(true);
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Fetch Hidden Items first
+      // 1. Get Deleted/Hidden IDs (Merge Supabase + Local Cache)
       let hiddenSet = new Set<string>();
+      
+      // Local cache (Sync)
       try {
-        const { data: hiddenData } = await supabase
-          .from('hidden_items')
-          .select('item_id')
-          .eq('user_id', user.id);
-        
-        if (hiddenData) {
-          hiddenData.forEach((item: any) => hiddenSet.add(item.item_id));
-        }
+          const localDeleted = await NotificationRepository.getDeletedIds();
+          localDeleted.forEach(id => hiddenSet.add(id));
       } catch (err) {
-        console.log('Hidden items error', err);
+          console.log('Local deleted cache error', err);
       }
 
-      // ========================================
-      // SUBSTITUTIONS - Proper Targeting
-      // ========================================
-      // 1. Pending requests: Only show if I am the RECEIVER (substitute_faculty_id)
-      // 2. Accepted/Declined: Show if I am the SENDER (original_faculty_id) - to see responses
-      const { data: pendingSubsToMe } = await supabase
-        .from('substitutions')
-        .select(`
-          *, 
-          original_faculty:profiles!substitutions_original_faculty_id_fkey(full_name), 
-          subject:subjects!substitutions_subject_id_fkey(name, code)
-        `)
-        .eq('substitute_faculty_id', user.id) // Only requests TO me
-        .eq('status', 'pending')
-        .order('requested_at', { ascending: false });
+      // Remote cache (Async)
+      if (pageNum === 0) {
+        try {
+          const { data: hiddenData } = await supabase
+            .from('hidden_items')
+            .select('item_id')
+            .eq('user_id', user.id);
+          
+          if (hiddenData) {
+            hiddenData.forEach((item: any) => hiddenSet.add(item.item_id));
+          }
+        } catch (err) {
+          console.log('Hidden items error', err);
+        }
+      }
 
-      const { data: respondedSubsFromMe } = await supabase
-        .from('substitutions')
-        .select(`
-          *, 
-          original_faculty:profiles!substitutions_original_faculty_id_fkey(full_name), 
-          subject:subjects!substitutions_subject_id_fkey(name, code)
-        `)
-        .eq('original_faculty_id', user.id) // Requests I sent
-        .neq('status', 'pending') // That have been responded to
-        .order('requested_at', { ascending: false });
+      // 2. Fetch Requests, Swaps, Leaves (ONLY on first page)
+      // LIMIT all to 20 recent items to avoid massive fetches. 
+      // Infinite scroll usually drives the 'notifications' list, but users can see all by clearing filters or we can add specific pagination later.
+      if (pageNum === 0) {
+        const LIMIT = 20;
 
-      const allSubs = [
-        ...(pendingSubsToMe || []),
-        ...(respondedSubsFromMe || [])
-      ].filter((r: any) => !hiddenSet.has(r.id));
-      
-      setRequests(allSubs);
+        // ... Substitutions ...
+        const { data: pendingSubsToMe } = await supabase
+          .from('substitutions')
+          .select(`*, original_faculty:profiles!substitutions_original_faculty_id_fkey(full_name), subject:subjects!substitutions_subject_id_fkey(name, code)`)
+          .eq('substitute_faculty_id', user.id)
+          .order('requested_at', { ascending: false })
+          .limit(LIMIT);
 
-      // ========================================
-      // SWAPS - Proper Targeting
-      // ========================================
-      // 1. Pending swaps: Only show if I am faculty_b (the receiver)
-      // 2. Accepted/Declined: Show if I am faculty_a (the sender) - to see responses
-      const { data: pendingSwapsToMe } = await supabase
-        .from('class_swaps')
-        .select(`
-          *, 
-          faculty_a:profiles!class_swaps_faculty_a_id_fkey(full_name), 
-          faculty_b:profiles!class_swaps_faculty_b_id_fkey(full_name)
-        `)
-        .eq('faculty_b_id', user.id) // Only swaps TO me
-        .eq('status', 'pending')
-        .order('requested_at', { ascending: false });
+        const { data: respondedSubsFromMe } = await supabase
+          .from('substitutions')
+          .select(`*, original_faculty:profiles!substitutions_original_faculty_id_fkey(full_name), subject:subjects!substitutions_subject_id_fkey(name, code)`)
+          .eq('original_faculty_id', user.id)
+          .order('requested_at', { ascending: false })
+          .limit(LIMIT);
 
-      const { data: respondedSwapsFromMe } = await supabase
-        .from('class_swaps')
-        .select(`
-          *, 
-          faculty_a:profiles!class_swaps_faculty_a_id_fkey(full_name), 
-          faculty_b:profiles!class_swaps_faculty_b_id_fkey(full_name)
-        `)
-        .eq('faculty_a_id', user.id) // Swaps I sent
-        .neq('status', 'pending') // That have been responded to
-        .order('requested_at', { ascending: false });
+        const allSubs = [...(pendingSubsToMe || []), ...(respondedSubsFromMe || [])]
+          .filter((r: any) => !hiddenSet.has(r.id));
+        setRequests(allSubs);
 
-      const allSwaps = [
-        ...(pendingSwapsToMe || []),
-        ...(respondedSwapsFromMe || [])
-      ].filter((s: any) => !hiddenSet.has(s.id));
+        // ... Swaps ...
+        const { data: pendingSwapsToMe } = await supabase
+          .from('class_swaps')
+          .select(`*, faculty_a:profiles!class_swaps_faculty_a_id_fkey(full_name), faculty_b:profiles!class_swaps_faculty_b_id_fkey(full_name)`)
+          .eq('faculty_b_id', user.id)
+          .order('requested_at', { ascending: false })
+          .limit(LIMIT);
 
-      setSwaps(allSwaps);
+        const { data: respondedSwapsFromMe } = await supabase
+          .from('class_swaps')
+          .select(`*, faculty_a:profiles!class_swaps_faculty_a_id_fkey(full_name), faculty_b:profiles!class_swaps_faculty_b_id_fkey(full_name)`)
+          .eq('faculty_a_id', user.id)
+          .order('requested_at', { ascending: false })
+          .limit(LIMIT);
 
-      // Fetch Notifications
+        const allSwaps = [...(pendingSwapsToMe || []), ...(respondedSwapsFromMe || [])]
+          .filter((s: any) => !hiddenSet.has(s.id));
+
+        // Enrich Swaps
+        const enrichedSwaps = await Promise.all(allSwaps.map(async (swap: any) => {
+            const { data: slotA } = await supabase.from('master_timetables').select('subjects:subject_id(name, code), target_dept, target_year, target_section, start_time, end_time').eq('faculty_id', swap.faculty_a_id).eq('slot_id', swap.slot_a_id).maybeSingle();
+            const { data: slotB } = await supabase.from('master_timetables').select('subjects:subject_id(name, code), target_dept, target_year, target_section, start_time, end_time').eq('faculty_id', swap.faculty_b_id).eq('slot_id', swap.slot_b_id).maybeSingle();
+            return { ...swap, slot_a_details: slotA, slot_b_details: slotB };
+        }));
+        setSwaps(enrichedSwaps);
+
+        // ... Leaves ...
+        const { data: leaveData } = await supabase
+          .from('leaves')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(LIMIT);
+        
+        if (leaveData) {
+          setLeaves(leaveData.filter((l: any) => !hiddenSet.has(l.id)));
+        }
+      }
+
+      // 3. Fetch Notifications (Paginated)
+      const from = pageNum * NOTIFICATIONS_PER_PAGE;
+      const to = from + NOTIFICATIONS_PER_PAGE - 1;
+
       const { data: notifData } = await supabase
         .from('notifications')
         .select('*')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
-        .limit(50);
+        .range(from, to);
 
-      if (notifData) setNotifications(notifData);
-      await refreshNotifications();
+      if (notifData) {
+        // Filter out locally deleted ones
+        const visibleNotifs = notifData.filter((n: any) => !hiddenSet.has(n.id));
+        
+        if (pageNum === 0) {
+          setNotifications(visibleNotifs);
+        } else {
+          setNotifications(prev => [...prev, ...visibleNotifs]);
+        }
+
+        if (notifData.length < NOTIFICATIONS_PER_PAGE) {
+            setHasMore(false);
+        } else {
+            setHasMore(true);
+        }
+      } else {
+        setHasMore(false);
+      }
+
+      if (pageNum === 0) await refreshNotifications();
 
     } catch (e: any) {
       console.log(e);
+    } finally {
+      setInitialLoading(false);
+      setLoadingMore(false);
+      setRefreshing(false);
     }
   };
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(0); }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadData();
-    setRefreshing(false);
+    setPage(0);
+    setHasMore(true);
+    await loadData(0);
+  };
+
+  const onLoadMore = () => {
+      if (!hasMore || loadingMore || refreshing) return;
+      const nextPage = page + 1;
+      setPage(nextPage);
+      loadData(nextPage);
   };
 
   const toggleSelection = useCallback((id: string) => {
@@ -328,6 +411,7 @@ export const NotificationScreen = ({ navigation }: any) => {
     notifications.forEach(n => allIds.add(n.id));
     requests.forEach(r => allIds.add(r.id));
     swaps.forEach(s => allIds.add(s.id));
+    leaves.forEach(l => allIds.add(l.id));
     setSelectedIds(allIds);
   };
 
@@ -352,6 +436,7 @@ export const NotificationScreen = ({ navigation }: any) => {
         setNotifications(prev => prev.filter(n => !selectedIds.has(n.id)));
         setRequests(prev => prev.filter(r => !selectedIds.has(r.id)));
         setSwaps(prev => prev.filter(s => !selectedIds.has(s.id)));
+        setLeaves(prev => prev.filter(l => !selectedIds.has(l.id)));
         
         setSelectedIds(new Set());
         setSelectionMode(false);
@@ -392,7 +477,22 @@ export const NotificationScreen = ({ navigation }: any) => {
             });
             if (error) console.log('Hide swaps error:', error);
           }
+
+          // Hide leave requests (soft delete via hidden_items)
+          const leaveIds = idsToRemove.filter(id => leaves.find(l => l.id === id));
+          if (leaveIds.length > 0) {
+            const itemsToHide = leaveIds.map(id => ({
+              user_id: user.id,
+              item_id: id,
+              item_type: 'leave'
+            }));
+            const { error } = await supabase.from('hidden_items').upsert(itemsToHide, { 
+              onConflict: 'user_id,item_id' 
+            });
+            if (error) console.log('Hide leaves error:', error);
+          }
           
+          await NotificationRepository.addDeletedIds(idsToRemove);
           refreshNotifications();
         } catch (err) {
           console.log('Delete error:', err);
@@ -444,7 +544,20 @@ export const NotificationScreen = ({ navigation }: any) => {
             user_id: user.id, item_id: id, item_type: 'swap' 
           }, { onConflict: 'user_id,item_id' });
         }
+      } else {
+        // Try finding in leaves
+        const leave = leaves.find(l => l.id === id);
+        if (leave) {
+          setLeaves(prev => prev.filter(l => l.id !== id));
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            await supabase.from('hidden_items').upsert({ 
+              user_id: user.id, item_id: id, item_type: 'leave' 
+            }, { onConflict: 'user_id,item_id' });
+          }
+        }
       }
+      await NotificationRepository.addDeletedId(id);
       showToast('Removed', 'success');
       return;
     }
@@ -529,11 +642,39 @@ export const NotificationScreen = ({ navigation }: any) => {
     } else {
       setSelectedNotification(item);
       if (!item.is_read && item.type !== 'request') {
+        markNotificationAsRead(item.id);
         setNotifications(prev => prev.map(n => n.id === item.id ? { ...n, is_read: true } : n));
+        // Also update backend fire-and-forget
         supabase.from('notifications').update({ is_read: true }).eq('id', item.id);
       }
     }
   };
+
+  // Effect to trigger actual mark read for items in viewableItemsRef
+  const handleViewableItemsChanged = useRef(({ viewableItems }: any) => {
+      const idsToMark: string[] = [];
+      
+      viewableItems.forEach((viewable: any) => {
+          const item = viewable.item;
+          if (item?.data && 
+              !item.isRead && 
+              item.type !== 'request' && 
+              item.type !== 'swap' && 
+              item.type !== 'leave' &&
+              !viewableItemsRef.current.has(item.id)) {
+                  
+              idsToMark.push(item.id);
+              viewableItemsRef.current.add(item.id);
+          }
+      });
+
+      if (idsToMark.length > 0) {
+        markNotificationsAsRead(idsToMark);
+         // Local state update
+         setNotifications(prev => prev.map(n => idsToMark.includes(n.id) ? { ...n, is_read: true } : n));
+      }
+  }).current;
+
 
   // Section data with filtering
   const sections = useMemo(() => {
@@ -545,7 +686,7 @@ export const NotificationScreen = ({ navigation }: any) => {
         status: req.status,
         title: req.original_faculty?.full_name ? `${req.original_faculty.full_name}` : 'Substitute Request',
         // Professional Message
-        body: `${req.original_faculty?.full_name || 'Faculty'} requests you to cover ${req.subject?.code || 'their class'}.`,
+        body: `${req.original_faculty?.full_name || 'Faculty'} requests you to cover ${req.subject?.code || 'their class'} for ${getSlotLabel(req.slot_id)}.`,
         timestamp: req.requested_at || req.created_at || new Date().toISOString(),
         isRead: req.status !== 'pending',
         data: req,
@@ -553,42 +694,107 @@ export const NotificationScreen = ({ navigation }: any) => {
 
     const swapItems = (swaps || [])
       .filter(s => !processedIds.has(s.id))
-      .map(s => ({
-        id: s.id,
-        type: 'swap',
-        status: s.status,
-        title: s.faculty_a?.full_name || 'Swap Request',
-        // Professional Message
-        body: `${s.faculty_a?.full_name || 'Faculty'} requests a class swap for ${s.slot_a_id?.split('_')[1] || 'Slot A'}.`,
-        timestamp: s.requested_at || s.created_at || new Date().toISOString(),
-        isRead: s.status !== 'pending',
-        data: s,
-      }));
+      .map(s => {
+        // Safe access to enriched details
+        const slotA = s.slot_a_details || {};
+        const slotB = s.slot_b_details || {};
+        const subjectA = slotA.subjects?.code || slotA.subjects?.name || 'Class';
+        const subjectB = slotB.subjects?.code || slotB.subjects?.name || 'Class';
+        const timeA = getSlotLabel(s.slot_a_id);
+        const timeB = getSlotLabel(s.slot_b_id);
+
+        return {
+          id: s.id,
+          type: 'swap',
+          status: s.status,
+          title: s.faculty_a?.full_name || 'Swap Request',
+          // Professional Message: "Swap Period 1 (CS101) with Period 2 (CS102)"
+          body: `Request to swap ${timeA} (${subjectA}) with ${timeB} (${subjectB}).`,
+          timestamp: s.requested_at || s.created_at || new Date().toISOString(),
+          isRead: s.status !== 'pending',
+          data: s,
+        };
+      });
 
     const notifItems = (notifications || [])
-      .filter(n => n.type !== 'substitute_request' && n.type !== 'swap_request') // Remove duplicates that are already in 'requests'/'swaps'
-      .map(n => ({
-      id: n.id,
-      type: n.type === 'class_reminder' ? 'alert' : 'info',
-      status: n.data?.status || null,
-      title: n.title,
-      body: n.body,
-      timestamp: n.created_at,
-      isRead: n.is_read,
-      data: n,
-    }));
+      .filter(n => n.type !== 'substitute_request' && n.type !== 'swap_request') // Remove duplicates
+      .map(n => {
+        // Detect if this is a Leave Notification (Database record)
+        const isLeaveNotif = n.type === 'leave_request' || n.type === 'leave' || (n.data && n.data.type === 'LEAVE_REQUEST') || n.title.includes('Leave');
+        
+        if (isLeaveNotif) {
+             return {
+                 id: n.id,
+                 type: 'leave_proxy', // Distinct type to handle incomplete data
+                 status: n.data?.status || (n.body.includes('APPROVED') ? 'approved' : n.body.includes('REJECTED') ? 'rejected' : 'pending'),
+                 title: n.title,
+                 body: n.body,
+                 timestamp: n.created_at,
+                 isRead: n.is_read,
+                 data: {
+                     // Shim data for LeaveRequestCard
+                     start_date: n.created_at, // Use created_at as fallback
+                     end_date: n.created_at,
+                     reason: n.body, // Use body as reason
+                     status: n.data?.status || (n.body.includes('APPROVED') ? 'approved' : n.body.includes('REJECTED') ? 'rejected' : 'pending'),
+                     leave_type: 'full_day' 
+                 }
+             };
+        }
 
-    let allItems = [...subItems, ...swapItems, ...notifItems];
+        return {
+            id: n.id,
+            type: n.type === 'class_reminder' ? 'alert' : 'info',
+            status: n.data?.status || null,
+            title: n.title,
+            body: n.body,
+            timestamp: n.created_at,
+            isRead: n.is_read,
+            data: n,
+        };
+    });
+
+    const leaveItems = (leaves || [])
+      .map(l => {
+        const start = l.start_date ? format(new Date(l.start_date), 'MMM d') : '';
+        const end = l.end_date ? format(new Date(l.end_date), 'MMM d') : '';
+        const dateStr = start === end ? start : `${start} - ${end}`;
+        
+        let iconName = 'calendar-outline';
+        if (l.status === 'approved') iconName = 'checkmark-circle-outline';
+        else if (l.status === 'rejected') iconName = 'close-circle-outline';
+        else iconName = 'time-outline';
+
+        return {
+          id: l.id,
+          type: 'leave', // This falls through to NotificationCard
+          status: l.status, 
+          title: 'Leave Request',
+          body: `Leave for ${dateStr}: ${l.status.charAt(0).toUpperCase() + l.status.slice(1)}`,
+          timestamp: l.created_at,
+          isRead: true, 
+          icon: iconName, // Pass specific icon
+          data: l,
+        };
+      });
+
+    let allItems = [...subItems, ...swapItems, ...notifItems, ...leaveItems];
 
     // Apply filters
-    if (activeFilter === 'requests') {
+    if (activeFilter === 'all') {
+      // User request: Leaves should be seen in leaves option ONLY.
+      // So we filter OUT leaves from the 'all' view.
+      allItems = [...subItems, ...swapItems, ...notifItems];
+    } else if (activeFilter === 'requests') {
       allItems = allItems.filter(i => i.type === 'request' || i.type === 'swap');
     } else if (activeFilter === 'accepted') {
       allItems = allItems.filter(i => i.status === 'accepted');
     } else if (activeFilter === 'events') {
       allItems = allItems.filter(i => i.type === 'alert');
-    } else if (activeFilter === 'system') {
-      allItems = allItems.filter(i => i.type === 'info');
+    } else if (activeFilter === 'management') {
+      allItems = allItems.filter(i => i.type === 'info' || i.type === 'management_update');
+    } else if (activeFilter === 'leaves') {
+      allItems = allItems.filter(i => i.type === 'leave');
     }
 
     // Sort by timestamp
@@ -648,11 +854,12 @@ export const NotificationScreen = ({ navigation }: any) => {
     return {
       all: unreadNotifs + pendingReqs + pendingSwaps,
       requests: pendingReqs + pendingSwaps,
-      accepted: requests.filter(r => r.status === 'accepted').length + swaps.filter(s => s.status === 'accepted').length,
+      accepted: requests.filter(r => r.status === 'accepted').length + swaps.filter(s => s.status === 'accepted').length + leaves.filter(l => l.status === 'approved').length,
       events: notifications.filter(n => n.type === 'class_reminder' && !n.is_read).length,
-      system: notifications.filter(n => n.type !== 'class_reminder' && n.type !== 'substitute_request' && n.type !== 'swap_request').length,
+      management: notifications.filter(n => n.type !== 'class_reminder' && n.type !== 'substitute_request' && n.type !== 'swap_request').length,
+      leaves: leaves.length,
     };
-  }, [notifications, requests, swaps]);
+  }, [notifications, requests, swaps, leaves]);
 
   // ZEN COLORS
   const zenColors = {
@@ -787,8 +994,9 @@ export const NotificationScreen = ({ navigation }: any) => {
           <FilterPill id="all" label="All" count={counts.all} />
           <FilterPill id="requests" label="Requests" count={counts.requests} />
           <FilterPill id="accepted" label="Accepted" count={counts.accepted} />
+          <FilterPill id="leaves" label="Leaves" count={counts.leaves} />
           <FilterPill id="events" label="Reminders" count={counts.events} />
-          <FilterPill id="system" label="System" count={counts.system} />
+          <FilterPill id="management" label="Management" count={counts.management} />
         </ScrollView>
         <Text style={{ 
           textAlign: 'center', 
@@ -801,7 +1009,11 @@ export const NotificationScreen = ({ navigation }: any) => {
         </Text>
       </LinearGradient>
 
-      {/* Content */}
+      { initialLoading ? (
+         <View style={{ flex: 1, backgroundColor: isDark ? '#0A0F0F' : '#F5F5F5' }}>
+             <NotificationSkeleton />
+         </View>
+      ) : (
       <SectionList
         sections={sections}
         keyExtractor={(item) => item.id}
@@ -838,7 +1050,22 @@ export const NotificationScreen = ({ navigation }: any) => {
           />
         }
         showsVerticalScrollIndicator={false}
+        onEndReached={onLoadMore}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={
+            loadingMore ? (
+                <View style={{ paddingVertical: 20 }}>
+                     <NotificationSkeleton />
+                </View>
+            ) : null
+        }
+        onViewableItemsChanged={handleViewableItemsChanged}
+        viewabilityConfig={{
+            itemVisiblePercentThreshold: 50,
+            minimumViewTime: 500,
+        }}
       />
+      )}
 
 
 

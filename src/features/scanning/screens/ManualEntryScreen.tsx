@@ -272,7 +272,7 @@ export const ManualEntryScreen: React.FC = () => {
       {hasChanges && (
           <View style={[styles.fabContainer, { paddingBottom: insets.bottom + verticalScale(20) }]}>
             <TouchableOpacity 
-                style={styles.fab} 
+                style={[styles.fab, isOfflineMode && { backgroundColor: '#FF9F0A' }]} 
                 onPress={handleSubmit}
                 disabled={submitting}
             >
@@ -280,8 +280,8 @@ export const ManualEntryScreen: React.FC = () => {
                     <ActivityIndicator color="#0D4A4A" />
                 ) : (
                     <>
-                        <Ionicons name="save" size={normalizeFont(20)} color="#0D4A4A" />
-                        <Text style={styles.fabText}>Submit ({filteredStudents.filter(s => s.status === 'absent').length} Absent)</Text>
+                        <Ionicons name={isOfflineMode ? "cloud-upload" : "save"} size={normalizeFont(20)} color="#0D4A4A" />
+                        <Text style={styles.fabText}>{isOfflineMode ? 'Queue & Sync Later' : `Submit (${filteredStudents.filter(s => s.status === 'absent').length} Absent)`}</Text>
                     </>
                 )}
             </TouchableOpacity>

@@ -9,11 +9,11 @@
  * <View style={{ backgroundColor: colors.background }} />
  */
 
-import { useTheme } from '../contexts';
-import { LightTheme, DarkTheme, Gradients, Shadows, Primary, Accent, Success, Danger, Warning, Info, Neutral } from '../constants/Theme';
+import { useTheme, Theme } from '../../contexts';
+import { LightTheme, DarkTheme, Gradients, Shadows, Primary, Accent, Success, Danger, Warning, Info, Neutral } from '../../constants/Theme';
 
 // Extended color type with all theme properties
-export type ThemeColors = typeof LightTheme & {
+export type ThemeColors = Theme & {
   // Gradients
   gradients: typeof Gradients;
   // Shadows

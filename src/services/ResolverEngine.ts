@@ -1,5 +1,8 @@
 import { syncPendingSubmissions } from './offlineService';
 import NetInfo from '@react-native-community/netinfo';
+import createLogger from '../utils/logger';
+
+const log = createLogger('Resolver');
 
 export interface SyncResult {
     success: boolean;
@@ -38,7 +41,7 @@ export class ResolverEngine {
             };
 
         } catch (err: any) {
-            console.error('[Resolver] Fatal Sync Error:', err);
+            log.error('Fatal Sync Error:', err);
             return {
                 success: false,
                 syncedCount: 0,

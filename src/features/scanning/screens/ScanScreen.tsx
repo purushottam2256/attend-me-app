@@ -50,6 +50,7 @@ import {
   type BlockReason,
 } from "../components";
 import { ZenToast } from "../../../components/ZenToast";
+import { PulsingDots } from "../../../components/ui/LoadingAnimation";
 import { scale, verticalScale, moderateScale, normalizeFont } from "../../../utils/responsive";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -954,7 +955,7 @@ export const ScanScreen: React.FC = () => {
   const renderSubmitting = () => (
     <View style={[styles.successContainer, { paddingTop: insets.top }]}>
       <View style={styles.submittingSpinner}>
-        <ActivityIndicator size="large" color={COLORS.accent} />
+        <PulsingDots size="large" color={COLORS.accent} />
       </View>
       <Text style={styles.handshakeTitle}>Submitting Attendance</Text>
       <Text style={styles.handshakeSubtitle}>Please wait...</Text>
@@ -1109,11 +1110,11 @@ export const ScanScreen: React.FC = () => {
           </View>
         </View>
         <TouchableOpacity
-          style={styles.submitButton}
+          style={[styles.submitButton, isOfflineMode && { backgroundColor: '#FF9F0A' }]}
           onPress={handleSubmitPress}
         >
-          <Text style={styles.submitButtonText}>Submit</Text>
-          <Ionicons name="arrow-forward" size={normalizeFont(18)} color="#FFFFFF" />
+          <Text style={styles.submitButtonText}>{isOfflineMode ? 'Save & Sync Later' : 'Submit'}</Text>
+          <Ionicons name={isOfflineMode ? "cloud-upload" : "arrow-forward"} size={normalizeFont(18)} color="#FFFFFF" />
         </TouchableOpacity>
       </View>
     </Animated.View>

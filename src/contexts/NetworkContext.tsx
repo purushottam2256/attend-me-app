@@ -5,6 +5,9 @@
 
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import NetInfo, { NetInfoState } from '@react-native-community/netinfo';
+import createLogger from '../utils/logger';
+
+const log = createLogger('Network');
 
 interface QueuedAction {
   id: string;
@@ -57,7 +60,7 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({ children }) =>
       try {
         await action();
       } catch (error) {
-        console.error('Queued action failed:', error);
+        log.error('Queued action failed:', error);
       }
     }
   };

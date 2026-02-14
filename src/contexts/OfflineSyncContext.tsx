@@ -8,18 +8,23 @@
  * - Manual sync triggers
  */
 
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import {
   cacheAllRosters,
   syncPendingSubmissions,
   getSyncStatus,
   getPendingCount,
+  getCacheAge,
   type SyncStatus,
   syncRosters as syncRostersService,
 } from '../services/offlineService';
+import { registerBackgroundSync, triggerForegroundSync } from '../services/backgroundSync';
 import { getTodaySchedule } from '../services/dashboardService';
 import { supabase } from '../config/supabase';
+import createLogger from '../utils/logger';
+
+const log = createLogger('OfflineSync');
 
 interface OfflineSyncContextType {
   // Network status
@@ -29,6 +34,8 @@ interface OfflineSyncContextType {
   syncStatus: SyncStatus;
   isSyncing: boolean;
   lastError: string | null;
+  pendingCount: number;
+  lastSyncAge: string;
   
   // Actions
   syncRosters: () => Promise<{ success: boolean; count: number }>;
@@ -48,11 +55,15 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
   });
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [lastSyncAge, setLastSyncAge] = useState('Never synced');
+  const bgSyncRegistered = useRef(false);
 
   // Refresh sync status
   const refreshStatus = useCallback(async () => {
     const status = await getSyncStatus();
     setSyncStatus(status);
+    const age = await getCacheAge('rosters');
+    setLastSyncAge(age);
   }, []);
 
   // Load initial status
@@ -63,10 +74,23 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
   // Auto-sync pending submissions when coming back online
   useEffect(() => {
     if (justCameOnline && syncStatus.pendingCount > 0) {
-      console.log('[OfflineSync] Network restored - auto-syncing pending submissions');
-      syncPending();
+      log.info('Network restored - auto-syncing pending submissions');
+      triggerForegroundSync().then(result => {
+        log.info('Foreground sync result:', result);
+        refreshStatus();
+      });
     }
   }, [justCameOnline, syncStatus.pendingCount]);
+
+  // Register background sync on first mount
+  useEffect(() => {
+    if (!bgSyncRegistered.current) {
+      bgSyncRegistered.current = true;
+      registerBackgroundSync().then(success => {
+        log.info('Background sync registration:', success ? 'OK' : 'FAILED');
+      });
+    }
+  }, []);
 
   // Auto-sync rosters on launch (once per session)
 
@@ -110,7 +134,7 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
   const [hasInitialSynced, setHasInitialSynced] = useState(false);
   useEffect(() => {
     if (isOnline && !hasInitialSynced) {
-      console.log('[OfflineSync] Triggering initial Smart Roster Sync');
+      log.info('Triggering initial Smart Roster Sync');
       syncRosters();
       setHasInitialSynced(true);
     }
@@ -158,6 +182,8 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
         syncStatus,
         isSyncing,
         lastError,
+        pendingCount: syncStatus.pendingCount,
+        lastSyncAge,
         syncRosters,
         syncPending,
         refreshStatus,

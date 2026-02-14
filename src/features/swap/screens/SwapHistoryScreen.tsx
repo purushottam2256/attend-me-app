@@ -65,7 +65,7 @@ export const SwapHistoryScreen: React.FC = () => {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
-        // 1. Fetch Substitute Requests
+        // 1. Fetch Substitute Requests (latest 30)
         const { data: subs, error: subError } = await supabase
             .from('substitutions')
             .select(`
@@ -74,35 +74,37 @@ export const SwapHistoryScreen: React.FC = () => {
                 subject:subject_id(name, code)
             `)
             .eq('original_faculty_id', user.id)
-            .order('date', { ascending: false });
+            .order('date', { ascending: false })
+            .limit(30);
 
         if (subError) throw subError;
 
-        // Enrich Subs with Time if possible (from slot_id)
-        // Note: This relies on master_timetables being static. 
-        const enrichedSubs = await Promise.all((subs || []).map(async (item: any) => {
-            // derive day from date
-            const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-            const dateObj = new Date(item.date);
-            const dayName = days[dateObj.getDay()];
+        // Batch-fetch time slots for all subs (instead of N+1)
+        const subSlotIds = [...new Set((subs || []).map((s: any) => s.slot_id).filter(Boolean))];
+        let subTimeMap: Record<string, { start_time: string; end_time: string }> = {};
+        if (subSlotIds.length > 0) {
+          const { data: slotData } = await supabase
+            .from('master_timetables')
+            .select('slot_id, start_time, end_time')
+            .eq('faculty_id', user.id)
+            .in('slot_id', subSlotIds);
+          if (slotData) {
+            for (const slot of slotData) {
+              subTimeMap[slot.slot_id] = { start_time: slot.start_time, end_time: slot.end_time };
+            }
+          }
+        }
 
-            // Try to find the time for this slot in master_timetables
-            const { data: slotData } = await supabase
-                .from('master_timetables')
-                .select('start_time, end_time')
-                .eq('faculty_id', user.id)
-                .eq('slot_id', item.slot_id)
-                .eq('day', dayName)
-                .maybeSingle();
-            
-            return {
-                ...item,
-                time_range: slotData ? `${slotData.start_time.slice(0,5)} - ${slotData.end_time.slice(0,5)}` : 'N/A'
-            };
-        }));
+        const enrichedSubs = (subs || []).map((item: any) => {
+          const slot = subTimeMap[item.slot_id];
+          return {
+            ...item,
+            time_range: slot ? `${slot.start_time.slice(0,5)} - ${slot.end_time.slice(0,5)}` : 'N/A'
+          };
+        });
         setSubRequests(enrichedSubs);
 
-        // 2. Fetch Swap Requests
+        // 2. Fetch Swap Requests (latest 30)
         const { data: swaps, error: swapError } = await supabase
             .from('class_swaps')
             .select(`
@@ -110,47 +112,44 @@ export const SwapHistoryScreen: React.FC = () => {
                 faculty_b:faculty_b_id(full_name)
             `)
             .eq('faculty_a_id', user.id)
-            .order('date', { ascending: false });
+            .order('date', { ascending: false })
+            .limit(30);
 
         if (swapError) throw swapError;
-        
-        // Enrich Swaps with BOTH class details
-        const enrichedSwaps = await Promise.all((swaps || []).map(async (item: any) => {
-            const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-            const dateObj = new Date(item.date);
-            const dayName = days[dateObj.getDay()];
 
-            // My Class Details (A)
-            const { data: myClass } = await supabase
-                .from('master_timetables')
-                .select(`
-                    target_dept, target_year, target_section,
-                    start_time, end_time,
-                    subjects:subject_id(name, code)
-                `)
-                .eq('faculty_id', user.id)
-                .eq('slot_id', item.slot_a_id)
-                .eq('day', dayName)
-                .maybeSingle();
+        // Batch-fetch class details for all swaps
+        const allSlotIds = new Set<string>();
+        const allFacultyIds = new Set<string>();
+        allFacultyIds.add(user.id);
+        (swaps || []).forEach((item: any) => {
+          if (item.slot_a_id) allSlotIds.add(item.slot_a_id);
+          if (item.slot_b_id) allSlotIds.add(item.slot_b_id);
+          if (item.faculty_b_id) allFacultyIds.add(item.faculty_b_id);
+        });
 
-            // Their Class Details (B)
-            const { data: theirClass } = await supabase
-                .from('master_timetables')
-                .select(`
-                    target_dept, target_year, target_section,
-                    start_time, end_time,
-                    subjects:subject_id(name, code)
-                `)
-                .eq('faculty_id', item.faculty_b_id)
-                .eq('slot_id', item.slot_b_id)
-                .eq('day', dayName)
-                .maybeSingle();
+        let timetableMap: Record<string, any> = {};
+        if (allSlotIds.size > 0 && allFacultyIds.size > 0) {
+          const { data: ttData } = await supabase
+            .from('master_timetables')
+            .select(`
+              faculty_id, slot_id,
+              target_dept, target_year, target_section,
+              start_time, end_time,
+              subjects:subject_id(name, code)
+            `)
+            .in('faculty_id', [...allFacultyIds])
+            .in('slot_id', [...allSlotIds]);
+          if (ttData) {
+            for (const row of ttData) {
+              timetableMap[`${row.faculty_id}:${row.slot_id}`] = row;
+            }
+          }
+        }
 
-            return {
-                ...item,
-                my_class: myClass,
-                their_class: theirClass
-            };
+        const enrichedSwaps = (swaps || []).map((item: any) => ({
+          ...item,
+          my_class: timetableMap[`${user.id}:${item.slot_a_id}`] || null,
+          their_class: timetableMap[`${item.faculty_b_id}:${item.slot_b_id}`] || null,
         }));
         
         setSwapRequests(enrichedSwaps);
@@ -253,11 +252,7 @@ export const SwapHistoryScreen: React.FC = () => {
             <View>
                  <Text style={{ fontSize: normalizeFont(11), color: colors.textSecondary, marginBottom: verticalScale(6), fontWeight: '600' }}>SUBSTITUTE FACULTY</Text>
                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                     <View style={{ width: scale(32), height: scale(32), borderRadius: moderateScale(16), backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center', marginRight: scale(10) }}>
-                         <Text style={{ color: '#FFF', fontWeight: '700' }}>
-                             {item.substitute_faculty?.full_name?.charAt(0) || '?'}
-                         </Text>
-                     </View>
+                     {/* Avatar Removed */}
                      <Text style={{ fontSize: normalizeFont(14), color: colors.textPrimary, fontWeight: '600' }}>
                          {item.substitute_faculty?.full_name || 'Unknown Faculty'}
                      </Text>

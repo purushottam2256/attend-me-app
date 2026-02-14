@@ -15,12 +15,18 @@ import {
   getClassPermissions
 } from '../../../services/dashboardService';
 import { supabase } from '../../../config/supabase';
-import { 
-  getCachedRoster, 
+import {
+  findCachedRoster, 
   queueSubmission, 
-  isCacheValid 
+  isCacheValid,
+  saveDraftAttendance,
+  getDraftAttendance,
+  clearDraftAttendance
 } from '../../../services/offlineService';
 import { useNetworkStatus } from '../../../hooks/useNetworkStatus';
+import createLogger from '../../../utils/logger';
+
+const log = createLogger('useAttendance');
 
 export interface AttendanceStudent {
   id: string;
@@ -32,6 +38,9 @@ export interface AttendanceStudent {
   detectedAt?: number;
   batch?: number | null;
 }
+
+// Re-export ClassData if needed or define locally
+export 
 
 interface ClassData {
   id?: string;
@@ -136,7 +145,7 @@ export function useAttendance({ classData, batch }: UseAttendanceOptions): UseAt
           setIsOfflineMode(false);
         } catch (onlineErr) {
           if (signal?.aborted) return;
-          console.log('[useAttendance] Online fetch failed, trying cache');
+          log.info('Online fetch failed, trying cache');
         }
       }
       
@@ -144,15 +153,14 @@ export function useAttendance({ classData, batch }: UseAttendanceOptions): UseAt
         const slotIdStr = String(classData.slot_id || '0');
         const slotId = /^\d+$/.test(slotIdStr) ? parseInt(slotIdStr, 10) : 0;
         
-        const cachedRoster = await getCachedRoster(
-          slotId, 
+        const cachedRoster = await findCachedRoster(
           classData.target_dept, 
           classData.target_year, 
           classData.target_section
         );
         
         if (cachedRoster && (await isCacheValid())) {
-          console.log('[useAttendance] Using cached roster');
+          log.info('Using cached roster');
           mappedStudents = cachedRoster.students.map(s => ({
             id: s.id,
             name: s.name,
@@ -180,12 +188,32 @@ export function useAttendance({ classData, batch }: UseAttendanceOptions): UseAt
         }
       }
 
-      if (!signal?.aborted) {
+        // Check for saved draft (offline cache for active session)
+        if (classData.slot_id) {
+            const draft = await getDraftAttendance(classData.slot_id);
+            if (draft && draft.length > 0) {
+                log.info('Loaded draft attendance for slot:', classData.slot_id);
+                // Merge draft statuses
+                const draftMap = new Map(draft.map((d: any) => [d.id, d]));
+                mappedStudents = mappedStudents.map(s => {
+                    const draftStudent = draftMap.get(s.id);
+                    if (draftStudent && draftStudent.status !== 'pending') {
+                        return {
+                            ...s,
+                            status: draftStudent.status,
+                            detectedAt: draftStudent.timestamp
+                        };
+                    }
+                    return s;
+                });
+            }
+        }
+
         setStudents(mappedStudents);
-      }
+
     } catch (err) {
       if (!signal?.aborted) {
-        console.error('Error fetching students:', err);
+        log.error('Error fetching students:', err);
         setError('Failed to load students');
       }
     } finally {
@@ -218,6 +246,17 @@ export function useAttendance({ classData, batch }: UseAttendanceOptions): UseAt
     ));
   }, []);
 
+  // Auto-save draft when students change (Debounced to avoid excessive writes)
+  useEffect(() => {
+      if (!classData?.slot_id || loading || students.length === 0) return;
+
+      const timeoutId = setTimeout(() => {
+          saveDraftAttendance(classData.slot_id!, students);
+      }, 1000); // 1 second debounce
+
+      return () => clearTimeout(timeoutId);
+  }, [students, classData?.slot_id, loading]);
+
   // Submit attendance to Supabase (or queue if offline)
   const handleSubmitAttendance = useCallback(async (): Promise<{ success: boolean; error: string | null; queued?: boolean }> => {
     if (!classData?.slot_id) {
@@ -235,7 +274,7 @@ export function useAttendance({ classData, batch }: UseAttendanceOptions): UseAt
       try {
         await queueSubmission({
           classData: {
-            slotId: parseInt(classData.slot_id),
+            slotId: String(classData.slot_id || '0'),
             subjectName: classData.subject?.name || 'Unknown',
             subjectId: classData.subject?.id, 
             dept: classData.target_dept,
@@ -245,12 +284,18 @@ export function useAttendance({ classData, batch }: UseAttendanceOptions): UseAt
           },
           attendance: records,
           submittedAt: new Date().toISOString(),
+          id: `manual-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          retryCount: 0,
         });
         
-        console.log('[useAttendance] Submission queued for later sync');
+        log.info('Submission queued for later sync');
+        // Clear draft after queuing
+        if (classData.slot_id) {
+            await clearDraftAttendance(classData.slot_id);
+        }
         return { success: true, error: null, queued: true };
       } catch (err) {
-        console.error('[useAttendance] Queue error:', err);
+        log.error('Queue error:', err);
         return { success: false, error: 'Failed to queue submission' };
       }
     }
@@ -293,9 +338,14 @@ export function useAttendance({ classData, batch }: UseAttendanceOptions): UseAt
         return { success: false, error: submitError || 'Failed to submit' };
       }
 
+      // Clear draft after successful submission
+      if (classData.slot_id) {
+          await clearDraftAttendance(classData.slot_id);
+      }
+
       return { success: true, error: null };
     } catch (err) {
-      console.error('Submit error:', err);
+      log.error('Submit error:', err);
       return { success: false, error: 'Submission failed' };
     }
   }, [classData, students, totalCount, isOnline, isOfflineMode]);

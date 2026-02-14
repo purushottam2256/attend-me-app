@@ -6,6 +6,9 @@ import React, { createContext, useContext, useState, useCallback, useEffect } fr
 import { useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LightTheme, DarkTheme } from '../constants/Theme';
+import createLogger from '../utils/logger';
+
+const log = createLogger('Theme');
 
 // Theme type definition - allow compatible string values
 export type Theme = { [K in keyof typeof LightTheme]: string };
@@ -49,7 +52,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
           setMode(saved as any);
         }
       } catch (error) {
-        console.log('Error loading theme:', error);
+        log.error('Error loading theme:', error);
       }
     };
     loadTheme();

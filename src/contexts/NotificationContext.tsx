@@ -14,7 +14,11 @@ import * as Notifications from 'expo-notifications';
 import { supabase } from '../config/supabase';
 import { useAuth } from './AuthContext';
 import { NotificationService, PushTokenData } from '../services/NotificationService';
+import { NotificationRepository } from '../services/NotificationRepository';
 import { navigate, navigateNested } from '../navigation/navigationRef';
+import createLogger from '../utils/logger';
+
+const log = createLogger('Notifications');
 
 // ============================================================================
 // TYPES
@@ -33,6 +37,7 @@ interface NotificationContextData {
     action: 'accept' | 'decline'
   ) => Promise<{ success: boolean; message: string; type: 'success' | 'error' | 'warning' | 'info' }>;
   markNotificationAsRead: (notificationId: string) => Promise<void>;
+  markNotificationsAsRead: (notificationIds: string[]) => Promise<void>;
   markAllAsRead: () => Promise<void>;
 }
 
@@ -130,8 +135,25 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
     // Foreground notification received
     notificationListenerRef.current = Notifications.addNotificationReceivedListener(
       (notification) => {
-        console.log('[NotificationContext] Foreground notification:', notification.request.content.title);
+        const title = notification.request.content.title;
+        const data = notification.request.content.data;
+        log.debug('Foreground notification:', title, data);
+        
+        // Update badge count
         setUnreadCount((prev) => prev + 1);
+
+        // Specific handling for Management Announcements (FCM)
+        if (data?.type === 'announcement' || data?.categoryId === 'ANNOUNCEMENT') {
+            // Show a prominent toast/alert in-app
+            // We use a custom event or context exposure to show this, 
+            // but for now we'll rely on the system banner (configured in NotificationService)
+            // If we wanted a modal, we'd set state here.
+        }
+
+        // Refresh lists if it's a request/swap/leave
+        if (data?.type === 'request' || data?.type === 'swap' || data?.type === 'leave') {
+            fetchUnreadCount();
+        }
       }
     );
 
@@ -151,19 +173,48 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
     const actionId = response.actionIdentifier;
     const data = response.notification.request.content.data as Record<string, any>;
 
-    console.log('[NotificationContext] Response:', { actionId, data });
+    log.debug('Response:', { actionId, data });
 
     // Handle interactive button actions
     switch (actionId) {
       case 'ACCEPT':
-        if (data.requestId) {
-          await respondToSubstituteRequest(data.requestId, 'accept');
+        // The data payload from push might be nested or direct depending on how backend sent it
+        // We'll check data.requestId or data.body.requestId
+        const requestId = data.requestId || (data.body && data.body.requestId);
+        
+        if (requestId) {
+          log.info('Processing ACCEPT action for:', requestId);
+          // Optimistic feedback
+          const result = await respondToSubstituteRequest(requestId, 'accept');
+          
+          // Show feedback even if app was backgrounded (will show when foregrounded)
+          if (result.success) {
+            // Toast or Alert
+             // Since we don't have access to UI toast here easily, we might rely on the `respondToSubstituteRequest` to send a local notification or just log it.
+             // But wait, `respondToSubstituteRequest` returns a result.
+             // We can schedule a local notification to confirm success if the app was in background
+             await NotificationService.showLocalNotification({
+                title: 'Success',
+                body: result.message,
+                categoryId: 'simple'
+             });
+          } else {
+             await NotificationService.showLocalNotification({
+                title: 'Action Failed',
+                body: result.message,
+                categoryId: 'simple'
+             });
+          }
+        } else {
+            log.warn('Missing requestId in push payload', data);
         }
         break;
 
       case 'DECLINE':
-        if (data.requestId) {
-          await respondToSubstituteRequest(data.requestId, 'decline');
+        const reqId = data.requestId || (data.body && data.body.requestId);
+        if (reqId) {
+          await respondToSubstituteRequest(reqId, 'decline');
+          await NotificationService.showLocalNotification({ title: 'Declined', body: 'Request declined', categoryId: 'simple' });
         }
         break;
 
@@ -230,7 +281,7 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
           filter: `user_id=eq.${user.id}`,
         },
         (payload) => {
-          console.log('[NotificationContext] New notification:', payload.new);
+          log.debug('New notification:', payload.new);
           setUnreadCount((prev) => prev + 1);
         }
       )
@@ -280,6 +331,32 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
       .eq('id', notificationId);
 
     setUnreadCount((prev) => Math.max(0, prev - 1));
+  };
+
+  const markNotificationsAsRead = async (notificationIds: string[]) => {
+      try {
+          // Local update
+          await NotificationRepository.markMultipleAsRead(notificationIds);
+          
+          // Server update (fire and forget)
+          const userId = user?.id;
+          const validIds = notificationIds.filter(id => id && typeof id === 'string' && id.trim().length > 0);
+
+          if (userId && validIds.length > 0) {
+              supabase
+                  .from('notifications')
+                  .update({ is_read: true })
+                  .in('id', validIds)
+                  .then(({ error }) => {
+                      if (error) log.error('Failed to batch mark notifications read on server', error);
+                  });
+          }
+
+          // Update state locally
+          fetchUnreadCount();
+      } catch (error) {
+          log.error('Error batch marking notifications as read', error);
+      }
   };
 
   const markAllAsRead = async () => {
@@ -409,7 +486,7 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
         return { success: true, message: 'Request declined', type: 'info' };
       }
     } catch (error: any) {
-      console.error('[NotificationContext] Error responding to request:', error);
+      log.error('Error responding to request:', error);
       return { success: false, message: error.message || 'An error occurred', type: 'error' };
     }
   };
@@ -427,6 +504,7 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
         refreshNotifications: fetchUnreadCount,
         respondToSubstituteRequest,
         markNotificationAsRead,
+        markNotificationsAsRead,
         markAllAsRead,
       }}
     >

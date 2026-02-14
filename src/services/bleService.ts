@@ -7,10 +7,25 @@
  * - Match detected UUIDs with student records
  * - RSSI threshold filtering
  * - Scan timeout protection
+ * 
+ * NOTE ON BACKGROUND SCANNING:
+ * - This implementation primarily supports foreground scanning.
+ * - For true background scanning (screen off/app minimized):
+ *   1. iOS: Requires 'Uses Bluetooth LE accessories' in UIBackgroundModes (Info.plist) and EAS Build.
+ *   2. Android: Requires ACCESS_BACKGROUND_LOCATION and foreground service.
+ *   3. Expo Go: Background scanning is NOT supported.
+ *   4. Library: react-native-ble-plx has limited background support without ejection.
+ * 
+ * NOTE ON RANGE:
+ * - MIN_RSSI is set to -120 to allow maximum range (essentially no filter).
+ * - ScanMode.LowLatency is used for highest duty cycle (fastest detection).
  */
 
 import { BleManager, Device, State, ScanMode } from 'react-native-ble-plx';
 import { Platform, PermissionsAndroid } from 'react-native';
+import createLogger from '../utils/logger';
+
+const log = createLogger('BLE');
 
 // Singleton BLE Manager
 let bleManager: BleManager | null = null;
@@ -27,8 +42,8 @@ const BLE_CONFIG = {
   MIN_RSSI: -120,
   // Maximum scan duration in milliseconds (60 minutes - full class period)
   MAX_SCAN_DURATION: 60 * 60 * 1000,
-  // Log verbose device info
-  VERBOSE_LOGGING: true,
+  // Log verbose device info (only in dev)
+  VERBOSE_LOGGING: __DEV__,
 };
 
 export interface DetectedStudent {
@@ -43,7 +58,7 @@ export type BLEState = 'unknown' | 'resetting' | 'unsupported' | 'unauthorized' 
 export const initBLE = (): BleManager => {
   if (!bleManager) {
     bleManager = new BleManager();
-    console.log('[BLE] Manager initialized');
+    log.info('Manager initialized');
   }
   return bleManager;
 };
@@ -79,7 +94,7 @@ export const requestBLEPermissions = async (): Promise<boolean> => {
         results[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] === 'granted'
       );
       
-      console.log('[BLE] Android 12+ permissions:', granted ? 'GRANTED' : 'DENIED');
+      log.info('Android 12+ permissions:', granted ? 'GRANTED' : 'DENIED');
       return granted;
     } else {
       // Android < 12
@@ -87,13 +102,13 @@ export const requestBLEPermissions = async (): Promise<boolean> => {
         PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
       );
       const granted = result === 'granted';
-      console.log('[BLE] Android < 12 permission:', granted ? 'GRANTED' : 'DENIED');
+      log.info('Android < 12 permission:', granted ? 'GRANTED' : 'DENIED');
       return granted;
     }
   }
   
   // iOS permissions are handled in Info.plist
-  console.log('[BLE] iOS - permissions handled by system');
+  log.info('iOS - permissions handled by system');
   return true;
 };
 
@@ -102,7 +117,7 @@ export const isBLEReady = async (): Promise<{ ready: boolean; reason?: string }>
   const manager = initBLE();
   const state = await manager.state();
   
-  console.log('[BLE] Checking readiness, state:', state);
+  log.debug('Checking readiness, state:', state);
   
   if (state !== State.PoweredOn) {
     if (state === State.PoweredOff) {
@@ -138,7 +153,7 @@ export const startScanning = (
 ): (() => void) => {
   // Guard: prevent double start
   if (isCurrentlyScanning) {
-    console.warn('[BLE] ⚠️ Scan already in progress, ignoring duplicate start');
+    log.warn('⚠️ Scan already in progress, ignoring duplicate start');
     return () => {}; // Return no-op stop function
   }
   
@@ -149,15 +164,15 @@ export const startScanning = (
   // Normalize UUIDs for comparison (lowercase, no dashes for flexibility)
   const normalizedStudentUUIDs = studentUUIDs?.map(normalizeUUID) || [];
   
-  console.log('[BLE] ==========================================');
-  console.log('[BLE] Starting BLE scan');
-  console.log('[BLE] Looking for', normalizedStudentUUIDs.length, 'student UUIDs');
-  console.log('[BLE] Min RSSI:', minRSSI);
-  console.log('[BLE] Timeout:', timeout / 1000, 'seconds');
-  console.log('[BLE] ==========================================');
+  log.info('==========================================');
+  log.info('Starting BLE scan');
+  log.info('Looking for', normalizedStudentUUIDs.length, 'student UUIDs');
+  log.info('Min RSSI:', minRSSI);
+  log.info('Timeout:', timeout / 1000, 'seconds');
+  log.info('==========================================');
   
   if (BLE_CONFIG.VERBOSE_LOGGING && studentUUIDs) {
-    console.log('[BLE] Student UUIDs:', studentUUIDs.slice(0, 5), '...');
+    log.debug('Student UUIDs:', studentUUIDs.slice(0, 5), '...');
   }
   
   isCurrentlyScanning = true;
@@ -165,7 +180,7 @@ export const startScanning = (
   // Set scan timeout
   if (timeout > 0) {
     scanTimeoutHandle = setTimeout(() => {
-      console.log('[BLE] ⏰ Scan timeout reached, stopping');
+      log.info('⏰ Scan timeout reached, stopping');
       stopScanning();
       options?.onTimeout?.();
     }, timeout);
@@ -183,7 +198,7 @@ export const startScanning = (
     },
     (error, device) => {
       if (error) {
-        console.error('[BLE] ❌ Scan Error:', error.message);
+        log.error('❌ Scan Error:', error.message);
         options?.onError?.(error);
         return;
       }
@@ -205,7 +220,7 @@ export const startScanning = (
         if (!detectedDeviceIds.has(deviceId)) {
           detectedDeviceIds.add(deviceId);
           if (BLE_CONFIG.VERBOSE_LOGGING) {
-            console.log('[BLE] 📱 Device found:', {
+            log.debug('📱 Device found:', {
               id: deviceId,
               name: deviceName || 'No Name',
               rssi,
@@ -229,7 +244,7 @@ export const startScanning = (
             
             if (matchIndex >= 0) {
               matchedUUID = studentUUIDs![matchIndex];
-              console.log('[BLE] ✅ Matched via Service UUID');
+              log.info('✅ Matched via Service UUID');
               break;
             }
           }
@@ -245,7 +260,7 @@ export const startScanning = (
           );
           if (matchIndex >= 0) {
             matchedUUID = studentUUIDs![matchIndex];
-            console.log('[BLE] ✅ Matched via Device ID');
+            log.info('✅ Matched via Device ID');
           }
         }
         
@@ -259,12 +274,12 @@ export const startScanning = (
           );
           if (matchIndex >= 0) {
             matchedUUID = studentUUIDs![matchIndex];
-            console.log('[BLE] ✅ Matched via Device Name:', deviceName);
+            log.info('✅ Matched via Device Name:', deviceName);
           }
         }
         
         if (matchedUUID) {
-          console.log('[BLE] ✅ MATCHED:', matchedUUID, 'from device:', deviceName || deviceId, 'RSSI:', rssi);
+          log.info('✅ MATCHED:', matchedUUID, 'from device:', deviceName || deviceId, 'RSSI:', rssi);
           onDeviceFound({
             uuid: matchedUUID,
             rssi,
@@ -287,7 +302,7 @@ export const stopScanning = (): void => {
     return; // Already stopped
   }
   
-  console.log('[BLE] 🛑 Stopping scan');
+  log.info('🛑 Stopping scan');
   
   // Clear timeout
   if (scanTimeoutHandle) {
@@ -310,7 +325,7 @@ export const onBLEStateChange = (
   const manager = initBLE();
   
   const subscription = manager.onStateChange((state) => {
-    console.log('[BLE] State changed:', state);
+    log.info('State changed:', state);
     callback(state.toLowerCase() as BLEState);
   }, true);
   
@@ -322,7 +337,7 @@ export const destroyBLE = (): void => {
   stopScanning();
   
   if (bleManager) {
-    console.log('[BLE] Destroying manager');
+    log.info('Destroying manager');
     bleManager.destroy();
     bleManager = null;
   }

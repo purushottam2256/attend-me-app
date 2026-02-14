@@ -24,9 +24,11 @@ import {
   TimetableSlot, 
   getSwapsAndSubstitutions, 
   getHolidayInfo,
-  SubstitutionInfo 
+  SubstitutionInfo,
+  HolidayInfo
 } from '../../../services/dashboardService';
 import { NotificationService } from '../../../services/NotificationService';
+import { PulsingDots } from '../../../components/ui/LoadingAnimation';
 import { 
   cacheTodaySchedule, 
   getCachedTodaySchedule, 
@@ -43,7 +45,7 @@ import { useOfflineSync } from '../../../contexts/OfflineSyncContext';
 import { OffHoursScanModal, type OffHoursReason } from '../components';
 import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive';
 
-type HeroState = 'CLASS_NOW' | 'BREAK' | 'DONE' | 'LOADING' | 'NO_CLASSES';
+type HeroState = 'CLASS_NOW' | 'BREAK' | 'DONE' | 'LOADING' | 'NO_CLASSES' | 'HOLIDAY';
 
 interface ScheduleSlot extends TimetableSlot {
   status: 'live' | 'completed' | 'incomplete' | 'upcoming';
@@ -89,12 +91,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [isOfflineData, setIsOfflineData] = useState(false);
   const [cacheAge, setCacheAge] = useState<string>('');
+  const [holiday, setHoliday] = useState<HolidayInfo | null>(null);
   
   // Toast State
   const [toast, setToast] = useState<ToastState>({ visible: false, message: '', type: 'success' });
   
   // Offline Sync
-  const { isOnline, syncStatus, syncPending } = useOfflineSync();
+  const { isOnline, syncStatus, syncPending, lastSyncAge } = useOfflineSync();
   const [isSyncingManually, setIsSyncingManually] = useState(false);
 
   // Load Profile Image
@@ -191,6 +194,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
   const determineHeroState = useCallback((slots: ScheduleSlot[]) => {
     const now = new Date();
     
+    if (holiday && holiday.type === 'holiday') {
+      setHeroState('HOLIDAY');
+      return;
+    }
+
     if (slots.length === 0) {
       setHeroState('NO_CLASSES');
       return;
@@ -235,7 +243,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
     const mins = Math.ceil((nextStart.getTime() - now.getTime()) / 60000);
     setMinutesUntilNext(mins);
     setHeroState('BREAK');
-  }, []);
+  }, [holiday]);
 
   const loadSchedule = useCallback(async (forceRefresh = false) => {
     try {
@@ -277,6 +285,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
       
       // Fetch swaps and substitutions
       const { swaps, substitutions } = await getSwapsAndSubstitutions(user.id);
+      
+      // Fetch Holiday Info
+      const holidayInfo = await getHolidayInfo();
+      setHoliday(holidayInfo);
       
       // Create sets for quick lookup
       const swappedSlots = new Set(swaps.flatMap(s => [s.slot_a_id, s.slot_b_id]));
@@ -363,25 +375,58 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
       
       // Schedule Reminders (Professional Feature)
       try {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('notifications_enabled')
-            .eq('id', user.id)
-            .single();
+          const NOTIF_PREF_KEY = '@attend_me/notifications_enabled';
+          let notificationsEnabled = false;
 
-          if (profile?.notifications_enabled) {
-             // Cancel old to avoid duplicates
-             await NotificationService.cancelAllScheduled();
+          // 1. Get preference (Online or Offline)
+          if (connectionStatus === 'online') {
+              const { data: profile } = await supabase
+                .from('profiles')
+                .select('notifications_enabled')
+                .eq('id', user.id)
+                .single();
+              
+              notificationsEnabled = profile?.notifications_enabled ?? false;
+              // Cache it
+              await AsyncStorage.setItem(NOTIF_PREF_KEY, JSON.stringify(notificationsEnabled));
+          } else {
+              // Load from cache
+              const cachedPref = await AsyncStorage.getItem(NOTIF_PREF_KEY);
+              notificationsEnabled = cachedPref ? JSON.parse(cachedPref) : false;
+          }
+
+          if (notificationsEnabled) {
+             // 2. Cancel only CLASS reminders (preserve event reminders)
+             await NotificationService.cancelClassReminders();
+             
+             // Skip scheduling if today is a holiday
+             if (holidayInfo && holidayInfo.type === 'holiday') {
+                console.log('Skipping reminders due to holiday:', holidayInfo.title);
+                return;
+             }
+             
+             // 3. Get existing scheduled notifications for dedup
+             const scheduled = await NotificationService.getAllScheduled();
+             const scheduledSubjects = new Set(
+                 scheduled
+                    .filter(n => n.content.data?.type === 'CLASS_REMINDER')
+                    .map(n => n.content.data?.subjectName)
+             );
              
              for (const slot of mergedClasses) {
                  if (slot.status === 'upcoming' || slot.status === 'live') {
                      const classDate = parseTime(slot.start_time);
                      if (classDate.getTime() > Date.now()) { // Only future classes
-                         await NotificationService.scheduleClassReminder(
-                             slot.subject?.name || 'Class',
-                             `${slot.target_year}-${slot.target_section} (${slot.room || 'N/A'})`,
-                             classDate
-                         );
+                         const subjectName = slot.subject?.name || 'Class';
+                         
+                         // 4. Schedule if not duplicate
+                         if (!scheduledSubjects.has(subjectName)) {
+                             await NotificationService.scheduleClassReminder(
+                                 subjectName,
+                                 `${slot.target_year}-${slot.target_section} (${slot.room || 'N/A'})`,
+                                 classDate
+                             );
+                         }
                      }
                  }
              }
@@ -538,12 +583,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
 
   const handleSyncPress = async () => {
     if (!isOnline) {
-      setToast({ visible: true, message: 'Offline Mode Active', type: 'warning' });
+      setToast({ visible: true, message: `Offline — Rosters synced: ${lastSyncAge}`, type: 'warning' });
       return;
     }
 
     if (syncStatus.pendingCount === 0) {
-      setToast({ visible: true, message: 'Everything is synced', type: 'success' });
+      setToast({ visible: true, message: `All synced ✓ Rosters: ${lastSyncAge}`, type: 'success' });
       return;
     }
 
@@ -645,7 +690,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
       case 'LOADING':
         return (
           <View style={[styles.heroCard, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' }]}>
-            <ActivityIndicator size="large" color="#0D4A4A" />
+            <PulsingDots size="large" color="#0D9488" />
             <Text style={[styles.loadingText, { color: isDark ? '#94A3B8' : '#64748B' }]}>Loading schedule...</Text>
           </View>
         );
@@ -712,7 +757,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
           </View>
         );
 
-      case 'DONE':
+    case 'DONE':
         return (
           <View style={[styles.heroCard, { backgroundColor: isDark ? '#082020' : '#FFFFFF' }]}>
             <View style={[styles.doneInnerCard, { backgroundColor: 'transparent' }]}>
@@ -734,6 +779,27 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
                 </TouchableOpacity>
               )}
             </View>
+          </View>
+        );
+
+      case 'HOLIDAY':
+        return (
+          <View style={[styles.heroCard, { backgroundColor: isDark ? '#082020' : '#FFFFFF' }]}>
+             <View style={{ alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+                <View style={{ 
+                  width: 80, height: 80, borderRadius: 40, 
+                  backgroundColor: isDark ? 'rgba(245, 158, 11, 0.1)' : '#FEF3C7',
+                  alignItems: 'center', justifyContent: 'center', marginBottom: 16
+                }}>
+                  <Ionicons name="calendar" size={40} color="#F59E0B" />
+                </View>
+                <Text style={[styles.doneTitle, { color: isDark ? '#FFFFFF' : '#0F172A', textAlign: 'center' }]}>
+                  {holiday?.title || 'Holiday'}
+                </Text>
+                <Text style={[styles.doneSubtitle, { color: isDark ? 'rgba(255,255,255,0.7)' : '#64748B', textAlign: 'center', marginTop: 8, maxWidth: '80%' }]}>
+                  {holiday?.description || 'No classes scheduled for today.'}
+                </Text>
+             </View>
           </View>
         );
     }

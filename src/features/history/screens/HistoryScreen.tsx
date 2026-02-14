@@ -20,7 +20,6 @@ import {
   Dimensions,
   Easing,
   Image,
-  Alert
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
@@ -39,6 +38,7 @@ import { EditAttendanceModal, FilterBar } from '../components';
 import { historyStyles as styles, DATE_TILE_WIDTH } from '../styles';
 import { scale, verticalScale, normalizeFont, moderateScale } from '../../../utils/responsive'; // Import responsive utils locally if needed for inline use or keep consistent with styles
 import { ZenToast } from '../../../components/ZenToast';
+import { PulsingDots } from '../../../components/ui/LoadingAnimation';
 
 // Months for picker
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -72,6 +72,10 @@ export const HistoryScreen: React.FC = () => {
 
   // Toast State
   const [toast, setToast] = useState<{ visible: boolean, type: 'success' | 'error', message: string }>({ visible: false, type: 'success', message: '' });
+
+  // Delete Confirmation Modal State
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
   const showToast = useCallback((type: 'success' | 'error', message: string) => {
     setToast({ visible: true, type, message });
@@ -155,19 +159,24 @@ export const HistoryScreen: React.FC = () => {
       const pendingSubmissions = await getPendingSubmissions();
       const pendingSessions = pendingSubmissions
         .filter(p => isSameDay(new Date(p.submittedAt), selectedDate))
-        .map(p => ({
-            id: `pending-${p.id}`, // Prefix to distinguish from synced sessions
+        .map(p => {
+          const odCount = p.attendance.filter(a => a.status === 'od').length;
+          return {
+            id: `pending-${p.id}`,
             date: p.submittedAt,
-            slot_id: p.classData.slotId, // Ensure string/number match
+            slot_id: p.classData.slotId,
             subject: { name: p.classData.subjectName, code: '' },
             target_dept: p.classData.dept || '???',
             target_section: p.classData.section || p.classData.sectionLetter || '???',
             target_year: p.classData.year || 0,
             present_count: p.attendance.filter(a => a.status === 'present').length,
             absent_count: p.attendance.filter(a => a.status === 'absent').length,
+            od_count: odCount,
             total_students: p.attendance.length,
-            isOfflinePending: true, // Custom flag for UI
-        } as any));
+            isOfflinePending: true,
+            syncStatus: p.syncStatus,
+          } as any;
+        });
 
       let historySessions: AttendanceSession[] = [];
 
@@ -201,7 +210,9 @@ export const HistoryScreen: React.FC = () => {
         setIsOfflineData(false);
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
-           const data = await getAttendanceHistory(user.id, 'All');
+           // Pass selected date for server-side filtering (YYYY-MM-DD)
+           const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+           const data = await getAttendanceHistory(user.id, 'All', 30, dateStr);
 
            // Cache for offline use
            const cacheData = data.map(s => ({
@@ -217,16 +228,22 @@ export const HistoryScreen: React.FC = () => {
            }));
            await cacheHistory(cacheData);
 
-           // Filter by selected date
-           historySessions = data.filter(session => {
-             const sessionDate = new Date(session.date);
-             return isSameDay(sessionDate, selectedDate);
-           });
+           // Data is already filtered by date on server
+           historySessions = data;
         }
       }
 
-      // Merge: Pending first, then History
-      setSessions([...pendingSessions, ...historySessions]);
+      // DEDUP MERGE: Pending submissions override matching synced sessions (same slot + date)
+      // This ensures only the latest attendance shows, not both old and new
+      const pendingSlotIds = new Set(pendingSessions.map((p: any) => String(p.slot_id)));
+      const filteredHistory = historySessions.filter(session => {
+        const sessionDate = new Date(session.date);
+        if (isSameDay(sessionDate, selectedDate) && pendingSlotIds.has(String(session.slot_id))) {
+          return false; // Pending version replaces this synced version
+        }
+        return true;
+      });
+      setSessions([...pendingSessions, ...filteredHistory]);
 
     } catch (error) {
       console.error('Error loading history:', error);
@@ -268,24 +285,19 @@ export const HistoryScreen: React.FC = () => {
     }
   };
 
-  const handleDeletePending = async (sessionId: string) => {
-    // Session ID for pending starts with 'pending-'
+  const handleDeletePending = (sessionId: string) => {
     const submissionId = sessionId.replace('pending-', '');
-    Alert.alert(
-        "Discard Offline Record?",
-        "This will permanently delete this unsynced attendance record.",
-        [
-            { text: "Cancel", style: "cancel" },
-            {
-                text: "Delete",
-                style: "destructive",
-                onPress: async () => {
-                    await removePendingSubmission(submissionId);
-                    loadHistory();
-                }
-            }
-        ]
-    );
+    setDeleteTargetId(submissionId);
+    setDeleteModalVisible(true);
+  };
+
+  const confirmDeletePending = async () => {
+    if (deleteTargetId) {
+      await removePendingSubmission(deleteTargetId);
+      loadHistory();
+    }
+    setDeleteModalVisible(false);
+    setDeleteTargetId(null);
   };
 
   const handleRetrySync = async () => {
@@ -591,6 +603,7 @@ export const HistoryScreen: React.FC = () => {
     const substituteFacultyName = sessionAny.substituteFacultyName;
     const originalFacultyName = sessionAny.originalFacultyName;
     const isOfflinePending = sessionAny.isOfflinePending;
+    const syncStatus = sessionAny.syncStatus;
 
     return (
       <TouchableOpacity
@@ -647,7 +660,8 @@ export const HistoryScreen: React.FC = () => {
                 </View>
               )}
               
-              {/* Batch Badge for Lab Clarity */}
+              
+               {/* Batch Badge for Lab Clarity */}
               {session.batch && (
                 <View style={styles.labBadge}>
                   <Ionicons name="flask" size={normalizeFont(12)} color="#8B5CF6" />
@@ -657,6 +671,7 @@ export const HistoryScreen: React.FC = () => {
                 </View>
               )}
             </View>
+            
             {isOfflinePending ? (
                <View style={styles.pendingBadge}>
                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -664,7 +679,7 @@ export const HistoryScreen: React.FC = () => {
                     <Text style={[styles.pendingText, { color: colors.warning }]}>PENDING</Text>
                  </View>
                  {/* Quick Actions for Pending */}
-                 <TouchableOpacity onPress={() => handleDeletePending(session.id)} style={styles.deletePendingBtn}>
+                 <TouchableOpacity onPress={() => handleDeletePending(session.id.replace('pending-', ''))} style={styles.deletePendingBtn}>
                     <Ionicons name="trash-outline" size={normalizeFont(16)} color={colors.danger} />
                  </TouchableOpacity>
                </View>
@@ -848,7 +863,7 @@ export const HistoryScreen: React.FC = () => {
       >
         {loading ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#0D4A4A" />
+            <PulsingDots size="large" color="#0D9488" />
             <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
               Fetching records...
             </Text>
@@ -919,6 +934,106 @@ export const HistoryScreen: React.FC = () => {
         students={editStudents}
         onSave={handleSaveAttendance}
       />
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        visible={deleteModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDeleteModalVisible(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setDeleteModalVisible(false)}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: scale(24) }}>
+            <TouchableWithoutFeedback>
+              <View style={{
+                backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+                borderRadius: moderateScale(20),
+                padding: scale(24),
+                width: '100%',
+                maxWidth: scale(340),
+                alignItems: 'center',
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 8 },
+                shadowOpacity: 0.15,
+                shadowRadius: 24,
+                elevation: 10,
+              }}>
+                {/* Warning Icon */}
+                <View style={{
+                  width: scale(56),
+                  height: scale(56),
+                  borderRadius: scale(28),
+                  backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  marginBottom: verticalScale(16),
+                }}>
+                  <Ionicons name="trash-outline" size={normalizeFont(26)} color="#EF4444" />
+                </View>
+
+                <Text style={{
+                  fontSize: normalizeFont(17),
+                  fontWeight: '700',
+                  color: isDark ? '#F1F5F9' : '#0F172A',
+                  marginBottom: verticalScale(8),
+                  textAlign: 'center',
+                }}>
+                  Discard Offline Record?
+                </Text>
+
+                <Text style={{
+                  fontSize: normalizeFont(13),
+                  color: isDark ? '#94A3B8' : '#64748B',
+                  textAlign: 'center',
+                  lineHeight: normalizeFont(19),
+                  marginBottom: verticalScale(24),
+                  paddingHorizontal: scale(8),
+                }}>
+                  This will permanently delete this unsynced attendance record. This action cannot be undone.
+                </Text>
+
+                <View style={{ flexDirection: 'row', gap: scale(12), width: '100%' }}>
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      paddingVertical: verticalScale(12),
+                      borderRadius: moderateScale(12),
+                      backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#F1F5F9',
+                      alignItems: 'center',
+                    }}
+                    onPress={() => setDeleteModalVisible(false)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={{
+                      fontSize: normalizeFont(14),
+                      fontWeight: '600',
+                      color: isDark ? '#CBD5E1' : '#475569',
+                    }}>Cancel</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      paddingVertical: verticalScale(12),
+                      borderRadius: moderateScale(12),
+                      backgroundColor: '#EF4444',
+                      alignItems: 'center',
+                    }}
+                    onPress={confirmDeletePending}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={{
+                      fontSize: normalizeFont(14),
+                      fontWeight: '700',
+                      color: '#FFFFFF',
+                    }}>Delete</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
 
       {/* Toast Notification */}
       <ZenToast

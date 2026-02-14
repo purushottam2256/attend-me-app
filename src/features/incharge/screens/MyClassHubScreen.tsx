@@ -34,6 +34,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { ZenToast } from '../../../components/ZenToast';
+import { PulsingDots } from '../../../components/ui/LoadingAnimation';
 import { safeHaptic } from '../../../utils/haptics';
 import * as Haptics from 'expo-haptics';
 
@@ -392,7 +393,7 @@ export const MyClassHubScreen: React.FC = () => {
   if (loading) {
     return (
       <View style={{ flex: 1, backgroundColor: isDark ? '#000' : '#F2F2F7', justifyContent: 'center', alignItems: 'center' }}>
-          <ActivityIndicator size="large" color={colors.accent} />
+          <PulsingDots size="large" color={colors.accent} />
           <Text style={{ marginTop: verticalScale(20), color: colors.textSecondary, fontSize: normalizeFont(16), fontWeight: '500' }}>Loading Class Data...</Text>
       </View>
     );
@@ -714,7 +715,7 @@ export const MyClassHubScreen: React.FC = () => {
                </View>
 
                {loadingAll ? (
-                   <ActivityIndicator style={{marginTop: 50}} color={colors.accent}/>
+                   <PulsingDots size="medium" color={colors.accent} style={{marginTop: 50}} />
                ) : (
                    <FlatList
                         data={filteredAllStudents}
@@ -817,7 +818,7 @@ export const MyClassHubScreen: React.FC = () => {
 
                     {loadingPeriodStats ? (
                         <View style={{ padding: 40, alignItems: 'center' }}>
-                            <ActivityIndicator color={Colors.premium.accent} />
+                            <PulsingDots size="medium" color={Colors.premium.accent} />
                         </View>
                     ) : (
                         <FlatList

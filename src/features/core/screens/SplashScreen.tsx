@@ -149,8 +149,8 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
       >
         <View style={styles.logoGlow} />
         <Image
-          source={require('../../../../assets/splash-logo.jpg')}
-          style={styles.logo}
+          source={require('../../../../assets/android/mipmap-xxxhdpi/ic_launcher_round.png')}
+          style={[styles.logo, { borderRadius: 100 }]} // Added border radius for round icon
           resizeMode="contain"
         />
       </Animated.View>
