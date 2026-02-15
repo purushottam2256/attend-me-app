@@ -10,7 +10,7 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 
-import { useTheme } from "../../../contexts";
+import { useTheme } from "@contexts";
 
 interface DigitalIdCardProps {
   user: {
@@ -23,7 +23,7 @@ interface DigitalIdCardProps {
   onEdit?: () => void;
 }
 
-import { scale, verticalScale, moderateScale, normalizeFont } from "../../../utils/responsive";
+import { scale, verticalScale, moderateScale, normalizeFont } from "@utils/responsive";
 
 const { width } = Dimensions.get("window");
 const CARD_ASPECT_RATIO = 1.586;
@@ -118,7 +118,7 @@ export const DigitalIdCard: React.FC<DigitalIdCardProps> = ({
               {/* Fallback to Icon if image fails, but try to use local asset */}
               <View style={styles.logoContainer}>
                 <Image
-                  source={require("../../../../assets/college-logo.png")}
+                  source={require("@assets/college-logo.png")}
                   style={styles.logoImage}
                   resizeMode="contain"
                 />

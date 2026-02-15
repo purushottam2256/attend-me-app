@@ -8,14 +8,14 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
-import { RootNavigator } from './src/navigation';
-import { NetworkProvider, ThemeProvider, OfflineSyncProvider, AuthProvider } from './src/contexts';
-import { NotificationProvider } from './src/contexts/NotificationContext';
-import { OfflineBanner } from './src/components/ui/OfflineBanner';
-import ErrorBoundary from './src/components/ErrorBoundary';
+import { RootNavigator } from '@navigation';
+import { NetworkProvider, ThemeProvider, OfflineSyncProvider, AuthProvider } from '@contexts';
+import { NotificationProvider } from '@contexts/NotificationContext';
+import { OfflineBanner } from '@components/ui/OfflineBanner';
+import ErrorBoundary from '@components/ErrorBoundary';
 
-import { initOffline } from './src/services/offline';
-import createLogger from './src/utils/logger';
+import { initOffline } from '@services/offline';
+import createLogger from '@utils/logger';
 
 const log = createLogger('App');
 

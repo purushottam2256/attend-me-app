@@ -16,18 +16,18 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RootStackParamList } from '../../../navigation/RootNavigator';
+import { RootStackParamList } from '@navigation/RootNavigator';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { StatusBar } from 'expo-status-bar';
 
-import { useTheme } from '../../../contexts';
+import { useTheme } from '@contexts';
 import { ManualAttendanceGrid } from '../components/ManualAttendanceGrid';
 import { useAttendance } from '../hooks/useAttendance';
-import { checkExistingSession } from '../../../services/dashboardService';
-import { supabase } from '../../../config/supabase';
-import { ZenToast } from '../../../components/ZenToast';
-import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive';
+import { checkExistingSession } from '@services/dashboardService';
+import { supabase } from '@config/supabase';
+import { ZenToast } from '@components/ZenToast';
+import { scale, verticalScale, moderateScale, normalizeFont } from '@utils/responsive';
 
 // Types
 type BatchFilter = 'all' | 1 | 2;

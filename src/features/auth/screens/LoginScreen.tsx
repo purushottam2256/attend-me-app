@@ -23,13 +23,13 @@ import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../../../config/supabase';
+import { supabase } from '@config/supabase';
 
-import { useNetwork } from '../../../contexts';
-import { SlideToLogin, SlideToLoginRef } from '../../../components/ui';
-import { Colors } from '../../../constants';
-import { signIn, isBiometricEnabled, getStoredProfile, getCurrentSession } from '../../../services/authService';
-import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive';
+import { useNetwork } from '@contexts';
+import { SlideToLogin, SlideToLoginRef } from '@components/ui';
+import { Colors } from '@constants';
+import { signIn, isBiometricEnabled, getStoredProfile, getCurrentSession } from '@services/authService';
+import { scale, verticalScale, moderateScale, normalizeFont } from '@utils/responsive';
 
 const { width, height } = Dimensions.get('window');
 
@@ -201,7 +201,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               ]}
             >
               <Image
-                source={require('../../../../assets/college-logo.png')}
+                source={require('@assets/college-logo.png')}
                 style={styles.logo}
                 resizeMode="contain"
               />

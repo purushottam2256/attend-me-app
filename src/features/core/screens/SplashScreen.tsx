@@ -13,8 +13,8 @@ import {
   Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Colors, Fonts, Layout } from '../../../constants';
-import { getCurrentSession, getStoredProfile } from '../../../services/authService';
+import { Colors, Fonts, Layout } from '@constants';
+import { getCurrentSession, getStoredProfile } from '@services/authService';
 
 const { width } = Dimensions.get('window');
 
@@ -149,7 +149,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
       >
         <View style={styles.logoGlow} />
         <Image
-          source={require('../../../../assets/android/mipmap-xxxhdpi/ic_launcher_round.png')}
+          source={require('@assets/splash.png')}
           style={[styles.logo, { borderRadius: 100 }]} // Added border radius for round icon
           resizeMode="contain"
         />

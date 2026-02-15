@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "attend-me",
-    "slug": "attend-me",
+    "name": "Attend-me",
+    "slug": "Attend-me",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -16,20 +16,20 @@
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0F5C4E"
+      "backgroundColor": "#ffffff"
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.mrce.attendme",
       "infoPlist": {
-        "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to detect student devices for attendance tracking.",
-        "NSBluetoothPeripheralUsageDescription": "This app uses Bluetooth to detect student devices for attendance tracking."
+        "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to detect student BLE devices for attendance tracking.",
+        "NSBluetoothPeripheralUsageDescription": "This app uses Bluetooth to detect student BLE devices for attendance tracking."
       }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0F5C4E"
+        "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -44,7 +44,8 @@
       ]
     },
     "web": {
-      "favicon": "./assets/apple-devices/AppIcon.appiconset/icon-ios-1024x1024.png"
+      "favicon": "./assets/favicon.png",
+      "backgroundColor": "#ffffff" 
     },
     "plugins": [
       "react-native-ble-plx",

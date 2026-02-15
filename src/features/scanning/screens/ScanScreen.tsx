@@ -49,9 +49,9 @@ import {
   ScanBlockedModal,
   type BlockReason,
 } from "../components";
-import { ZenToast } from "../../../components/ZenToast";
-import { PulsingDots } from "../../../components/ui/LoadingAnimation";
-import { scale, verticalScale, moderateScale, normalizeFont } from "../../../utils/responsive";
+import { ZenToast } from "@components/ZenToast";
+import { PulsingDots } from "@components/ui/LoadingAnimation";
+import { scale, verticalScale, moderateScale, normalizeFont } from "@utils/responsive";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -63,20 +63,20 @@ const TIMER_PRESETS = [60, 180, 300, 600]; // 1, 3, 5, 10 minutes
 
 import { useAttendance, type AttendanceStudent } from "../hooks";
 import { useBLE } from "../hooks/useBLE";
-import { isBLEReady } from "../../../services/bleService";
+import { isBLEReady } from "@services/bleService";
 import {
   Gradients,
   Primary,
   Success,
   Danger,
   Neutral,
-} from "../../../constants/Theme";
+} from "@constants/Theme";
 import {
   getTodaySchedule,
   type TimetableSlot,
-} from "../../../services/dashboardService";
-import { supabase } from "../../../config/supabase";
-import { useTheme } from "../../../contexts";
+} from "@services/dashboardService";
+import { supabase } from "@config/supabase";
+import { useTheme } from "@contexts";
 
 // =============================================================================
 // PREMIUM SCANNER - Deep Teal Theme (Same as Home Page)
@@ -654,7 +654,7 @@ export const ScanScreen: React.FC = () => {
         stopBLEScan();
         setIsScanning(false);
         // Also directly stop via bleService to ensure it's stopped
-        import("../../../services/bleService").then(({ stopScanning }) => {
+        import("@services/bleService").then(({ stopScanning }) => {
           stopScanning();
           console.log("[ScanScreen] Direct bleService.stopScanning called");
         });

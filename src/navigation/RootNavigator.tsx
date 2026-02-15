@@ -17,21 +17,21 @@ import {
   Inter_700Bold,
 } from '@expo-google-fonts/inter';
 
-import { SplashScreen } from '../features/core';
-import { LoginScreen, ForgotPasswordScreen } from '../features/auth';
-import { Colors } from '../constants';
-import { signOut, getStoredProfile } from '../services/authService';
+import { SplashScreen } from '@features/core';
+import { LoginScreen, ForgotPasswordScreen } from '@features/auth';
+import { Colors } from '@constants';
+import { signOut, getStoredProfile } from '@services/authService';
 import { MainTabNavigator } from './MainTabNavigator';
 import {
   MyClassHubScreen,
   PermissionScreen,
   ManagePermissionsScreen,
-} from '../features/incharge/screens';
-import { ManualEntryScreen } from '../features/scanning/screens/ManualEntryScreen';
-import { BeaconDoctorScreen } from '../features/diagnostics/screens/BeaconDoctorScreen';
-import { SyncManagerScreen } from '../features/sync/screens/SyncManagerScreen';
-import { NotificationScreen } from '../features/notifications/screens/NotificationScreenNew';
-import { SwapHistoryScreen } from '../features/swap/screens/SwapHistoryScreen';
+} from '@features/incharge/screens';
+import { ManualEntryScreen } from '@features/scanning/screens/ManualEntryScreen';
+import { BeaconDoctorScreen } from '@features/diagnostics/screens/BeaconDoctorScreen';
+import { SyncManagerScreen } from '@features/sync/screens/SyncManagerScreen';
+import { NotificationScreen } from '@features/notifications/screens/NotificationScreenNew';
+import { SwapHistoryScreen } from '@features/swap/screens/SwapHistoryScreen';
 // Keep native splash screen visible
 SplashScreenExpo.preventAutoHideAsync();
 
