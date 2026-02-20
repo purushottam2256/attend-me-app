@@ -19,7 +19,9 @@ import {
     cacheAllRosters, 
     setCacheTimestamp, 
     getCacheTimestamp,
-    getCachedRostersMap // Use map for merging
+    isCacheValid,
+    getCachedRostersMap,
+    purgeStaleRosters,
 } from "./cache";
 import createLogger from '../../utils/logger';
 
@@ -275,53 +277,19 @@ export async function syncRosters(
       return { success: true, count: 0 };
     }
 
-    // 2. Load EXISTING cache to merge
-    const currentMap = await getCachedRostersMap();
-    
-    // We'll create a new map starting with existing data 
-    // BUT we want to remove stale classes (garbage collection).
-    // So we should start empty? No, if we start empty, we lose failed fetches.
-    // 
-    // Robust Strategy:
-    // Create `finalMap` = { ...currentMap }
-    // Track `syncedKeys` = Set()
-    // Loop `allClasses`:
-    //    Fetch. 
-    //    If success: `finalMap[key] = newRoster`. `syncedKeys.add(key)`.
-    //    If fail: `syncedKeys.add(key)`? (Keep old version or retry? We keep old)
-    // After loop:
-    //    Garbage Collect: Remove keys from `finalMap` that are NOT in `syncedKeys`?
-    //    Wait, `allClasses` is the list of active classes.
-    //    If a class key isn't in `allClasses`, it should be removed.
-    //    So we should check against `allClasses` keys, not just what successfully synced.
-    
-    // Revised Strategy:
-    // `syncedCount` = 0
-    // Loop `allClasses`:
-    //    fetch.
-    //    If success: `currentMap[key] = newRoster`. `syncedCount`++.
-    //    If fail: `currentMap[key]` stays as is (stale but available).
-    
-    // Garbage Collection:
-    // Identify valid keys from `allClasses`.
-    // Remove any key in `currentMap` that is NOT in `allClasses`.
-    
-    const validKeys = new Set<string>();
+    const validKeys: string[] = [];
     allClasses.forEach(cls => {
         const key = `${cls.target_dept}-${cls.target_year}-${cls.target_section}`;
-        validKeys.add(key);
+        validKeys.push(key);
     });
     
-    // Garbage Collection
-    Object.keys(currentMap).forEach(key => {
-        if (!validKeys.has(key)) {
-            log.info(`removing stale roster: ${key}`);
-            delete currentMap[key];
-        }
-    });
+    // NATIVE SQLITE GARBAGE COLLECTION
+    // Tell the cache layer to instantly purge any rosters not in this valid list.
+    await purgeStaleRosters(validKeys);
     
     // 3. Sync and Update
     let updatedCount = 0;
+    const syncedRosters: any[] = [];
     
     for (const cls of allClasses) {
       // Yield strictly to the JS Event Loop to prevent Main Thread UI freezing (jank)
@@ -350,7 +318,7 @@ export async function syncRosters(
       // Secondary yield before manipulating large arrays of student JSON data
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      currentMap[classKey] = {
+      syncedRosters.push({
         classId: classKey,
         slotId: 0, 
         subjectName: cls.subject_name,
@@ -364,14 +332,14 @@ export async function syncRosters(
           batch: s.batch,
         })),
         cachedAt: new Date().toISOString(),
-      };
+      });
 
       updatedCount++;
     }
 
     // 4. Save Final Map (Merged & GC'd)
     if (updatedCount > 0) {
-        await cacheAllRosters(currentMap);
+        await cacheAllRosters(syncedRosters);
         await storage.setItem(STORAGE_KEYS.LAST_SYNC_TIME, new Date().toISOString());
     }
 

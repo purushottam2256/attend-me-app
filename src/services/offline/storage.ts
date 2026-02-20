@@ -114,6 +114,24 @@ export class SQLiteStorageAdapter implements StorageAdapter {
            requested_at TEXT,
            is_hidden INTEGER DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS rosters (
+            class_id TEXT PRIMARY KEY,
+            subject_name TEXT,
+            subject_id TEXT,
+            section TEXT,
+            cached_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS students (
+            id TEXT PRIMARY KEY,
+            class_id TEXT NOT NULL,
+            name TEXT,
+            roll_no TEXT,
+            bluetooth_uuid TEXT,
+            batch INTEGER,
+            FOREIGN KEY(class_id) REFERENCES rosters(class_id) ON DELETE CASCADE
+        );
       `);
       log.info('Database initialized successfully');
       return db;
@@ -121,6 +139,10 @@ export class SQLiteStorageAdapter implements StorageAdapter {
       log.error('Failed to initialize database:', error);
       throw error;
     }
+  }
+
+  public getDb(): Promise<SQLite.SQLiteDatabase> {
+    return this.db;
   }
 
   async getItem(key: string): Promise<string | null> {
@@ -245,4 +267,15 @@ export function getStorage(): StorageAdapter {
     // storageInstance = AsyncStorageAdapter; 
   }
   return storageInstance;
+}
+
+/**
+ * Returns the raw SQLite database instance if active, for structured queries.
+ */
+export function getSqliteDb(): Promise<SQLite.SQLiteDatabase> {
+  const adapter = getStorage();
+  if (adapter instanceof SQLiteStorageAdapter) {
+    return adapter.getDb();
+  }
+  throw new Error("SQLite adapter is not active");
 }

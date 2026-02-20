@@ -5,7 +5,7 @@ import {
   CacheTimestamps,
   STORAGE_KEYS 
 } from "./types";
-import { getStorage } from "./storage";
+import { getStorage, getSqliteDb } from "./storage";
 import createLogger from '../../utils/logger';
 
 const storage = getStorage();
@@ -86,51 +86,95 @@ export async function isCacheValid(
 // ============================================================================
 
 /**
- * Get the raw roster map from storage (Backward Compatibility: Storage is Object, not Array)
+ * Get the structured roster map from SQLite (Constructed from raw tables)
  */
 export async function getCachedRostersMap(): Promise<Record<string, CachedRoster>> {
   try {
-    const data = await storage.getItem(STORAGE_KEYS.CACHED_ROSTERS);
-    return data ? JSON.parse(data) : {};
+    const db = await getSqliteDb();
+    const rosters = await db.getAllAsync<any>(`SELECT * FROM rosters`);
+    const students = await db.getAllAsync<any>(`SELECT * FROM students ORDER BY roll_no ASC`);
+    
+    const map: Record<string, CachedRoster> = {};
+    for (const r of rosters) {
+       map[r.class_id] = {
+          classId: r.class_id,
+          slotId: 0,
+          subjectName: r.subject_name,
+          subjectId: r.subject_id,
+          section: r.section,
+          cachedAt: r.cached_at,
+          students: []
+       };
+    }
+    for (const s of students) {
+       if (map[s.class_id]) {
+           map[s.class_id].students.push({
+              id: s.id,
+              name: s.name,
+              rollNo: s.roll_no,
+              bluetoothUUID: s.bluetooth_uuid,
+              batch: s.batch
+           });
+       }
+    }
+    return map;
   } catch (error) {
-    log.error("Error getting roster map:", error);
+    log.error("Error getting roster map from SQLite:", error);
     return {};
   }
 }
 
 export async function cacheRoster(roster: CachedRoster): Promise<void> {
   try {
-    const map = await getCachedRostersMap();
-    map[roster.classId] = roster;
-    
-    await storage.setItem(STORAGE_KEYS.CACHED_ROSTERS, JSON.stringify(map));
+    const db = await getSqliteDb();
+    await db.withTransactionAsync(async () => {
+       await db.runAsync(`INSERT OR REPLACE INTO rosters (class_id, subject_name, subject_id, section, cached_at) VALUES (?, ?, ?, ?, ?)`, 
+          [roster.classId, roster.subjectName, roster.subjectId || null, roster.section, roster.cachedAt]
+       );
+       await db.runAsync(`DELETE FROM students WHERE class_id = ?`, [roster.classId]);
+       for (const s of roster.students) {
+           await db.runAsync(`INSERT INTO students (id, class_id, name, roll_no, bluetooth_uuid, batch) VALUES (?, ?, ?, ?, ?, ?)`,
+              [s.id, roster.classId, s.name, s.rollNo, s.bluetoothUUID || null, s.batch || null]
+           );
+       }
+    });
+
     await setCacheTimestamp("rosters");
-    log.info(`Cached roster for ${roster.subjectName} (${roster.students.length} students)`);
+    log.info(`Cached single roster for ${roster.subjectName} to SQLite`);
   } catch (error) {
-    log.error("Error caching roster:", error);
+    log.error("Error caching roster to SQLite:", error);
   }
 }
 
 /**
- * Bulk cache rosters (replaces entire map or merges?)
- * The sync logic usually rebuilds valid rosters. We'll accept a Map or Array.
- * If Array, we convert to Map.
+ * Bulk cache rosters directly into structured SQLite relational tables
  */
 export async function cacheAllRosters(rosters: CachedRoster[] | Record<string, CachedRoster>): Promise<void> {
   try {
-    let map: Record<string, CachedRoster> = {};
+    const db = await getSqliteDb();
+    const arr = Array.isArray(rosters) ? rosters : Object.values(rosters);
     
-    if (Array.isArray(rosters)) {
-      rosters.forEach(r => map[r.classId] = r);
-    } else {
-      map = rosters;
-    }
+    await db.withTransactionAsync(async () => {
+       for (const r of arr) {
+           await db.runAsync(`INSERT OR REPLACE INTO rosters (class_id, subject_name, subject_id, section, cached_at) VALUES (?, ?, ?, ?, ?)`, 
+              [r.classId, r.subjectName, r.subjectId || null, r.section, r.cachedAt]
+           );
+           
+           // Clear old to avoid orphan duplicates on update
+           await db.runAsync(`DELETE FROM students WHERE class_id = ?`, [r.classId]);
+           
+           for (const s of r.students) {
+               await db.runAsync(`INSERT INTO students (id, class_id, name, roll_no, bluetooth_uuid, batch) VALUES (?, ?, ?, ?, ?, ?)`,
+                  [s.id, r.classId, s.name, s.rollNo, s.bluetoothUUID || null, s.batch || null]
+               );
+           }
+       }
+    });
 
-    await storage.setItem(STORAGE_KEYS.CACHED_ROSTERS, JSON.stringify(map));
     await setCacheTimestamp("rosters");
-    log.info(`Cached ${Object.keys(map).length} rosters in bulk`);
+    log.info(`Cached ${arr.length} rosters in bulk to SQLite tables`);
   } catch (error) {
-    log.error("Error bulk caching rosters:", error);
+    log.error("Error bulk caching rosters in SQLite:", error);
   }
 }
 
@@ -140,8 +184,35 @@ export async function getCachedRosters(): Promise<CachedRoster[]> {
 }
 
 export async function getCachedRosterResponse(classId: string): Promise<CachedRoster | undefined> {
-  const map = await getCachedRostersMap();
-  return map[classId];
+  try {
+     const db = await getSqliteDb();
+     const rosterRow = await db.getFirstAsync<any>(
+         `SELECT * FROM rosters WHERE class_id = ?`, [classId]
+     );
+     if (!rosterRow) return undefined;
+     
+     const studentRows = await db.getAllAsync<any>(
+         `SELECT * FROM students WHERE class_id = ? ORDER BY roll_no ASC`, [classId]
+     );
+     
+     return {
+         classId: rosterRow.class_id,
+         slotId: 0,
+         subjectName: rosterRow.subject_name,
+         subjectId: rosterRow.subject_id,
+         section: rosterRow.section,
+         cachedAt: rosterRow.cached_at,
+         students: studentRows.map(s => ({
+            id: s.id,
+            name: s.name,
+            rollNo: s.roll_no,
+            bluetoothUUID: s.bluetooth_uuid,
+            batch: s.batch
+         }))
+     };
+  } catch (e) {
+     return undefined;
+  }
 }
 
 /**
@@ -163,6 +234,27 @@ export async function findCachedRoster(
   const map = await getCachedRostersMap();
   const key = `${dept}-${year}-${section}`;
   return map[key];
+}
+
+/**
+ * Purge outdated rosters that are no longer part of the user's active timetable
+ */
+export async function purgeStaleRosters(validClassIds: string[]): Promise<void> {
+  try {
+     const db = await getSqliteDb();
+     if (validClassIds.length === 0) {
+         await db.runAsync(`DELETE FROM rosters`);
+         log.info("Purged ALL stale rosters from SQLite as schedule is empty.");
+         return;
+     }
+     const placeholders = validClassIds.map(() => '?').join(',');
+     const result = await db.runAsync(`DELETE FROM rosters WHERE class_id NOT IN (${placeholders})`, validClassIds);
+     if (result.changes > 0) {
+         log.info(`Purged ${result.changes} stale rosters from SQLite`);
+     }
+  } catch (error) {
+     log.error("Error purging stale rosters in SQLite:", error);
+  }
 }
 
 // ============================================================================
