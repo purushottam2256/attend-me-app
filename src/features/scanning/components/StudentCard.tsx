@@ -275,7 +275,6 @@ const styles = StyleSheet.create({
   },
   info: {
     flex: 1,
-    flex: 1,
     marginLeft: 0, // Removed margin since avatar is gone
   },
   name: {
@@ -310,4 +309,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default StudentCard;
+export default React.memo(StudentCard);

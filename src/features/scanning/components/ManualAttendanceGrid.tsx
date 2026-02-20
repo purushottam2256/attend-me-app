@@ -25,7 +25,6 @@ interface ManualAttendanceGridProps {
   students: Student[];
   onToggleStatus: (studentId: string) => void;
   onLongPress: (student: Student) => void;
-  batchFilter: 'all' | 1 | 2;
   isDark: boolean;
 }
 
@@ -115,19 +114,12 @@ export const ManualAttendanceGrid: React.FC<ManualAttendanceGridProps> = ({
   students,
   onToggleStatus,
   onLongPress,
-  batchFilter,
   isDark
 }) => {
-  // Filter students
-  const filteredStudents = students.filter(s => {
-    if (batchFilter === 'all') return true;
-    return s.batch === batchFilter;
-  });
-
   return (
     <View style={styles.container}>
       <FlatList
-        data={filteredStudents}
+        data={students}
         keyExtractor={(item) => item.id}
         numColumns={COLUMNS}
         contentContainerStyle={styles.gridContent}

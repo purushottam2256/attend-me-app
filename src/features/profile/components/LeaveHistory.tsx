@@ -4,7 +4,7 @@ import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl } f
 import { Ionicons } from '@expo/vector-icons';
 import { format } from 'date-fns';
 import { supabase } from '../../../config/supabase';
-import { useColors } from '../../../shared/hooks/useColors';
+import { useColors } from '../../../hooks/useColors';
 import createLogger from '../../../utils/logger';
 
 const log = createLogger('LeaveHistory');

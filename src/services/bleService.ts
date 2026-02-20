@@ -23,6 +23,8 @@
 
 import { BleManager, Device, State, ScanMode } from 'react-native-ble-plx';
 import { Platform, PermissionsAndroid } from 'react-native';
+import * as TaskManager from 'expo-task-manager';
+import * as Location from 'expo-location';
 import createLogger from '../utils/logger';
 
 const log = createLogger('BLE');
@@ -45,6 +47,15 @@ const BLE_CONFIG = {
   // Log verbose device info (only in dev)
   VERBOSE_LOGGING: __DEV__,
 };
+
+// Background Task Name for keeping app alive
+const BACKGROUND_LOCATION_TASK = 'BACKGROUND_LOCATION_TASK';
+
+// Define the empty task just to keep the OS happy and the app awake
+TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
+  // We don't actually need to do anything with the location data
+  // The mere existence of this active task keeps our BLE scanner thread running
+});
 
 export interface DetectedStudent {
   uuid: string;
@@ -112,6 +123,54 @@ export const requestBLEPermissions = async (): Promise<boolean> => {
   return true;
 };
 
+// Start background keep-awake service
+const startBackgroundService = async () => {
+  try {
+    const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
+    if (foregroundStatus !== 'granted') {
+      log.warn('Location foreground permission denied. Background scan will not work.');
+      return;
+    }
+
+    const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
+    if (backgroundStatus !== 'granted') {
+      log.warn('Location background permission denied. Background scan will not work.');
+      return;
+    }
+
+    const isTaskRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_LOCATION_TASK);
+    if (!isTaskRegistered) {
+      await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+        accuracy: Location.Accuracy.Low,
+        timeInterval: 10000,
+        distanceInterval: 100,
+        showsBackgroundLocationIndicator: true,
+        foregroundService: {
+          notificationTitle: "Attend-Me Scanner Active",
+          notificationBody: "Scanning for student beacons in the background...",
+          notificationColor: "#0D9488",
+        },
+      });
+      log.info('Background keep-awake service started');
+    }
+  } catch (error) {
+    log.error('Failed to start background service:', error);
+  }
+};
+
+// Stop background keep-awake service
+const stopBackgroundService = async () => {
+  try {
+    const isTaskRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_LOCATION_TASK);
+    if (isTaskRegistered) {
+      await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+      log.info('Background keep-awake service stopped');
+    }
+  } catch (error) {
+    log.error('Failed to stop background service:', error);
+  }
+};
+
 // Check if BLE is ready
 export const isBLEReady = async (): Promise<{ ready: boolean; reason?: string }> => {
   const manager = initBLE();
@@ -177,6 +236,9 @@ export const startScanning = (
   
   isCurrentlyScanning = true;
   
+  // Start background location service to keep app awake during scan
+  startBackgroundService();
+  
   // Set scan timeout
   if (timeout > 0) {
     scanTimeoutHandle = setTimeout(() => {
@@ -219,14 +281,7 @@ export const startScanning = (
         // Log ALL devices for debugging (first time only)
         if (!detectedDeviceIds.has(deviceId)) {
           detectedDeviceIds.add(deviceId);
-          if (BLE_CONFIG.VERBOSE_LOGGING) {
-            log.debug('📱 Device found:', {
-              id: deviceId,
-              name: deviceName || 'No Name',
-              rssi,
-              serviceUUIDs: serviceUUIDs.length > 0 ? serviceUUIDs : 'none',
-            });
-          }
+          // Removed verbose logging for performance
         }
         
         // Check if any of the device's Service UUIDs match our student list
@@ -314,6 +369,9 @@ export const stopScanning = (): void => {
   if (bleManager) {
     bleManager.stopDeviceScan();
   }
+  
+  // Stop background location service
+  stopBackgroundService();
   
   isCurrentlyScanning = false;
 };

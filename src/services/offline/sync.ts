@@ -324,6 +324,11 @@ export async function syncRosters(
     let updatedCount = 0;
     
     for (const cls of allClasses) {
+      // Yield strictly to the JS Event Loop to prevent Main Thread UI freezing (jank)
+      // during heavy sequential network boundaries and JSON parsing.
+      // Increased from 150ms to 800ms to ensure the UI has plenty of time to render map/animations
+      await new Promise(resolve => setTimeout(resolve, 800));
+
       const classKey = `${cls.target_dept}-${cls.target_year}-${cls.target_section}`;
 
       // Optimization: if cache is very fresh (<1h), maybe skip?
@@ -341,6 +346,9 @@ export async function syncRosters(
         log.error(`Failed to sync roster: ${classKey}`, error);
         continue;
       }
+      
+      // Secondary yield before manipulating large arrays of student JSON data
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       currentMap[classKey] = {
         classId: classKey,

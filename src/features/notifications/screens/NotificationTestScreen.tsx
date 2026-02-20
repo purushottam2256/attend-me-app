@@ -15,6 +15,7 @@ import {
   Alert,
 } from 'react-native';
 import { useTheme } from '../../../contexts';
+import { useColors } from '../../../hooks/useColors';
 import { NotificationService } from '../../../services/NotificationService';
 import { useNotifications } from '../../../contexts/NotificationContext';
 import { supabase } from '../../../config/supabase';
@@ -23,7 +24,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive';
 
 export const NotificationTestScreen = () => {
-  const { colors } = useTheme();
+  const { colors } = useTheme() as any; // Using useColors instead below
+  const themeColors = useColors();
   const { user } = useAuth();
   const { pushToken, unreadCount, refreshNotifications } = useNotifications();
   const [loading, setLoading] = useState<string | null>(null);
@@ -211,29 +213,29 @@ export const NotificationTestScreen = () => {
   };
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
+    <ScrollView style={[styles.container, { backgroundColor: themeColors.background }]}>
       <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.text }]}>Notification Testing</Text>
-        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+        <Text style={[styles.title, { color: themeColors.textPrimary }]}>Notification Testing</Text>
+        <Text style={[styles.subtitle, { color: themeColors.textSecondary }]}>
           Test all notification types
         </Text>
       </View>
 
       {/* Status Section */}
-      <View style={[styles.statusCard, { backgroundColor: colors.surface }]}>
-        <Text style={[styles.statusTitle, { color: colors.text }]}>Status</Text>
+      <View style={[styles.statusCard, { backgroundColor: themeColors.surface }]}>
+        <Text style={[styles.statusTitle, { color: themeColors.textPrimary }]}>Status</Text>
         <View style={styles.statusRow}>
-          <Text style={[styles.statusLabel, { color: colors.textSecondary }]}>Push Token:</Text>
-          <Text style={[styles.statusValue, { color: pushToken ? colors.success : colors.error }]}>
+          <Text style={[styles.statusLabel, { color: themeColors.textSecondary }]}>Push Token:</Text>
+          <Text style={[styles.statusValue, { color: pushToken ? themeColors.success : themeColors.danger }]}>
             {pushToken ? `${pushToken.type.toUpperCase()} ✓` : 'Not registered'}
           </Text>
         </View>
         <View style={styles.statusRow}>
-          <Text style={[styles.statusLabel, { color: colors.textSecondary }]}>Unread Count:</Text>
-          <Text style={[styles.statusValue, { color: colors.text }]}>{unreadCount}</Text>
+          <Text style={[styles.statusLabel, { color: themeColors.textSecondary }]}>Unread Count:</Text>
+          <Text style={[styles.statusValue, { color: themeColors.textPrimary }]}>{unreadCount}</Text>
         </View>
         {pushToken && (
-          <Text style={[styles.tokenPreview, { color: colors.textTertiary }]}>
+          <Text style={[styles.tokenPreview, { color: themeColors.textTertiary }]}>
             Token: {pushToken.token.substring(0, 30)}...
           </Text>
         )}
@@ -241,7 +243,7 @@ export const NotificationTestScreen = () => {
 
       {/* Test Buttons */}
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Local Notifications</Text>
+        <Text style={[styles.sectionTitle, { color: themeColors.textPrimary }]}>Local Notifications</Text>
         
         <TestButton
           title="Local Notification"
@@ -276,7 +278,7 @@ export const NotificationTestScreen = () => {
       </View>
 
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Database & Push</Text>
+        <Text style={[styles.sectionTitle, { color: themeColors.textPrimary }]}>Database & Push</Text>
         
         <TestButton
           title="In-App Notification"
@@ -296,7 +298,7 @@ export const NotificationTestScreen = () => {
       </View>
 
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Management</Text>
+        <Text style={[styles.sectionTitle, { color: themeColors.textPrimary }]}>Management</Text>
         
         <TestButton
           title="View Scheduled"
@@ -316,7 +318,7 @@ export const NotificationTestScreen = () => {
       </View>
 
       <View style={styles.footer}>
-        <Text style={[styles.footerText, { color: colors.textTertiary }]}>
+        <Text style={[styles.footerText, { color: themeColors.textTertiary }]}>
           ℹ️ Some notifications require the app to be in background to appear in system tray
         </Text>
       </View>

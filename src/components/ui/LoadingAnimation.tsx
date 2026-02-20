@@ -112,7 +112,7 @@ export const SkeletonLine: React.FC<SkeletonLineProps> = ({
     <Animated.View
       style={[
         {
-          width: typeof width === 'number' ? scale(width) : width,
+          width: (typeof width === 'number' ? scale(width) : width) as any,
           height: verticalScale(height),
           borderRadius: moderateScale(borderRadius),
           backgroundColor: shimmer.interpolate({

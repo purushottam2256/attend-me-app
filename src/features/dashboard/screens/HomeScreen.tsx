@@ -24,8 +24,10 @@ import {
   TimetableSlot, 
   getSwapsAndSubstitutions, 
   getHolidayInfo,
+  getLeaveInfo,
   SubstitutionInfo,
-  HolidayInfo
+  HolidayInfo,
+  LeaveInfo
 } from '../../../services/dashboardService';
 import { NotificationService } from '../../../services/NotificationService';
 import { PulsingDots } from '../../../components/ui/LoadingAnimation';
@@ -37,7 +39,7 @@ import {
   getCacheAge,
   isCacheStale 
 } from '../../../services/offlineService';
-import { SlideToStart, BatchSplitterModal, BellIcon, ZenToast } from '../../../components';
+import { SlideToStart, BellIcon, ZenToast } from '../../../components';
 import { CircularClockHero, CircularClockHeroRef } from '../../../components/CircularClockHero';
 import { NoClassesHero } from '../../../components/NoClassesHero';
 import { useConnectionStatus } from '../../../hooks';
@@ -45,7 +47,7 @@ import { useOfflineSync } from '../../../contexts/OfflineSyncContext';
 import { OffHoursScanModal, type OffHoursReason } from '../components';
 import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive';
 
-type HeroState = 'CLASS_NOW' | 'BREAK' | 'DONE' | 'LOADING' | 'NO_CLASSES' | 'HOLIDAY';
+type HeroState = 'CLASS_NOW' | 'BREAK' | 'DONE' | 'LOADING' | 'NO_CLASSES' | 'HOLIDAY' | 'LEAVE';
 
 interface ScheduleSlot extends TimetableSlot {
   status: 'live' | 'completed' | 'incomplete' | 'upcoming';
@@ -82,8 +84,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
   const [progress, setProgress] = useState(0);
   const [minutesUntilNext, setMinutesUntilNext] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
-  const [showBatchModal, setShowBatchModal] = useState(false);
-  const [isManualMode, setIsManualMode] = useState(false);
   const [sliderKey, setSliderKey] = useState(0); // Key to reset slider
   const [showOffHoursModal, setShowOffHoursModal] = useState(false);
   const [offHoursReason, setOffHoursReason] = useState<'break' | 'after_hours' | 'before_hours' | 'holiday' | 'suspended'>('break');
@@ -92,6 +92,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
   const [isOfflineData, setIsOfflineData] = useState(false);
   const [cacheAge, setCacheAge] = useState<string>('');
   const [holiday, setHoliday] = useState<HolidayInfo | null>(null);
+  const [leave, setLeave] = useState<LeaveInfo | null>(null);
   
   // Toast State
   const [toast, setToast] = useState<ToastState>({ visible: false, message: '', type: 'success' });
@@ -194,6 +195,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
   const determineHeroState = useCallback((slots: ScheduleSlot[]) => {
     const now = new Date();
     
+    if (leave) {
+      setHeroState('LEAVE');
+      return;
+    }
+    
     if (holiday && holiday.type === 'holiday') {
       setHeroState('HOLIDAY');
       return;
@@ -243,7 +249,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
     const mins = Math.ceil((nextStart.getTime() - now.getTime()) / 60000);
     setMinutesUntilNext(mins);
     setHeroState('BREAK');
-  }, [holiday]);
+  }, [holiday, leave]);
 
   const loadSchedule = useCallback(async (forceRefresh = false) => {
     try {
@@ -260,7 +266,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
 
       // OFFLINE FALLBACK: If offline, use cached data
       if (connectionStatus !== 'online') {
-        console.log('[HomeScreen] Offline mode - loading from cache');
+
         const cachedSchedule = await getCachedTodaySchedule();
         if (cachedSchedule && cachedSchedule.length > 0) {
           const age = await getCacheAge('todaySchedule');
@@ -289,6 +295,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
       // Fetch Holiday Info
       const holidayInfo = await getHolidayInfo();
       setHoliday(holidayInfo);
+      
+      // Fetch Leave Info
+      const leaveInfo = await getLeaveInfo(user.id);
+      setLeave(leaveInfo);
       
       // Create sets for quick lookup
       const swappedSlots = new Set(swaps.flatMap(s => [s.slot_a_id, s.slot_b_id]));
@@ -401,7 +411,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
              
              // Skip scheduling if today is a holiday
              if (holidayInfo && holidayInfo.type === 'holiday') {
-                console.log('Skipping reminders due to holiday:', holidayInfo.title);
+
                 return;
              }
              
@@ -432,7 +442,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
              }
           }
       } catch (err) {
-          console.log('Reminder Scheduling Error:', err);
+
       }
       
       // Cache for offline use
@@ -475,32 +485,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
 
   const handleStartClass = () => {
     if (!currentClass) return;
-    const isLab = currentClass.subject?.name?.toLowerCase().includes('lab');
-    if (isLab) {
-      setShowBatchModal(true);
-    } else {
-      navigateToScanner('full');
-    }
+    navigation.navigate('Scan', { classData: currentClass, manual: false });
   };
 
   const handleManualEntry = () => {
-    setIsManualMode(true);
-    const isLab = currentClass?.subject?.name?.toLowerCase().includes('lab');
-    if (isLab) {
-      setShowBatchModal(true);
-    } else {
-      navigation.navigate('ManualEntry', { classData: currentClass });
-    }
-  };
-
-  const navigateToScanner = (batch: 'full' | 1 | 2) => {
-    setShowBatchModal(false);
-    if (isManualMode) {
-      navigation.navigate('ManualEntry', { classData: currentClass });
-    } else {
-      navigation.navigate('Scan', { classData: currentClass, batch, manual: false });
-    }
-    setIsManualMode(false);
+    if (!currentClass) return;
+    navigation.navigate('ManualEntry', { classData: currentClass });
   };
 
   // Handle schedule card click based on status
@@ -517,12 +507,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
       case 'live':
         // Go to Scan for live class
         setCurrentClass(slot);
-        const isLab = slot.subject?.name?.toLowerCase().includes('lab');
-        if (isLab) {
-          setShowBatchModal(true);
-        } else {
-          navigation.navigate('Scan', { classData: slot, batch: 'full' });
-        }
+        navigation.navigate('Scan', { classData: slot });
         break;
       case 'incomplete':
         // Past grace period - manual add only
@@ -563,11 +548,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
     } else if (heroState === 'DONE') {
       setOffHoursReason('after_hours');
       setShowOffHoursModal(true);
-    } else if (heroState === 'NO_CLASSES') {
-      // Could be holiday, before hours, or no schedule
+    } else if (heroState === 'NO_CLASSES' || heroState === 'HOLIDAY' || heroState === 'LEAVE') {
+      // Could be holiday, leave, before hours, or no schedule
       const now = new Date();
       const firstClassTime = schedule.length > 0 ? parseTime(schedule[0].start_time) : null;
-      if (firstClassTime && now < firstClassTime) {
+      if (firstClassTime && now < firstClassTime && heroState !== 'LEAVE' && heroState !== 'HOLIDAY') {
         setOffHoursReason('before_hours');
       } else {
         setOffHoursReason('after_hours');
@@ -710,7 +695,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
           <CircularClockHero
             ref={heroRef}
             subjectName={currentClass?.subject?.name || 'Loading...'}
-            section={`${currentClass?.target_dept} • Year ${currentClass?.target_year} • Section ${currentClass?.target_section}`}
+            section={`${currentClass?.target_dept} • Year ${currentClass?.target_year} • Section ${currentClass?.target_section}${currentClass?.batch ? ` • Batch ${currentClass.batch}` : ''}`}
             startTime={currentClass?.start_time || '00:00'}
             endTime={currentClass?.end_time || '00:00'}
             progress={progress}
@@ -741,7 +726,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
                 {nextClass?.subject?.name}
               </Text>
               <Text style={[styles.breakSection, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-                {nextClass?.target_dept} • Year {nextClass?.target_year} • {nextClass?.target_section}
+                {nextClass?.target_dept} • Year {nextClass?.target_year} • {nextClass?.target_section}{nextClass?.batch ? ` • B${nextClass.batch}` : ''}
               </Text>
             </View>
             
@@ -778,6 +763,39 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
                   <Text style={[styles.doneScanText, { color: isDark ? '#FFFFFF' : '#0D4A4A' }]}>Take Late Attendance</Text>
                 </TouchableOpacity>
               )}
+            </View>
+          </View>
+        );
+
+      case 'LEAVE':
+        return (
+          <View style={[styles.heroCard, { backgroundColor: isDark ? '#082020' : '#FFFFFF' }]}>
+            <View style={[styles.doneInnerCard, { backgroundColor: 'transparent', paddingVertical: scale(10) }]}>
+              <View style={styles.doneContent}>
+                <View style={{ 
+                  width: 80, height: 80, borderRadius: 40, 
+                  backgroundColor: isDark ? 'rgba(56, 189, 248, 0.1)' : '#E0F2FE',
+                  alignItems: 'center', justifyContent: 'center', marginBottom: 16
+                }}>
+                  <Ionicons name="airplane" size={40} color="#38BDF8" />
+                </View>
+                <Text style={[styles.doneTitle, { color: isDark ? '#FFFFFF' : '#0F172A', textAlign: 'center' }]}>
+                  On Leave
+                </Text>
+                <Text style={[styles.doneSubtitle, { color: isDark ? 'rgba(255,255,255,0.7)' : '#64748B', textAlign: 'center', marginTop: 8, maxWidth: '80%' }]}>
+                  Enjoy your time off! You are not required to take classes today.
+                </Text>
+              </View>
+              
+              {/* Take late attendance/extra classes explicitly requested by user when on leave */}
+              <TouchableOpacity 
+                style={[styles.doneScanButton, { backgroundColor: isDark ? '#2C2C2E' : '#F2F2F7', marginTop: 0 }]}
+                onPress={handleFloatingScanPress}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="scan-outline" size={18} color={isDark ? '#FFFFFF' : '#0D4A4A'} />
+                <Text style={[styles.doneScanText, { color: isDark ? '#FFFFFF' : '#0D4A4A' }]}>Take Late Classes</Text>
+              </TouchableOpacity>
             </View>
           </View>
         );
@@ -868,7 +886,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
             
             <View style={styles.scheduleMetaRow}>
               <Text style={[styles.scheduleSectionText, { color: isDark ? 'rgba(255,255,255,0.6)' : '#64748B' }]}>
-                {slot.target_dept} • Year {slot.target_year} • {slot.target_section}
+                {slot.target_dept} • Year {slot.target_year} • {slot.target_section}{slot.batch ? ` • B${slot.batch}` : ''}
               </Text>
             </View>
             
@@ -982,12 +1000,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
         <View style={{ height: 120 }} />
       </ScrollView>
 
-      <BatchSplitterModal
-        visible={showBatchModal}
-        onClose={() => { setShowBatchModal(false); setIsManualMode(false); }}
-        onSelect={navigateToScanner}
-        subjectName={currentClass?.subject?.name}
-      />
 
       <OffHoursScanModal
         visible={showOffHoursModal}

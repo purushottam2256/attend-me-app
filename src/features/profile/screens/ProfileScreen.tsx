@@ -1165,14 +1165,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
                           {isSubmittingReport ? <ActivityIndicator color="#FFF" /> : <Text style={styles.saveText}>Submit Report</Text>}
                       </TouchableOpacity>
                   </View>
-
-                  <View style={{ marginTop: 24, height: 1, backgroundColor: isDark ? '#333' : '#E2E8F0' }} />
-                  
-                  <Text style={{ marginTop: 16, marginBottom: 12, fontWeight: '600', color: isDark ? '#94A3B8' : '#64748B', fontSize: 13, textTransform: 'uppercase', letterSpacing: 0.5 }}>Request History</Text>
-                  
-                  <View style={{ flex: 1, minHeight: 200 }}>
-                    <LeaveHistory />
-                  </View>
               </View>
           </View>
       </Modal>

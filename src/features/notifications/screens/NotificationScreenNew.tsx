@@ -136,6 +136,14 @@ const ListItem = React.memo(({
       onDelete={() => onAction(item.id, 'delete')}
     />
   );
+}, (prevProps, nextProps) => {
+  // Custom memo comparator to avoid the Array.map trap
+  return prevProps.item.id === nextProps.item.id &&
+         prevProps.item.isRead === nextProps.item.isRead &&
+         prevProps.item.status === nextProps.item.status &&
+         prevProps.isSelected === nextProps.isSelected &&
+         prevProps.selectionMode === nextProps.selectionMode &&
+         prevProps.isDark === nextProps.isDark;
 });
 
 import { getSlotLabel } from '../../../utils/timeUtils';
@@ -165,6 +173,12 @@ export const NotificationScreen = ({ navigation }: any) => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [processedIds] = useState<Set<string>>(new Set());
   const viewableItemsRef = useRef<Set<string>>(new Set()); // For auto-read
+
+  // Stable Refs for callbacks to prevent ListItem re-renders
+  const stateRef = useRef({ notifications, requests, swaps, leaves, selectionMode });
+  useEffect(() => {
+    stateRef.current = { notifications, requests, swaps, leaves, selectionMode };
+  });
 
   // Modals
   const [selectedNotification, setSelectedNotification] = useState<any>(null);
@@ -513,9 +527,42 @@ export const NotificationScreen = ({ navigation }: any) => {
     await refreshNotifications();
   };
 
-  const handleRequestAction = async (id: string, action: 'accept' | 'decline' | 'delete' | 'view') => {
+  const processAction = useCallback(async (id: string, action: 'accept' | 'decline', type: string = 'substitution') => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    
+    processedIds.add(id);
+    if (type === 'swap') {
+      setSwaps(prev => prev.filter(r => r.id !== id));
+    } else {
+      setRequests(prev => prev.filter(r => r.id !== id));
+    }
+    
+    try {
+      if (type === 'swap') {
+        const status = action === 'accept' ? 'accepted' : 'declined';
+        await supabase.from('class_swaps').update({ status }).eq('id', id);
+        showToast(`Swap ${status}`, 'success');
+      } else {
+        const result = await respondToSubstituteRequest(id, action);
+        if (result?.message) {
+          showToast(result.message, result.type);
+        }
+      }
+    } catch (error) {
+      console.error("Action failed:", error);
+      processedIds.delete(id);
+      showToast("Action failed", "error");
+      loadData();
+    } finally {
+      loadData();
+    }
+  }, [respondToSubstituteRequest]);
+
+  const handleRequestAction = useCallback(async (id: string, action: 'accept' | 'decline' | 'delete' | 'view') => {
     // Ignore view for now (cards show full details)
     if (action === 'view') return;
+    
+    const { notifications, requests, swaps, leaves } = stateRef.current;
 
     // Handle single item delete (swipe-to-delete)
     if (action === 'delete') {
@@ -603,40 +650,12 @@ export const NotificationScreen = ({ navigation }: any) => {
     }
 
     await processAction(id, action, type);
-  };
+  }, [processAction]);
 
-  const processAction = async (id: string, action: 'accept' | 'decline', type: string = 'substitution') => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    
-    processedIds.add(id);
-    if (type === 'swap') {
-      setSwaps(prev => prev.filter(r => r.id !== id));
-    } else {
-      setRequests(prev => prev.filter(r => r.id !== id));
-    }
-    
-    try {
-      if (type === 'swap') {
-        const status = action === 'accept' ? 'accepted' : 'declined';
-        await supabase.from('class_swaps').update({ status }).eq('id', id);
-        showToast(`Swap ${status}`, 'success');
-      } else {
-        const result = await respondToSubstituteRequest(id, action);
-        if (result?.message) {
-          showToast(result.message, result.type);
-        }
-      }
-    } catch (error) {
-      console.error("Action failed:", error);
-      processedIds.delete(id);
-      showToast("Action failed", "error");
-      loadData();
-    } finally {
-      loadData();
-    }
-  };
 
-  const handlePressNotification = (item: any) => {
+
+  const handlePressNotification = useCallback((item: any) => {
+    const { selectionMode } = stateRef.current;
     if (selectionMode) {
       toggleSelection(item.id);
     } else {
@@ -648,7 +667,7 @@ export const NotificationScreen = ({ navigation }: any) => {
         supabase.from('notifications').update({ is_read: true }).eq('id', item.id);
       }
     }
-  };
+  }, [markNotificationAsRead, toggleSelection]);
 
   // Effect to trigger actual mark read for items in viewableItemsRef
   const handleViewableItemsChanged = useRef(({ viewableItems }: any) => {
@@ -1016,7 +1035,7 @@ export const NotificationScreen = ({ navigation }: any) => {
       ) : (
       <SectionList
         sections={sections}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => `${item.type}_${item.id}`}
         renderItem={({ item }) => (
           <ListItem
             item={item}

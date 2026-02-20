@@ -61,7 +61,7 @@ interface ClassData {
 
 interface UseAttendanceOptions {
   classData: ClassData | null;
-  batch: 'full' | 'b1' | 'b2';
+  batchOverride?: 'full' | null; // When 'full', ignore classData.batch and load all students
 }
 
 interface UseAttendanceReturn {
@@ -79,7 +79,7 @@ interface UseAttendanceReturn {
   isOfflineMode: boolean;
 }
 
-export function useAttendance({ classData, batch }: UseAttendanceOptions): UseAttendanceReturn {
+export function useAttendance({ classData, batchOverride }: UseAttendanceOptions): UseAttendanceReturn {
   const [students, setStudents] = useState<AttendanceStudent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -107,7 +107,8 @@ export function useAttendance({ classData, batch }: UseAttendanceOptions): UseAt
     try {
       const { target_dept, target_year, target_section } = classData;
       
-      const batchNumber = batch === 'b1' ? 1 : batch === 'b2' ? 2 : null;
+      // Auto-derive batch from schedule data, unless overridden to 'full'
+      const batchNumber = batchOverride === 'full' ? null : (classData?.batch ?? null);
       
       let mappedStudents: AttendanceStudent[] = [];
       
@@ -221,7 +222,7 @@ export function useAttendance({ classData, batch }: UseAttendanceOptions): UseAt
         setLoading(false);
       }
     }
-  }, [classData, batch, isOnline]);
+  }, [classData, batchOverride, isOnline]);
 
   // Fetch on mount and when class/batch changes
   useEffect(() => {

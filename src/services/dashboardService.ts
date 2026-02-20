@@ -26,6 +26,7 @@ export interface TimetableSlot {
   target_year: number;
   target_section: string;
   batch: number | null;
+  isSwap?: boolean; // Added to support swap class indicating
 }
 
 export interface Student {
@@ -442,6 +443,36 @@ export async function getHolidayInfo(
   }
 }
 
+export interface LeaveInfo {
+  id: string;
+  leave_type: string;
+  status: string;
+}
+
+/**
+ * Check if the user is currently on an approved leave
+ */
+export async function getLeaveInfo(
+  facultyId: string,
+  date: string = new Date().toISOString().split('T')[0]
+): Promise<LeaveInfo | null> {
+  try {
+    // Check if there is an approved leave overlapping today
+    const { data, error } = await supabase
+      .from('faculty_leaves')
+      .select('id, leave_type, status')
+      .eq('faculty_id', facultyId)
+      .eq('status', 'approved')
+      .lte('start_date', date)
+      .gte('end_date', date)
+      .maybeSingle();
+
+    if (error || !data) return null;
+    return data as LeaveInfo;
+  } catch {
+    return null;
+  }
+}
 // =====================================================
 // STUDENT FUNCTIONS
 // =====================================================

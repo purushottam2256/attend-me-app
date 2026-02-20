@@ -196,10 +196,7 @@ export const ScanScreen: React.FC = () => {
         });
 
         if (liveClass) {
-          console.log(
-            "[ScanScreen] Auto-fetched live class:",
-            liveClass.subject?.name,
-          );
+
           setLiveClassData(liveClass);
         } else {
           setNoLiveClassError("No live class right now");
@@ -216,19 +213,24 @@ export const ScanScreen: React.FC = () => {
   }, [routeClassData]);
 
   const subjectName = classData?.subject?.name || "Loading...";
-  const section = classData
-    ? `${classData.target_dept || "CSE"}-${
-        classData.target_year || "3"
-      }-${classData.target_section || "A"}`
+  const [batchOverride, setBatchOverride] = useState<'full' | null>(null);
+  const effectiveBatch = batchOverride === 'full' ? null : (classData?.batch ?? null);
+  const batchLabel = effectiveBatch === 1 ? 'B1' : effectiveBatch === 2 ? 'B2' : 'All';
+
+  // Stable identifier for focus effect (excludes batch)
+  const baseSection = classData
+    ? `${classData.target_dept || "CSE"}-${classData.target_year || "3"}-${classData.target_section || "A"}`
     : "Loading...";
-  const classKey = `${subjectName}_${section}`;
+  const baseClassKey = `${subjectName}_${baseSection}`;
+
+  // Display identifier (includes batch) - used for storage keys and UI
+  const displaySection = `${baseSection}${effectiveBatch ? ` (${batchLabel})` : ''}`;
+  const classKey = `${subjectName}_${displaySection}`;
+  
   const endTime = classData?.end_time || "00:00";
 
   // UI State
   const [scanState, setScanState] = useState<ScanState>("HANDSHAKE");
-  const [currentBatch, setCurrentBatch] = useState<"full" | "b1" | "b2">(
-    "full",
-  );
   const [isScanning, setIsScanning] = useState(false);
   const [isAutoPilot, setIsAutoPilot] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(180);
@@ -253,7 +255,7 @@ export const ScanScreen: React.FC = () => {
   // Show blocked modal when no live class
   useEffect(() => {
     if (noLiveClassError && !routeClassData) {
-      console.log("[ScanScreen] No live class - showing blocked modal");
+
       
       const now = new Date();
       const currentHour = now.getHours();
@@ -287,14 +289,14 @@ export const ScanScreen: React.FC = () => {
     const bleCheck = await isBLEReady();
 
     if (bleCheck.ready) {
-      console.log("[ScanScreen] Retry successful - BLE is ready");
+
       setShowBleModal(false);
       // Force handshake restart
       handshakeProgress.setValue(0);
       handshakeRotation.setValue(0);
       setRetryTrigger((prev) => prev + 1);
     } else {
-      console.log("[ScanScreen] Retry failed - BLE still not ready");
+
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setBleError({
         title: "Still Unavailable",
@@ -327,7 +329,7 @@ export const ScanScreen: React.FC = () => {
     submitAttendance: submitToSupabase,
     refreshStudents,
     isOfflineMode,
-  } = useAttendance({ classData, batch: currentBatch });
+  } = useAttendance({ classData, batchOverride });
 
   // Animations
   const handshakeRotation = useRef(new Animated.Value(0)).current;
@@ -352,22 +354,25 @@ export const ScanScreen: React.FC = () => {
       headerOpacity.setValue(0);
 
       // Check for previous attendance
-      const checkPreviousAttendance = async () => {
+      const checkPreviousAttendance = async (key: string, name: string) => {
         try {
           const stored = await AsyncStorage.getItem(
-            `@attend_me/attendance_${classKey}`,
+            `@attend_me/attendance_${key}`,
           );
           if (stored) {
             const data = JSON.parse(stored);
             setPreviousAttendance({
-              className: `${subjectName} - ${section}`,
+              className: name,
               takenAt: data.takenAt,
             });
             // Show confirmation popup
             setShowOverride(true);
+          } else {
+             setPreviousAttendance(null);
+             setShowOverride(false);
           }
         } catch (error) {
-          console.log("No previous attendance found");
+
         }
       };
 
@@ -396,28 +401,6 @@ export const ScanScreen: React.FC = () => {
           return false;
         }
 
-        // NOTE: Disabled strict class validation for development/testing
-        // In production, uncomment this block:
-        /*
-        // Check if class data is missing (no class for this slot)
-        if (!classData || !classData.subject) {
-          setBlockReason("no_class");
-          setShowBlocked(true);
-          return false;
-        }
-
-        // Check if class has already ended (with grace period of 15 min)
-        if (classData.end_time) {
-          const [endHour, endMin] = classData.end_time.split(":").map(Number);
-          const classEndMinutes = endHour * 60 + endMin + 15; // 15 min grace
-          if (currentTimeMinutes > classEndMinutes) {
-            setBlockReason("class_ended");
-            setShowBlocked(true);
-            return false;
-          }
-        }
-        */
-
         return true;
       };
 
@@ -428,19 +411,51 @@ export const ScanScreen: React.FC = () => {
         validateScanTiming();
       }
 
-      checkPreviousAttendance();
+      checkPreviousAttendance(classKey, `${subjectName} - ${displaySection}`);
     }, [
+      // Only depend on base identifiers to prevent reset on batch toggle
+      baseClassKey, 
+      subjectName,
+      baseSection,
+      // Still need these for initial setup
       handshakeProgress,
       handshakeRotation,
       contentOpacity,
       headerOpacity,
-      classKey,
-      subjectName,
-      section,
-      classData,
       route.params?.manual,
+      // Note: classData is needed for validation logic inside, but we don't want to re-run on every small change
+      // Ideally, rely on baseClassKey which changes when classData identity changes
     ]),
   );
+
+  // Dedicated effect for Batch Switching
+  // Updates attendance check without resetting the whole screen
+  useEffect(() => {
+     const checkPrevious = async () => {
+        try {
+          const stored = await AsyncStorage.getItem(`@attend_me/attendance_${classKey}`);
+          if (stored) {
+             const data = JSON.parse(stored);
+             setPreviousAttendance({
+               className: `${subjectName} - ${displaySection}`,
+               takenAt: data.takenAt,
+             });
+             setShowOverride(true);
+             setIsScanning(false); // Stop scanning if we found previous data
+             setScanState("HANDSHAKE");
+          } else {
+             setPreviousAttendance(null);
+             if (scanState === 'HANDSHAKE') {
+                setShowOverride(false);
+             }
+          }
+        } catch (e) { }
+     };
+     
+     if (scanState !== 'SUBMITTING' && scanState !== 'SUCCESS') {
+        checkPrevious();
+     }
+  }, [batchOverride, classKey]);
 
   // Handshake phase animation (waits for override decision and validation)
   useEffect(() => {
@@ -487,7 +502,7 @@ export const ScanScreen: React.FC = () => {
 
         // 2. Check BLE/Bluetooth status using bleService directly
         const bleCheck = await isBLEReady();
-        console.log("[ScanScreen] BLE Ready Check:", bleCheck);
+
 
         if (!bleCheck.ready) {
           handshakeRotation.stopAnimation();
@@ -579,7 +594,7 @@ export const ScanScreen: React.FC = () => {
       setTimeRemaining((prev) => {
         if (prev <= 1) {
           // Timer ended - auto-submit attendance
-          console.log("[ScanScreen] Timer ended - auto-submitting attendance");
+
           setIsScanning(false);
           // Trigger submit after a small delay to ensure state updates
           setTimeout(() => {
@@ -614,23 +629,18 @@ export const ScanScreen: React.FC = () => {
       isPresent: s.status === "present",
     })),
     onStudentDetected: (studentId) => {
-      console.log("[ScanScreen] 🎯 Student detected by BLE:", studentId);
+
       const student = students.find((s) => s.id === studentId);
       
       // FIX: Do not overwrite OD or Leave status
       if (student?.status === 'od' || student?.status === 'leave') {
-        console.log(`[ScanScreen] 🔒 Skipping update for ${student.name} (Status: ${student.status})`);
+
         return;
       }
 
-      console.log(
-        "[ScanScreen] Student info:",
-        student?.name,
-        student?.rollNo,
-        student?.bleUUID,
-      );
+
       updateStudentStatus(studentId, "present");
-      console.log("[ScanScreen] ✅ Called updateStudentStatus for:", studentId);
+
     },
     // Only enable BLE when: scanning, in SCANNING state, classData loaded, roster loaded, no break time error
     enabled:
@@ -650,13 +660,13 @@ export const ScanScreen: React.FC = () => {
       // On focus - nothing extra needed
       return () => {
         // On blur - stop BLE scanning using both hook and direct bleService call
-        console.log("[ScanScreen] Screen lost focus - stopping BLE scan");
+
         stopBLEScan();
         setIsScanning(false);
         // Also directly stop via bleService to ensure it's stopped
         import("@services/bleService").then(({ stopScanning }) => {
           stopScanning();
-          console.log("[ScanScreen] Direct bleService.stopScanning called");
+
         });
       };
     }, [stopBLEScan]),
@@ -681,11 +691,11 @@ export const ScanScreen: React.FC = () => {
       (prevState === "off" || prevState === "unauthorized") &&
       bleState === "on"
     ) {
-      console.log("[ScanScreen] 🔄 Bluetooth enabled! Auto-resuming...");
+
 
       // If we're in SCANNING state and have data, auto-start
       if (scanState === "SCANNING" && classData && students.length > 0) {
-        console.log("[ScanScreen] ✅ Resuming scan automatically");
+
         setIsScanning(true);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
@@ -894,7 +904,7 @@ export const ScanScreen: React.FC = () => {
 
         <Text style={styles.handshakeTitle}>Securing Class</Text>
         <Text style={styles.handshakeSubtitle}>
-          {subjectName} • {section}
+          {subjectName} • {displaySection}
         </Text>
 
         {/* Progress bar */}
@@ -979,7 +989,7 @@ export const ScanScreen: React.FC = () => {
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>{subjectName}</Text>
-          <Text style={styles.headerSubtitle}>{section}</Text>
+          <Text style={styles.headerSubtitle}>{displaySection}</Text>
         </View>
         <View style={{ flexDirection: "row", gap: scale(8) }}>
 
@@ -1024,17 +1034,14 @@ export const ScanScreen: React.FC = () => {
           isScanning={isScanning}
           isAutoPilot={isAutoPilot}
           endTime={endTime}
-          currentBatch={currentBatch}
+          batchLabel={batchLabel}
+          hasBatch={!!classData?.batch}
           onToggleScan={handleToggleScan}
           onRescan={handleRescan}
           onTimerPress={handleTimerPress}
           onBatchPress={() => {
-            // Cycle through batches: full -> b1 -> b2 -> full
-            setCurrentBatch((prev) => {
-              if (prev === "full") return "b1";
-              if (prev === "b1") return "b2";
-              return "full";
-            });
+            // Toggle between scheduled batch and full class
+            setBatchOverride(prev => prev === 'full' ? null : 'full');
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
           }}
         />

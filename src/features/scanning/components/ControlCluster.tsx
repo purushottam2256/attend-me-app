@@ -24,11 +24,12 @@ interface ControlClusterProps {
   isScanning: boolean;
   isAutoPilot: boolean;
   endTime?: string;
-  currentBatch: 'full' | 'b1' | 'b2';
+  batchLabel: string;
+  hasBatch?: boolean; // true for lab classes with a scheduled batch
   onToggleScan: () => void;
   onRescan: () => void;
   onTimerPress: () => void;
-  onBatchPress: () => void;
+  onBatchPress?: () => void; // toggle between scheduled batch and full
 }
 
 export const ControlCluster: React.FC<ControlClusterProps> = ({
@@ -36,7 +37,8 @@ export const ControlCluster: React.FC<ControlClusterProps> = ({
   isScanning,
   isAutoPilot,
   endTime,
-  currentBatch,
+  batchLabel,
+  hasBatch,
   onToggleScan,
   onRescan,
   onTimerPress,
@@ -52,13 +54,6 @@ export const ControlCluster: React.FC<ControlClusterProps> = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const getBatchLabel = () => {
-    switch (currentBatch) {
-      case 'b1': return 'B1';
-      case 'b2': return 'B2';
-      default: return 'All';
-    }
-  };
 
   const handleRescan = () => {
     Animated.timing(rotateAnim, {
@@ -124,14 +119,20 @@ export const ControlCluster: React.FC<ControlClusterProps> = ({
           </Animated.View>
         </TouchableOpacity>
 
-        {/* Batch Selector */}
-        <TouchableOpacity 
-          style={styles.batchButton} 
-          onPress={onBatchPress}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.batchLabel}>{getBatchLabel()}</Text>
-        </TouchableOpacity>
+        {/* Batch Toggle - pressable for labs, display-only otherwise */}
+        {hasBatch && onBatchPress ? (
+          <TouchableOpacity 
+            style={styles.batchButton} 
+            onPress={onBatchPress}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.batchLabel}>{batchLabel}</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.batchButton}>
+            <Text style={styles.batchLabel}>{batchLabel}</Text>
+          </View>
+        )}
       </View>
     </View>
   );
