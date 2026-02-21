@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import { useDeferredLoad } from '../../../hooks/useDeferredLoad';
 import { 
   View, Text, StyleSheet, SectionList, RefreshControl, TouchableOpacity, 
   LayoutAnimation, Platform, UIManager, ScrollView, Alert, Animated, Dimensions 
@@ -376,7 +377,7 @@ export const NotificationScreen = ({ navigation }: any) => {
     }
   };
 
-  useEffect(() => { loadData(0); }, []);
+  useDeferredLoad(() => { loadData(0); }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -446,7 +447,7 @@ export const NotificationScreen = ({ navigation }: any) => {
         setConfirmModal(prev => ({ ...prev, visible: false }));
         
         // Optimistic UI update
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+
         setNotifications(prev => prev.filter(n => !selectedIds.has(n.id)));
         setRequests(prev => prev.filter(r => !selectedIds.has(r.id)));
         setSwaps(prev => prev.filter(s => !selectedIds.has(s.id)));
@@ -516,7 +517,7 @@ export const NotificationScreen = ({ navigation }: any) => {
   };
 
   const handleMarkAllRead = async () => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+
     setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
     
     const { data: { user } } = await supabase.auth.getUser();
@@ -528,7 +529,7 @@ export const NotificationScreen = ({ navigation }: any) => {
   };
 
   const processAction = useCallback(async (id: string, action: 'accept' | 'decline', type: string = 'substitution') => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+
     
     processedIds.add(id);
     if (type === 'swap') {
@@ -570,7 +571,7 @@ export const NotificationScreen = ({ navigation }: any) => {
       const request = requests.find(r => r.id === id);
       const swap = swaps.find(s => s.id === id);
       
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+
       
       if (notification) {
         setNotifications(prev => prev.filter(n => n.id !== id));

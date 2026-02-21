@@ -4,7 +4,7 @@
  * Premium design with date strip, accordion cards, and floating dock
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,8 @@ import {
   Easing,
   Image,
 } from 'react-native';
+import { safeRefresh } from '../../../utils/safeRefresh';
+import { useDeferredLoad, deferLoad } from '../../../hooks/useDeferredLoad';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -69,6 +71,8 @@ export const HistoryScreen: React.FC = () => {
   const [isOfflineData, setIsOfflineData] = useState(false);
 
   const { status: connectionStatus } = useConnectionStatus();
+  const connectionStatusRef = useRef(connectionStatus);
+  connectionStatusRef.current = connectionStatus;
 
   // Toast State
   const [toast, setToast] = useState<{ visible: boolean, type: 'success' | 'error', message: string }>({ visible: false, type: 'success', message: '' });
@@ -181,7 +185,7 @@ export const HistoryScreen: React.FC = () => {
       let historySessions: AttendanceSession[] = [];
 
       // OFFLINE FALLBACK: Use cached data if offline
-      if (connectionStatus !== 'online') {
+      if (connectionStatusRef.current !== 'online') {
         console.log('[HistoryScreen] Offline mode - loading from cache');
         const cached = await getCachedHistory();
         if (cached && cached.length > 0) {
@@ -250,11 +254,9 @@ export const HistoryScreen: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [selectedDate, connectionStatus]);
+  }, [selectedDate]);
 
-  useEffect(() => {
-    loadHistory();
-  }, [loadHistory]);
+  useDeferredLoad(() => { loadHistory(); }, [loadHistory]);
 
   // Handle date selection
   const handleDateSelect = (date: Date) => {
@@ -270,10 +272,8 @@ export const HistoryScreen: React.FC = () => {
   };
 
   // Pull to refresh
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await loadHistory();
-    setRefreshing(false);
+  const onRefresh = useCallback(() => {
+    safeRefresh(setRefreshing, () => loadHistory());
   }, [loadHistory]);
 
   const handleShareSession = async (session: AttendanceSession) => {
@@ -300,12 +300,12 @@ export const HistoryScreen: React.FC = () => {
     setDeleteTargetId(null);
   };
 
-  const handleRetrySync = async () => {
-    setRefreshing(true);
-    await syncPendingSubmissions();
-    await loadHistory();
-    setRefreshing(false);
-  };
+  const handleRetrySync = useCallback(() => {
+    safeRefresh(setRefreshing, async () => {
+      await syncPendingSubmissions();
+      await loadHistory();
+    });
+  }, [loadHistory]);
 
   // Generate WhatsApp report
   const generateWhatsAppReport = (session: AttendanceSession) => {

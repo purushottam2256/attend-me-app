@@ -18,6 +18,7 @@ import React, {
   ReactNode,
   useCallback,
 } from "react";
+import { InteractionManager } from "react-native";
 import * as Notifications from "expo-notifications";
 import { supabase } from "../config/supabase";
 import { useAuth } from "./AuthContext";
@@ -88,13 +89,12 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
   // --------------------------------------------------------------------------
 
   useEffect(() => {
-    const initializeNotifications = async () => {
-      // Initialize NotificationService (channels, categories)
+    // Defer init so it doesn't compete with the first render frame
+    const timer = setTimeout(async () => {
       await NotificationService.init();
       setIsInitialized(true);
-    };
-
-    initializeNotifications();
+    }, 500);
+    return () => clearTimeout(timer);
   }, []);
 
   // --------------------------------------------------------------------------
@@ -104,27 +104,21 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     if (!user || !isInitialized) return;
 
-    // Register for push notifications
-    registerPushToken();
+    // Stagger all notification work so the UI stays responsive
+    const task = InteractionManager.runAfterInteractions(() => {
+      registerPushToken();
+      fetchUnreadCount();
+      setupNotificationListeners();
+      setupRealtimeSubscription();
 
-    // Fetch initial unread count
-    fetchUnreadCount();
-
-    // Setup listeners
-    setupNotificationListeners();
-
-    // Setup realtime subscription
-    setupRealtimeSubscription();
-
-    // Weekly cleanup
-    NotificationService.cleanupOldNotifications();
+      // Cleanup old notifications — low priority, delay further
+      setTimeout(() => NotificationService.cleanupOldNotifications(), 3000);
+    });
 
     return () => {
-      // Cleanup listeners
+      task.cancel();
       notificationListenerRef.current?.remove();
       responseListenerRef.current?.remove();
-
-      // Cleanup realtime channel
       if (realtimeChannelRef.current) {
         supabase.removeChannel(realtimeChannelRef.current);
       }
@@ -204,6 +198,22 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
       any
     >;
 
+    // ─── STALENESS GUARD ───────────────────────────────────────────────
+    // When the app resumes from background, Android/iOS replays the LAST
+    // notification response through this listener even if the user did NOT
+    // tap a notification. We detect this by checking if the notification
+    // was delivered more than 5 seconds ago — a genuine tap happens
+    // within milliseconds of showing the notification.
+    const notificationDate = response.notification.date;
+    const nowMs = Date.now();
+    const ageMs = nowMs - notificationDate;
+    
+    if (ageMs > 5000) {
+      log.debug('Ignoring stale notification response (age:', Math.round(ageMs / 1000), 's). This is a background resume, not a user tap.');
+      return; // ← Skip navigation entirely
+    }
+    // ────────────────────────────────────────────────────────────────────
+
     log.debug("Response:", { actionId, data });
 
     // Handle interactive button actions
@@ -220,10 +230,6 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
 
           // Show feedback even if app was backgrounded (will show when foregrounded)
           if (result.success) {
-            // Toast or Alert
-            // Since we don't have access to UI toast here easily, we might rely on the `respondToSubstituteRequest` to send a local notification or just log it.
-            // But wait, `respondToSubstituteRequest` returns a result.
-            // We can schedule a local notification to confirm success if the app was in background
             await NotificationService.showLocalNotification({
               title: "Success",
               body: result.message,
@@ -265,14 +271,8 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
 
       case "OPEN":
       case Notifications.DEFAULT_ACTION_IDENTIFIER:
-        // Navigate based on notification type ONLY if it has an explicit open intent or we know the user tapped it
-        // Check if app was truly opened via notification
-        if (
-          actionId === Notifications.DEFAULT_ACTION_IDENTIFIER ||
-          actionId === "OPEN"
-        ) {
-          handleDeepLink(data);
-        }
+        // Navigate based on notification type
+        handleDeepLink(data);
         break;
     }
   };

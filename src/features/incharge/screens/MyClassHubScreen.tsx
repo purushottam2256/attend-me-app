@@ -9,7 +9,7 @@
  * - Home Screen Background (Gradient + Orbs)
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -28,6 +28,8 @@ import {
 
   Linking,
 } from 'react-native';
+import { safeRefresh } from '../../../utils/safeRefresh';
+import { useDeferredLoad } from '../../../hooks/useDeferredLoad';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -196,25 +198,27 @@ export const MyClassHubScreen: React.FC = () => {
   }, [watchlist, searchQuery, filterMin, filterMax]);
   
   const { status: connectionStatus } = useConnectionStatus();
+  const connectionStatusRef = useRef(connectionStatus);
+  connectionStatusRef.current = connectionStatus;
 
   // Load Class Info
   const fetchClassInfo = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
+    if (!user) return { assignment: null, user: null };
     const assignment = await getAssignedClass(user.id);
     if (!assignment) console.log('[MyClassHub] No class assignment found.');
-    return assignment;
+    return { assignment, user };
   }, []);
 
   // Load Data
   const loadData = useCallback(async () => {
     try {
       // OFFLINE FALLBACK: Use cached data if offline
-      if (connectionStatus !== 'online') {
+      if (connectionStatusRef.current !== 'online') {
         console.log('[MyClassHub] Offline mode - loading from cache');
-        const cachedWatchlist = await getCachedWatchlist();
-        if (cachedWatchlist && cachedWatchlist.length > 0) {
-          setWatchlist(cachedWatchlist as StudentAggregate[]);
+        const cachedWatchlistData = await getCachedWatchlist();
+        if (cachedWatchlistData && cachedWatchlistData.length > 0) {
+          setWatchlist(cachedWatchlistData as StudentAggregate[]);
           setIsOfflineData(true);
         }
         setLoading(false);
@@ -222,32 +226,27 @@ export const MyClassHubScreen: React.FC = () => {
       }
       
       setIsOfflineData(false);
-      const info = await fetchClassInfo();
-      if (!info) {
+      const result = await fetchClassInfo();
+      if (!result?.assignment) {
         setLoading(false);
         return;
       }
+      const info = result.assignment;
+      const currentUser = result.user;
       setClassInfo(info);
       setError(null);
 
-      // Fetch Profile Image
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data } = await supabase
-            .from('profiles')
-            .select('avatar_url')
-            .eq('id', user.id)
-            .single();
-        if (data?.avatar_url) {
-            setProfileImage(data.avatar_url);
-        }
-      }
-
-      const [periods, students, currentSem] = await Promise.all([
+      // Fetch everything in parallel — profile image + data queries
+      const [profileData, periods, students, currentSem] = await Promise.all([
+        currentUser ? supabase.from('profiles').select('avatar_url').eq('id', currentUser.id).single() : null,
         getKeyPeriodAttendance(info.dept, info.year, info.section),
         getWatchlist(info.dept, info.year, info.section, 60),
         getCurrentSemester()
       ]);
+
+      if (profileData?.data?.avatar_url) {
+        setProfileImage(profileData.data.avatar_url);
+      }
 
       setP1(periods.p1);
       setP4(periods.p4);
@@ -272,7 +271,7 @@ export const MyClassHubScreen: React.FC = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [fetchClassInfo, classInfo, connectionStatus]);
+  }, [fetchClassInfo]);
 
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'warning') => {
       setToast({ visible: true, message, type });
@@ -292,15 +291,11 @@ export const MyClassHubScreen: React.FC = () => {
      fetchTrends();
   }, [classInfo, trendRange]);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useDeferredLoad(() => { loadData(); }, [loadData]);
 
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
+  const onRefresh = useCallback(() => {
     safeHaptic(Haptics.ImpactFeedbackStyle.Light);
-    await loadData();
-    setRefreshing(false);
+    safeRefresh(setRefreshing, () => loadData());
   }, [loadData]);
 
 

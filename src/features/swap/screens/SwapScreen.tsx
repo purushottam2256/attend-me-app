@@ -17,6 +17,8 @@ import {
   StyleSheet,
   Dimensions
 } from 'react-native';
+import { safeRefresh } from '../../../utils/safeRefresh';
+import { useDeferredLoad } from '../../../hooks/useDeferredLoad';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -152,9 +154,7 @@ export const SwapScreen: React.FC = () => {
   };
 
   // Load user and data
-  useEffect(() => {
-    loadData();
-  }, []);
+  useDeferredLoad(() => { loadData(); }, []);
 
   // Pre-selection Effect (runs when screen is focused)
   useFocusEffect(
@@ -335,10 +335,8 @@ export const SwapScreen: React.FC = () => {
     }
   };
 
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await loadData();
-    setRefreshing(false);
+  const onRefresh = useCallback(() => {
+    safeRefresh(setRefreshing, () => loadData());
   }, []);
 
   // Filter faculty by search

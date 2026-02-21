@@ -66,7 +66,7 @@ export const useConnectionStatus = (): UseConnectionStatusReturn => {
     });
 
     // Check queue periodically
-    const interval = setInterval(checkQueue, 10000);
+    const interval = setInterval(checkQueue, 30000); // Reduced from 10s to 30s
 
     return () => {
       unsubscribe();

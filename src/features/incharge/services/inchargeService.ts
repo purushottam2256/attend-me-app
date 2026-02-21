@@ -62,99 +62,48 @@ export interface Permission {
   created_at: string;
 }
 
-// Helper to compute aggregates dynamically
+// Helper to compute aggregates — now uses server-side RPC for zero JS thread overhead
+// The SQL function does the JOIN + GROUP BY + percentage calc on the server
+// and returns only ~60 pre-aggregated rows instead of 6000+ raw logs.
 const getAggregatedClassData = async (
   dept: string,
   year: number,
-  section: string
+  section: string,
+  threshold?: number
 ): Promise<StudentAggregate[]> => {
-  // 1. Fetch all students for the class
-  const { data: students, error: studentError } = await supabase
-    .from('students')
-    .select('id, roll_no, full_name, mobile, parent_mobile, dept, section, year')
-    .eq('dept', dept)
-    .eq('year', year)
-    .eq('section', section)
-    .eq('is_active', true)
-    .order('roll_no');
-
-  if (studentError || !students) throw studentError;
-
-  // 2. Fetch Total Sessions for this class
-  const { count, error: sessionError } = await supabase
-    .from('attendance_sessions')
-    .select('id', { count: 'exact', head: true })
-    .eq('target_dept', dept)
-    .eq('target_year', year)
-    .eq('target_section', section);
-
-  if (sessionError) throw sessionError;
-  const totalSessions = count || 0;
-
-  // 3. Fetch Logs for this class (using inner join to filter by class)
-  const { data: logs, error: logsError } = await supabase
-    .from('attendance_logs')
-    .select(`
-      student_id, 
-      status,
-      attendance_sessions!inner(target_dept, target_year, target_section)
-    `)
-    .eq('attendance_sessions.target_dept', dept)
-    .eq('attendance_sessions.target_year', year)
-    .eq('attendance_sessions.target_section', section);
-
-  if (logsError) throw logsError;
-
-  // 4. Aggregate Logs
-  const statsMap = new Map<string, { present: number, absent: number, od: number, leave: number }>();
-  
-  logs?.forEach((log: any) => {
-    const sid = log.student_id;
-    if (!statsMap.has(sid)) {
-      statsMap.set(sid, { present: 0, absent: 0, od: 0, leave: 0 });
-    }
-    const stats = statsMap.get(sid)!;
-    
-    if (log.status === 'present') stats.present++;
-    else if (log.status === 'absent') stats.absent++;
-    else if (log.status === 'od') stats.od++;
-    else if (log.status === 'leave') stats.leave++;
+  const { data, error } = await supabase.rpc('get_class_attendance_aggregates', {
+    p_dept: dept,
+    p_year: year,
+    p_section: section,
+    p_threshold: threshold ?? null,
   });
 
-  // 5. Build Aggregates
-  return students.map(s => {
-    const stats = statsMap.get(s.id) || { present: 0, absent: 0, od: 0, leave: 0 };
-    // OD counts as present for percentage
-    const effectivePresent = stats.present + stats.od;
-    // Total conducted for this student = Present + Absent + OD (Leave might be excluded or included depending on policy, user said "Present(present+absent)*100")
-    // Assuming "Present+Absent" implies Total Attended/Missed.
-    const studentTotal = stats.present + stats.absent + stats.od; 
-    
-    const percentage = studentTotal > 0 
-      ? Math.round((effectivePresent / studentTotal) * 100)
-      : 0;
+  if (error) {
+    console.error('[InchargeService] RPC error:', error);
+    throw error;
+  }
 
-    return {
-      student_id: s.id,
-      roll_no: s.roll_no,
-      full_name: s.full_name,
-      dept: s.dept,
-      section: s.section,
-      year: s.year,
-      present_sessions: stats.present,
-      absent_sessions: stats.absent,
-      od_sessions: stats.od,
-      leave_sessions: stats.leave,
-      total_sessions: totalSessions,
-      attendance_percentage: percentage,
-      last_attendance_date: null, // Optimization: skip for now or fetch if needed
-      student_mobile: s.mobile,
-      parent_mobile: s.parent_mobile
-    };
-  });
+  // Map RPC response to our TypeScript interface
+  return (data || []).map((row: any) => ({
+    student_id: row.student_id,
+    roll_no: row.roll_no,
+    full_name: row.full_name,
+    dept: row.dept,
+    section: row.section,
+    year: row.year,
+    present_sessions: row.present_sessions,
+    absent_sessions: row.absent_sessions,
+    od_sessions: row.od_sessions,
+    leave_sessions: row.leave_sessions,
+    total_sessions: row.total_sessions,
+    attendance_percentage: row.attendance_percentage,
+    last_attendance_date: null,
+    student_mobile: row.student_mobile,
+    parent_mobile: row.parent_mobile,
+  }));
 };
 
-// Fetch class students with aggregates
+// Fetch class students with aggregates — uses server-side RPC
 export const getClassStudents = async (
   dept: string,
   year: number,
@@ -168,7 +117,7 @@ export const getClassStudents = async (
   }
 };
 
-// Get watchlist (critical students <75%)
+// Get watchlist (critical students <threshold%) — server-side filtered
 export const getWatchlist = async (
   dept: string,
   year: number,
@@ -176,10 +125,9 @@ export const getWatchlist = async (
   threshold: number = CRITICAL_ATTENDANCE_THRESHOLD
 ): Promise<StudentAggregate[]> => {
   try {
-    const allStudents = await getAggregatedClassData(dept, year, section);
-    return allStudents
-      .filter(s => s.attendance_percentage < threshold)
-      .sort((a, b) => a.attendance_percentage - b.attendance_percentage);
+    // Pass threshold to server — only students below it are returned
+    const students = await getAggregatedClassData(dept, year, section, threshold);
+    return students.sort((a, b) => a.attendance_percentage - b.attendance_percentage);
   } catch (error) {
     console.error('[InchargeService] Error fetching watchlist:', error);
     throw error;

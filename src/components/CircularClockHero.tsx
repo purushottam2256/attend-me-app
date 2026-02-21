@@ -77,7 +77,7 @@ export const CircularClockHero = forwardRef<CircularClockHeroRef, CircularClockH
 
   // Update time
   useEffect(() => {
-    const interval = setInterval(() => setCurrentTime(new Date()), 1000);
+    const interval = setInterval(() => setCurrentTime(new Date()), 60000); // Only HH:MM shown, no need for every 1s
     return () => clearInterval(interval);
   }, []);
 
@@ -89,13 +89,13 @@ export const CircularClockHero = forwardRef<CircularClockHeroRef, CircularClockH
           toValue: 1,
           duration: 2000,
           easing: Easing.inOut(Easing.ease),
-          useNativeDriver: false,
+          useNativeDriver: true, // opacity IS natively supported
         }),
         Animated.timing(glowAnim, {
           toValue: 0,
           duration: 2000,
           easing: Easing.inOut(Easing.ease),
-          useNativeDriver: false,
+          useNativeDriver: true, // opacity IS natively supported
         }),
       ])
     ).start();

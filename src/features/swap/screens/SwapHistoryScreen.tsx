@@ -13,6 +13,8 @@ import {
   ActivityIndicator,
   StyleSheet
 } from 'react-native';
+import { safeRefresh } from '../../../utils/safeRefresh';
+import { useDeferredLoad } from '../../../hooks/useDeferredLoad';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -161,14 +163,10 @@ export const SwapHistoryScreen: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    loadHistory();
-  }, []);
+  useDeferredLoad(() => { loadHistory(); }, []);
 
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await loadHistory();
-    setRefreshing(false);
+  const onRefresh = useCallback(() => {
+    safeRefresh(setRefreshing, () => loadHistory());
   }, []);
 
   // Group items by date

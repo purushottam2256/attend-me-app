@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { deferLoad } from '../../../hooks/useDeferredLoad';
 
 import { useTheme } from '../../../contexts';
 import { Colors } from '../../../constants';
@@ -466,7 +467,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
 
   useFocusEffect(
     useCallback(() => {
-      loadSchedule(true);
+      return deferLoad(() => loadSchedule(true));
     }, [loadSchedule])
   );
 
@@ -479,8 +480,18 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadSchedule(true);
-    setRefreshing(false);
+    try {
+      // Race the refresh against a 15-second timeout so the spinner never gets stuck
+      await Promise.race([
+        loadSchedule(true),
+        new Promise(resolve => setTimeout(resolve, 15000)),
+      ]);
+    } catch (error) {
+      console.error('Refresh failed:', error);
+    } finally {
+      // ALWAYS dismiss the spinner, even if loadSchedule hangs or throws
+      setRefreshing(false);
+    }
   }, [loadSchedule]);
 
   const handleStartClass = () => {

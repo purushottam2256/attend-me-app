@@ -9,6 +9,7 @@
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
+import { InteractionManager } from 'react-native';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import {
   cacheAllRosters,
@@ -66,9 +67,12 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
     setLastSyncAge(age);
   }, []);
 
-  // Load initial status
+  // Load initial status — deferred so it doesn't compete with first render
   useEffect(() => {
-    refreshStatus();
+    const task = InteractionManager.runAfterInteractions(() => {
+      refreshStatus();
+    });
+    return () => task.cancel();
   }, [refreshStatus]);
 
   // Auto-sync pending submissions when coming back online
@@ -82,13 +86,16 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
     }
   }, [justCameOnline, syncStatus.pendingCount]);
 
-  // Register background sync on first mount
+  // Register background sync — deferred by 1s so UI loads first
   useEffect(() => {
     if (!bgSyncRegistered.current) {
       bgSyncRegistered.current = true;
-      registerBackgroundSync().then(success => {
-        log.info('Background sync registration:', success ? 'OK' : 'FAILED');
-      });
+      const timer = setTimeout(() => {
+        registerBackgroundSync().then(success => {
+          log.info('Background sync registration:', success ? 'OK' : 'FAILED');
+        });
+      }, 1000);
+      return () => clearTimeout(timer);
     }
   }, []);
 
@@ -130,13 +137,16 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
     }
   }, [isOnline, refreshStatus]);
 
-  // Auto-sync rosters on launch (once per session)
+  // Auto-sync rosters — deferred by 2s so the home screen renders first
   const [hasInitialSynced, setHasInitialSynced] = useState(false);
   useEffect(() => {
     if (isOnline && !hasInitialSynced) {
-      log.info('Triggering initial Smart Roster Sync');
-      syncRosters();
-      setHasInitialSynced(true);
+      const timer = setTimeout(() => {
+        log.info('Triggering initial Smart Roster Sync');
+        syncRosters();
+        setHasInitialSynced(true);
+      }, 2000);
+      return () => clearTimeout(timer);
     }
   }, [isOnline, hasInitialSynced, syncRosters]);
 
@@ -170,7 +180,7 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
           refreshStatus();
         }
       });
-    }, 5000);
+    }, 30000); // Check every 30s, not 5s — reduces JS thread pressure
 
     return () => clearInterval(interval);
   }, [syncStatus.pendingCount, refreshStatus]);

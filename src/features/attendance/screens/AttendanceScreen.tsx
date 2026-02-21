@@ -3,7 +3,7 @@
  * Take attendance with premium design
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -39,6 +39,8 @@ export const AttendanceScreen: React.FC = () => {
   const { isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const { status: connectionStatus } = useConnectionStatus(); // Get status explicitly
+  const connectionStatusRef = useRef(connectionStatus);
+  connectionStatusRef.current = connectionStatus;
   
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -82,7 +84,7 @@ export const AttendanceScreen: React.FC = () => {
       let data: Student[] = [];
       let loadedFromCache = false;
 
-      if (connectionStatus === 'online') {
+      if (connectionStatusRef.current === 'online') {
           data = await getStudentsForClass(
             selectedClass.target_dept,
             selectedClass.target_year,
@@ -92,7 +94,7 @@ export const AttendanceScreen: React.FC = () => {
       }
 
       // If online failed or offline, try cache
-      if ((!data || data.length === 0) || connectionStatus !== 'online') {
+      if ((!data || data.length === 0) || connectionStatusRef.current !== 'online') {
          // Load from cache using robust lookup (Department, Year, Section)
          // Assuming slot_id might not match cache key mechanism, use class details.
          if (selectedClass) {
@@ -130,7 +132,7 @@ export const AttendanceScreen: React.FC = () => {
       console.error('Error loading students:', error);
       showToast('error', 'Failed to load students');
     }
-  }, [selectedClass, connectionStatus]);
+  }, [selectedClass]);
 
   useEffect(() => {
     loadClasses();
@@ -174,7 +176,7 @@ export const AttendanceScreen: React.FC = () => {
     setSubmitting(true);
     try {
       // OFFLINE SUBMISSION
-      if (connectionStatus !== 'online') {
+      if (connectionStatusRef.current !== 'online') {
           // Queue submission
           try {
               await queueSubmission({

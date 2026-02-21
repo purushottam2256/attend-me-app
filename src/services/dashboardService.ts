@@ -58,10 +58,7 @@ export interface AttendanceSession {
 
 /**
  * Get today's timetable for the logged-in faculty
- */
-/**
- * Get today's timetable for the logged-in faculty
- * Includes accepted swaps (removes swapped-out, adds swapped-in)
+ * Uses server-side RPC to resolve swaps in one call (no N+1 queries)
  */
 export async function getTodaySchedule(facultyId: string): Promise<TimetableSlot[]> {
   try {
@@ -70,108 +67,35 @@ export async function getTodaySchedule(facultyId: string): Promise<TimetableSlot
     const todayDay = days[todayDate.getDay()];
     const todayStr = todayDate.toISOString().split('T')[0];
 
-    // 1. Fetch Base Schedule
-    const { data: baseSchedule, error } = await supabase
-      .from('master_timetables')
-      .select(`
-        id, day, slot_id, start_time, end_time, room,
-        target_dept, target_year, target_section, batch,
-        subjects:subject_id (id, name, code)
-      `)
-      .eq('faculty_id', facultyId)
-      .eq('day', todayDay)
-      .eq('is_active', true)
-      .order('start_time');
+    const { data, error } = await supabase.rpc('get_faculty_schedule', {
+      p_faculty_id: facultyId,
+      p_day: todayDay,
+      p_date: todayStr,
+    });
 
     if (error) {
-      log.error('Error fetching timetable:', error);
+      log.error('RPC get_faculty_schedule error:', error);
       return [];
     }
 
-    let finalSchedule = (baseSchedule || []).map((item: any) => ({
-      ...item,
-      subject: item.subjects,
+    return (data || []).map((row: any) => ({
+      id: row.id,
+      day: row.day,
+      slot_id: row.slot_id,
+      start_time: row.start_time,
+      end_time: row.end_time,
+      room: row.room,
+      target_dept: row.target_dept,
+      target_year: row.target_year,
+      target_section: row.target_section,
+      batch: row.batch,
+      subject: {
+        id: row.subject_id,
+        name: row.subject_name,
+        code: row.subject_code,
+      },
+      isSwap: row.is_swap,
     }));
-
-    // 2. Fetch Accepted Swaps for Today
-    const { data: swaps } = await supabase
-      .from('class_swaps')
-      .select('id, faculty_a_id, faculty_b_id, slot_a_id, slot_b_id')
-      .eq('date', todayStr)
-      .eq('status', 'accepted')
-      .or(`faculty_a_id.eq.${facultyId},faculty_b_id.eq.${facultyId}`);
-
-    if (swaps && swaps.length > 0) {
-      const swappedOutSlots = new Set<string>();
-      const acquiredSlots: TimetableSlot[] = [];
-
-      for (const swap of swaps) {
-        // CASE A: I am Faculty A (Requestor)
-        if (swap.faculty_a_id === facultyId) {
-          // I gave away slot_a_id -> Remove it
-          swappedOutSlots.add(swap.slot_a_id);
-          
-          // I acquired slot_b_id from Faculty B -> Add it
-          // Need to fetch details of Faculty B's slot
-          const { data: acquiredSlot } = await supabase
-            .from('master_timetables')
-            .select(`
-              id, day, slot_id, start_time, end_time, room,
-              target_dept, target_year, target_section, batch,
-              subjects:subject_id (id, name, code)
-            `)
-            .eq('faculty_id', swap.faculty_b_id)
-            .eq('slot_id', swap.slot_b_id)
-            .eq('day', todayDay) // Ensure it matches day to be safe
-            .maybeSingle();
-            
-          if (acquiredSlot) {
-            acquiredSlots.push({
-              ...acquiredSlot,
-              subject: Array.isArray(acquiredSlot.subjects) ? acquiredSlot.subjects[0] : acquiredSlot.subjects,
-              isSwap: true // Marker for UI
-            });
-          }
-        } 
-        // CASE B: I am Faculty B (Responder)
-        else if (swap.faculty_b_id === facultyId) {
-          // I gave away slot_b_id -> Remove it
-          swappedOutSlots.add(swap.slot_b_id);
-          
-          // I acquired slot_a_id from Faculty A -> Add it
-          const { data: acquiredSlot } = await supabase
-            .from('master_timetables')
-            .select(`
-              id, day, slot_id, start_time, end_time, room,
-              target_dept, target_year, target_section, batch,
-              subjects:subject_id (id, name, code)
-            `)
-            .eq('faculty_id', swap.faculty_a_id)
-            .eq('slot_id', swap.slot_a_id)
-            .eq('day', todayDay)
-            .maybeSingle();
-
-          if (acquiredSlot) {
-            acquiredSlots.push({
-              ...acquiredSlot,
-              subject: Array.isArray(acquiredSlot.subjects) ? acquiredSlot.subjects[0] : acquiredSlot.subjects,
-              isSwap: true
-            });
-          }
-        }
-      }
-
-      // Filter out swapped-out slots
-      finalSchedule = finalSchedule.filter((s: any) => !swappedOutSlots.has(s.slot_id));
-      
-      // Add acquired slots
-      finalSchedule = [...finalSchedule, ...acquiredSlots];
-      
-      // Re-sort by start time
-      finalSchedule.sort((a: any, b: any) => a.start_time.localeCompare(b.start_time));
-    }
-
-    return finalSchedule;
   } catch (error) {
     log.error('Schedule fetch error:', error);
     return [];
@@ -780,7 +704,7 @@ export async function getAttendanceHistory(
 }
 
 /**
- * Get quick stats for dashboard
+ * Get quick stats for dashboard — uses server-side RPC (single call)
  */
 export async function getDashboardStats(facultyId: string): Promise<{
   classesToday: number;
@@ -792,56 +716,23 @@ export async function getDashboardStats(facultyId: string): Promise<{
     const today = days[new Date().getDay()];
     const todayStr = new Date().toISOString().split('T')[0];
 
-    // Get today's scheduled classes
-    const { data: timetableData } = await supabase
-      .from('master_timetables')
-      .select('id, slot_id')
-      .eq('faculty_id', facultyId)
-      .eq('day', today)
-      .eq('is_active', true);
+    const { data, error } = await supabase.rpc('get_dashboard_stats', {
+      p_faculty_id: facultyId,
+      p_day: today,
+      p_date: todayStr,
+    });
 
-    const classesToday = timetableData?.length || 0;
-
-    // Get completed sessions today
-    const { data: sessionsData } = await supabase
-      .from('attendance_sessions')
-      .select('slot_id')
-      .eq('faculty_id', facultyId)
-      .eq('date', todayStr);
-
-    const completedSlots = new Set((sessionsData || []).map(s => s.slot_id));
-    const pendingCount = (timetableData || []).filter(t => !completedSlots.has(t.slot_id)).length;
-
-    // Get unique classes and count students
-    const { data: classData } = await supabase
-      .from('master_timetables')
-      .select('target_dept, target_year, target_section')
-      .eq('faculty_id', facultyId)
-      .eq('is_active', true);
-
-    let totalStudents = 0;
-    if (classData && classData.length > 0) {
-      // Get unique class combinations
-      const uniqueClasses = new Map<string, { dept: string; year: number; section: string }>();
-      classData.forEach(c => {
-        const key = `${c.target_dept}-${c.target_year}-${c.target_section}`;
-        uniqueClasses.set(key, { dept: c.target_dept, year: c.target_year, section: c.target_section });
-      });
-
-      // Count students for each unique class
-      for (const cls of uniqueClasses.values()) {
-        const { count } = await supabase
-          .from('students')
-          .select('*', { count: 'exact', head: true })
-          .eq('dept', cls.dept)
-          .eq('year', cls.year)
-          .eq('section', cls.section)
-          .eq('is_active', true);
-        totalStudents += count || 0;
-      }
+    if (error) {
+      log.error('RPC get_dashboard_stats error:', error);
+      return { classesToday: 0, pendingCount: 0, totalStudents: 0 };
     }
 
-    return { classesToday, pendingCount, totalStudents };
+    const row = Array.isArray(data) ? data[0] : data;
+    return {
+      classesToday: row?.classes_today || 0,
+      pendingCount: row?.pending_count || 0,
+      totalStudents: Number(row?.total_students || 0),
+    };
   } catch (error) {
     console.error('Stats fetch error:', error);
     return { classesToday: 0, pendingCount: 0, totalStudents: 0 };

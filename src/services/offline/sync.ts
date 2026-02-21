@@ -28,6 +28,11 @@ import createLogger from '../../utils/logger';
 const storage = getStorage();
 const log = createLogger('OfflineSync');
 
+/** Yield to the JS event loop so touch events can process — zero delay, maximum responsiveness */
+function yieldToUI(): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
 // ============================================================================
 // STATUS UTILS
 // ============================================================================
@@ -292,10 +297,8 @@ export async function syncRosters(
     const syncedRosters: any[] = [];
     
     for (const cls of allClasses) {
-      // Yield strictly to the JS Event Loop to prevent Main Thread UI freezing (jank)
-      // during heavy sequential network boundaries and JSON parsing.
-      // Increased from 150ms to 800ms to ensure the UI has plenty of time to render map/animations
-      await new Promise(resolve => setTimeout(resolve, 800));
+      // Yield to JS event loop between network calls so touches stay responsive
+      await yieldToUI();
 
       const classKey = `${cls.target_dept}-${cls.target_year}-${cls.target_section}`;
 
@@ -315,8 +318,8 @@ export async function syncRosters(
         continue;
       }
       
-      // Secondary yield before manipulating large arrays of student JSON data
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Yield again before array processing
+      await yieldToUI();
 
       syncedRosters.push({
         classId: classKey,

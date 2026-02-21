@@ -7,11 +7,18 @@
  * In production builds, all log calls become no-ops for:
  * - Security: prevents leaking internal state to device logs
  * - Performance: eliminates string formatting overhead in hot paths
+ *
+ * In dev mode, log calls are THROTTLED per tag (max 1 per 500ms)
+ * to prevent console.log bridge traffic from freezing the UI.
  */
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 const NOOP = () => {};
+
+// Throttle: max 1 log per tag+level per 500ms to prevent bridge spam
+const THROTTLE_MS = 500;
+const lastLogTime = new Map<string, number>();
 
 const createLogger = (tag: string) => {
   if (!__DEV__) {
@@ -24,6 +31,15 @@ const createLogger = (tag: string) => {
   }
 
   const format = (level: LogLevel, ...args: any[]) => {
+    // Errors always go through — never throttle error messages
+    if (level !== 'error') {
+      const key = `${tag}:${level}`;
+      const now = Date.now();
+      const last = lastLogTime.get(key) || 0;
+      if (now - last < THROTTLE_MS) return; // skip — too frequent
+      lastLogTime.set(key, now);
+    }
+
     const prefix = `[${tag}][${level.toUpperCase()}]`;
     switch (level) {
       case 'debug':
@@ -50,3 +66,4 @@ const createLogger = (tag: string) => {
 };
 
 export default createLogger;
+
