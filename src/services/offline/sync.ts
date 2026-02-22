@@ -1,6 +1,4 @@
 import { supabase } from "../../config/supabase";
-import { withTimeout } from '../../utils/withTimeout';
-import { syncMutex } from '../../utils/syncMutex';
 import { 
   PendingSubmission, 
   SyncResult, 
@@ -62,11 +60,6 @@ export async function getSyncStatus(rosterExpiryHours = 24): Promise<SyncStatus>
 // ============================================================================
 
 export async function syncPendingSubmissions(): Promise<SyncResult> {
-  const result = await syncMutex.run(() => _syncPendingSubmissions());
-  return result ?? { synced: 0, failed: 0, conflicts: 0, errors: ['Skipped — another sync is running'] };
-}
-
-async function _syncPendingSubmissions(): Promise<SyncResult> {
   const pending = await getPendingSubmissions();
   if (pending.length === 0) {
     return { synced: 0, failed: 0, conflicts: 0, errors: [] };
@@ -111,16 +104,12 @@ async function _syncPendingSubmissions(): Promise<SyncResult> {
       // Foreign key cascades should handle log cleanup if configured, otherwise we risk orphaned logs 
       // (but assuming cascade or just leaving them for now as per previous forceSync logic).
       
-      const { error: deleteError } = await withTimeout(
-        supabase
-          .from('attendance_sessions')
-          .delete()
-          .eq('faculty_id', user.id)
-          .eq('date', sessionDate)
-          .eq('slot_id', slotId),
-        10000,
-        'sync:deleteExisting',
-      );
+      const { error: deleteError } = await supabase
+        .from('attendance_sessions')
+        .delete()
+        .eq('faculty_id', user.id)
+        .eq('date', sessionDate)
+        .eq('slot_id', slotId);
 
       if (deleteError) {
           log.error('Failed to clear existing session for overwrite:', deleteError);
@@ -135,15 +124,11 @@ async function _syncPendingSubmissions(): Promise<SyncResult> {
       let finalSubjectId = submission.classData.subjectId;
       if (!finalSubjectId && submission.classData.subjectName) {
         // Try to find subject by name for this faculty
-        const { data: subj } = await withTimeout(
-          supabase
-            .from('subjects')
-            .select('id')
-            .ilike('name', submission.classData.subjectName)
-            .maybeSingle(),
-          10000,
-          'sync:lookupSubject',
-        ); // might be ambiguous if multiple faculties same subject name, but subjects usually global or mapped
+        const { data: subj } = await supabase
+          .from('subjects')
+          .select('id')
+          .ilike('name', submission.classData.subjectName)
+          .maybeSingle(); // might be ambiguous if multiple faculties same subject name, but subjects usually global or mapped
         
         // Better: check master_timetables for this faculty + subject name
         const { data: classWithSubj } = await supabase
@@ -167,33 +152,29 @@ async function _syncPendingSubmissions(): Promise<SyncResult> {
       }
 
       // INSERT
-      const { data: session, error: sessionError } = await withTimeout(
-        supabase
-          .from("attendance_sessions")
-          .insert({
-            faculty_id: user.id,
-            date: sessionDate,
-            slot_id: slotId || '0',
-            subject_id: finalSubjectId,
-            target_dept: submission.classData.dept || submission.classData.classId?.split("-")[0],
-            target_section: submission.classData.section,
-            target_year: submission.classData.year || 1,
-            batch: submission.classData.batch,
-            present_count: presentCount,
-            absent_count: absentCount,
-            od_count: odCount,
-            leave_count: leaveCount,
-            total_students: totalStudents,
-            start_time: submission.submittedAt,
-            end_time: submission.submittedAt,
-            is_synced: true,
-            synced_at: new Date().toISOString(),
-          })
-          .select()
-          .single(),
-        15000,
-        'sync:insertSession',
-      );
+      const { data: session, error: sessionError } = await supabase
+        .from("attendance_sessions")
+        .insert({
+          faculty_id: user.id,
+          date: sessionDate,
+          slot_id: slotId || '0', // fallback to '0' string if somehow null
+          subject_id: finalSubjectId,
+          target_dept: submission.classData.dept || submission.classData.classId?.split("-")[0],
+          target_section: submission.classData.section,
+          target_year: submission.classData.year || 1,
+          batch: submission.classData.batch,
+          present_count: presentCount,
+          absent_count: absentCount,
+          od_count: odCount,
+          leave_count: leaveCount,
+          total_students: totalStudents,
+          start_time: submission.submittedAt,
+          end_time: submission.submittedAt,
+          is_synced: true,
+          synced_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
 
       if (sessionError) throw sessionError;
 
@@ -206,11 +187,7 @@ async function _syncPendingSubmissions(): Promise<SyncResult> {
         is_manual: true,
       }));
 
-      const { error: logsError } = await withTimeout(
-        supabase.from("attendance_logs").insert(logs),
-        15000,
-        'sync:insertLogs',
-      );
+      const { error: logsError } = await supabase.from("attendance_logs").insert(logs);
 
       if (logsError) throw logsError;
 
@@ -261,31 +238,20 @@ async function _syncPendingSubmissions(): Promise<SyncResult> {
 export async function syncRosters(
   facultyId: string,
 ): Promise<{ success: boolean; count: number; error?: string }> {
-  const result = await syncMutex.run(() => _syncRosters(facultyId));
-  return result ?? { success: false, count: 0, error: 'Skipped — another sync is running' };
-}
-
-async function _syncRosters(
-  facultyId: string,
-): Promise<{ success: boolean; count: number; error?: string }> {
   try {
     log.info("Starting Smart Roster Sync...");
 
     // 1. Fetch Classes
-    const { data: classData, error: classError } = await withTimeout(
-      supabase
-        .from("master_timetables")
-        .select(`
-          target_dept,
-          target_year,
-          target_section,
-          subjects:subject_id (name)
-        `)
-        .eq("faculty_id", facultyId)
-        .eq("is_active", true),
-      10000,
-      'syncRosters:fetchClasses',
-    );
+    const { data: classData, error: classError } = await supabase
+      .from("master_timetables")
+      .select(`
+        target_dept,
+        target_year,
+        target_section,
+        subjects:subject_id (name)
+      `)
+      .eq("faculty_id", facultyId)
+      .eq("is_active", true);
 
     if (classError) {
       log.error("Error fetching classes:", classError);
@@ -339,17 +305,13 @@ async function _syncRosters(
       // Optimization: if cache is very fresh (<1h), maybe skip?
       // For now, force fetch to ensure accuracy.
 
-      const { data: students, error } = await withTimeout(
-        supabase
-          .from("students")
-          .select("id, name:full_name, roll_number:roll_no, bluetooth_uuid, batch")
-          .eq("dept", cls.target_dept)
-          .eq("year", cls.target_year)
-          .eq("section", cls.target_section)
-          .order("roll_no"),
-        10000,
-        `syncRosters:fetchStudents(${classKey})`,
-      );
+      const { data: students, error } = await supabase
+        .from("students")
+        .select("id, name:full_name, roll_number:roll_no, bluetooth_uuid, batch")
+        .eq("dept", cls.target_dept)
+        .eq("year", cls.target_year)
+        .eq("section", cls.target_section)
+        .order("roll_no");
 
       if (error) {
         log.error(`Failed to sync roster: ${classKey}`, error);

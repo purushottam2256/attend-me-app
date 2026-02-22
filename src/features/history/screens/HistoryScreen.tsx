@@ -21,8 +21,7 @@ import {
   Easing,
   Image,
 } from 'react-native';
-import { safeRefresh } from '../../../utils/safeRefresh';
-import { useDeferredLoad, deferLoad } from '../../../hooks/useDeferredLoad';
+
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -256,7 +255,12 @@ export const HistoryScreen: React.FC = () => {
     }
   }, [selectedDate]);
 
-  useDeferredLoad(() => { loadHistory(); }, [loadHistory]);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadHistory();
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [loadHistory]);
 
   // Handle date selection
   const handleDateSelect = (date: Date) => {
@@ -272,8 +276,10 @@ export const HistoryScreen: React.FC = () => {
   };
 
   // Pull to refresh
-  const onRefresh = useCallback(() => {
-    safeRefresh(setRefreshing, () => loadHistory());
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadHistory();
+    setRefreshing(false);
   }, [loadHistory]);
 
   const handleShareSession = async (session: AttendanceSession) => {
@@ -300,11 +306,14 @@ export const HistoryScreen: React.FC = () => {
     setDeleteTargetId(null);
   };
 
-  const handleRetrySync = useCallback(() => {
-    safeRefresh(setRefreshing, async () => {
+  const handleRetrySync = useCallback(async () => {
+    setRefreshing(true);
+    try {
       await syncPendingSubmissions();
       await loadHistory();
-    });
+    } finally {
+      setRefreshing(false);
+    }
   }, [loadHistory]);
 
   // Generate WhatsApp report

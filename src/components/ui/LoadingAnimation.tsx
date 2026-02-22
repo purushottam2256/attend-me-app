@@ -8,7 +8,7 @@
  */
 
 import React, { useEffect, useRef } from 'react';
-import { View, Animated, StyleSheet, ViewStyle } from 'react-native';
+import { View, Animated, StyleSheet, ViewStyle, DimensionValue } from 'react-native';
 import { scale, verticalScale, moderateScale } from '../../utils/responsive';
 import { useTheme } from '../../contexts';
 
@@ -79,7 +79,7 @@ export const PulsingDots: React.FC<PulsingDotsProps> = ({
 // SKELETON SHIMMER
 // ============================================================================
 interface SkeletonLineProps {
-  width?: number | string;
+  width?: DimensionValue;
   height?: number;
   borderRadius?: number;
   style?: ViewStyle;
@@ -112,7 +112,7 @@ export const SkeletonLine: React.FC<SkeletonLineProps> = ({
     <Animated.View
       style={[
         {
-          width: (typeof width === 'number' ? scale(width) : width) as any,
+          width: typeof width === 'number' ? scale(width) : width,
           height: verticalScale(height),
           borderRadius: moderateScale(borderRadius),
           backgroundColor: shimmer.interpolate({

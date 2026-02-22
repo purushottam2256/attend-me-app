@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
-import { useDeferredLoad } from '../../../hooks/useDeferredLoad';
 import { 
   View, Text, StyleSheet, SectionList, RefreshControl, TouchableOpacity, 
   LayoutAnimation, Platform, UIManager, ScrollView, Alert, Animated, Dimensions 
@@ -237,7 +236,7 @@ export const NotificationScreen = ({ navigation }: any) => {
     setToast({ visible: true, message, type });
   };
 
-  const loadData = async (pageNum = 0) => {
+  const loadData = useCallback(async (pageNum = 0) => {
     try {
       if (pageNum === 0 && !refreshing) setInitialLoading(true);
       if (pageNum > 0) setLoadingMore(true);
@@ -375,9 +374,14 @@ export const NotificationScreen = ({ navigation }: any) => {
       setLoadingMore(false);
       setRefreshing(false);
     }
-  };
+  }, [refreshing, page, refreshNotifications]);
 
-  useDeferredLoad(() => { loadData(0); }, []);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadData(0);
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [loadData]);
 
   const onRefresh = async () => {
     setRefreshing(true);

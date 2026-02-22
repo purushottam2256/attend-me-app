@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { useDeferredLoad } from '../../../hooks/useDeferredLoad';
 import {
   View,
   Text,
@@ -107,7 +106,9 @@ export const ManagePermissionsScreen: React.FC = () => {
     }
   };
 
-  useDeferredLoad(() => { loadPermissions(); }, []);
+  useEffect(() => {
+    loadPermissions();
+  }, []);
 
   const onRefresh = () => {
     setRefreshing(true);

@@ -12,14 +12,12 @@ import {
 
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { supabase } from '../../../config/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { deferLoad } from '../../../hooks/useDeferredLoad';
-
 import { useTheme } from '../../../contexts';
 import { Colors } from '../../../constants';
-import { supabase } from '../../../config/supabase';
 import { 
   getTodaySchedule, 
   TimetableSlot, 
@@ -45,8 +43,9 @@ import { CircularClockHero, CircularClockHeroRef } from '../../../components/Cir
 import { NoClassesHero } from '../../../components/NoClassesHero';
 import { useConnectionStatus } from '../../../hooks';
 import { useOfflineSync } from '../../../contexts/OfflineSyncContext';
-import { OffHoursScanModal, type OffHoursReason } from '../components';
 import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive';
+import { OffHoursScanModal, type OffHoursReason } from '../components';
+
 
 type HeroState = 'CLASS_NOW' | 'BREAK' | 'DONE' | 'LOADING' | 'NO_CLASSES' | 'HOLIDAY' | 'LEAVE';
 
@@ -193,19 +192,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
     return merged;
   };
 
-  const determineHeroState = useCallback((
-    slots: ScheduleSlot[],
-    currentHoliday: HolidayInfo | null,
-    currentLeave: LeaveInfo | null
-  ) => {
+  const determineHeroState = useCallback((slots: ScheduleSlot[]) => {
     const now = new Date();
     
-    if (currentLeave) {
+    if (leave) {
       setHeroState('LEAVE');
       return;
     }
     
-    if (currentHoliday && currentHoliday.type === 'holiday') {
+    if (holiday && holiday.type === 'holiday') {
       setHeroState('HOLIDAY');
       return;
     }
@@ -254,7 +249,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
     const mins = Math.ceil((nextStart.getTime() - now.getTime()) / 60000);
     setMinutesUntilNext(mins);
     setHeroState('BREAK');
-  }, []);
+  }, [holiday, leave]);
 
   const loadSchedule = useCallback(async (forceRefresh = false) => {
     try {
@@ -264,7 +259,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
           const { data, timestamp } = JSON.parse(cached);
           if (Date.now() - timestamp < 5 * 60 * 1000) {
             setSchedule(data);
-            determineHeroState(data, holiday, leave);
+            determineHeroState(data);
           }
         }
       }
@@ -278,7 +273,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
           setCacheAge(age);
           setIsOfflineData(true);
           setSchedule(cachedSchedule as ScheduleSlot[]);
-          determineHeroState(cachedSchedule as ScheduleSlot[], holiday, leave);
+          determineHeroState(cachedSchedule as ScheduleSlot[]);
           return;
         } else {
           setHeroState('NO_CLASSES');
@@ -386,7 +381,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
       const mergedClasses = mergeConsecutiveClasses(allClasses);
       
       setSchedule(mergedClasses);
-      determineHeroState(mergedClasses, holidayInfo, leaveInfo);
+      determineHeroState(mergedClasses);
       
       // Schedule Reminders (Professional Feature)
       try {
@@ -467,20 +462,23 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
       console.error('Error loading schedule:', error);
       setHeroState('NO_CLASSES');
     }
-  }, [determineHeroState, connectionStatus]);
+  }, [determineHeroState]);
 
   useFocusEffect(
     useCallback(() => {
-      return deferLoad(() => loadSchedule(true));
+      const timer = setTimeout(() => {
+        loadSchedule(true);
+      }, 100);
+      return () => clearTimeout(timer);
     }, [loadSchedule])
   );
 
   useEffect(() => {
     const interval = setInterval(() => {
-      determineHeroState(schedule, holiday, leave);
+      determineHeroState(schedule);
     }, 60000);
     return () => clearInterval(interval);
-  }, [schedule, holiday, leave, determineHeroState]);
+  }, [schedule, determineHeroState]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -1035,7 +1033,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
           start_time: nextClass.start_time,
           slot_id: nextClass.slot_id,
         } : null}
-        onSelectClass={(item) => handleOffHoursClassSelect(schedule.find(s => s.slot_id === item.slot_id)!)}
+        onSelectClass={(item: { slot_id: string }) => handleOffHoursClassSelect(schedule.find(s => s.slot_id === item.slot_id)!)}
       />
       <ZenToast 
         visible={toast.visible} 

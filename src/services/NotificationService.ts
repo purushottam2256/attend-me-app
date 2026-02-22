@@ -100,7 +100,7 @@ export const NotificationService = {
    * Call this once when the app starts (in NotificationContext)
    */
   async init(): Promise<void> {
-
+    log.info('Initializing...');
     
     // Setup Android channels
     if (Platform.OS === 'android') {
@@ -206,7 +206,10 @@ export const NotificationService = {
       // This is the key difference - we use getDevicePushTokenAsync, not getExpoPushTokenAsync
       const tokenData = await Notifications.getDevicePushTokenAsync();
       
-
+      log.info('Token obtained:', {
+        type: tokenData.type,
+        token: tokenData.data.substring(0, 15) + '...'
+      });
 
       return {
         type: tokenData.type as 'fcm' | 'apns',
@@ -332,7 +335,7 @@ export const NotificationService = {
       });
     }
 
-
+    log.info(`Scheduling class reminder for ${subjectName} at ${triggerDate.toLocaleTimeString()}`);
     return this.scheduleNotification({
       title: `📚 Upcoming: ${subjectName}`,
       body: `${classDetails} starts in 10 minutes`,
@@ -358,6 +361,8 @@ export const NotificationService = {
       title: `🎓 College Event: ${title}`,
       body: description || `Today is ${title}`,
       triggerDate,
+      data: { type: 'COLLEGE_EVENT' },
+      channelId: CHANNELS.REMINDERS.id,
     });
   },
 

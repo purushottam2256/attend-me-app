@@ -1,7 +1,6 @@
 
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl } from 'react-native';
-import { safeRefresh } from '../../../utils/safeRefresh';
 import { Ionicons } from '@expo/vector-icons';
 import { format } from 'date-fns';
 import { supabase } from '../../../config/supabase';
@@ -130,7 +129,7 @@ export function LeaveHistory() { // TODO: Add props if needed
       data={requests}
       renderItem={renderItem}
       keyExtractor={items => items.id}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => safeRefresh(setRefreshing, () => fetchHistory())} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchHistory(); }} />}
       contentContainerStyle={styles.list}
     />
   );

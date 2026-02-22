@@ -1283,6 +1283,85 @@ CREATE POLICY "config_read_all" ON public.app_config
 CREATE POLICY "config_admin_update" ON public.app_config 
     FOR UPDATE USING (public.auth_user_role() IN ('management', 'developer'));
 
+-- ============================================================================
+-- EDGE FUNCTION CONTRACTS (Documentation)
+-- ============================================================================
+
+/*
+EDGE FUNCTIONS (Supabase Edge Functions - Deno Runtime)
+
+1. send-notification
+   Purpose: Send FCM push notifications
+   Input: { user_id, type, title, body, data, priority }
+   Output: { success: boolean, message_id?: string }
+   Notes: Uses FCM Admin SDK, requires service role key
+
+2. process-offline-queue
+   Purpose: Process pending offline queue items
+   Input: { faculty_id?: UUID } (optional, processes all if not provided)
+   Output: { processed: number, failed: number }
+   Notes: Calls process_offline_queue_item() function for each item
+
+3. refresh-materialized-views
+   Purpose: Refresh attendance aggregate views
+   Input: None (or { force: boolean })
+   Output: { success: boolean, refreshed_at: timestamp }
+   Notes: Should be called hourly (9 AM - 5 PM) via cron or scheduled job
+
+4. validate-substitute-request
+   Purpose: Check if substitute request is still valid
+   Input: { substitution_id: UUID }
+   Output: { valid: boolean, status: string, message?: string }
+   Notes: Prevents race conditions (Ghost Request scenario)
+
+5. generate-attendance-report
+   Purpose: Generate PDF/CSV reports
+   Input: { session_ids: UUID[], format: 'pdf' | 'csv' | 'json' | 'text' }
+   Output: { url: string, expires_at: timestamp }
+   Notes: Uses server-side generation, stores in Supabase Storage temporarily
+
+REALTIME VS FCM DELIVERY LOGIC:
+
+1. REALTIME (Supabase Realtime - WebSocket):
+   - Use for: In-app notifications, live updates, instant sync
+   - Channels:
+     * notifications:{user_id} - Personal notifications
+     * substitutions:{faculty_id} - Substitute requests
+     * attendance:{session_id} - Live attendance updates
+   - Advantages: Instant, no external service, works in app
+   - Limitations: Only works when app is open
+
+2. FCM (Firebase Cloud Messaging):
+   - Use for: Lock screen notifications, background alerts, critical updates
+   - Triggers:
+     * Substitute requests (high priority)
+     * Class reminders (scheduled)
+     * Management updates (high priority)
+     * Exam duty reminders (scheduled)
+   - Advantages: Works when app is closed, lock screen display
+   - Implementation: Edge Function sends to FCM, FCM delivers to device
+
+3. HYBRID APPROACH (Recommended):
+   - Critical/Urgent: FCM + Realtime (dual delivery)
+   - Normal: Realtime only (if app open), FCM (if app closed)
+   - Scheduled: FCM only (local scheduling on device for reminders)
+
+4. NOTIFICATION FLOW:
+   a. Event occurs (e.g., substitute request)
+   b. Insert into notifications table
+   c. Edge Function triggered (via database trigger or webhook)
+   d. Edge Function:
+      - Sends FCM notification (if device_token exists)
+      - Broadcasts Realtime event (if user online)
+   e. Mobile app receives both:
+      - FCM: Shows lock screen notification
+      - Realtime: Updates in-app notification center
+
+5. FALLBACK STRATEGY:
+   - If FCM fails: Retry 3 times, then mark as failed
+   - If Realtime fails: Notification still in DB, user sees on next app open
+   - Offline Queue: All notifications queued, processed when online
+*/
 
 -- ============================================================================
 -- INDEXES FOR PERFORMANCE (Free Tier Safe)
@@ -1679,238 +1758,6 @@ SELECT cron.schedule(
   '0 3 * * 0',                -- Cron expression: At 03:00 on Sunday
   $$SELECT cleanup_old_history()$$
 );
-
--- ============================================================================
--- RPC: get_class_attendance_aggregates
--- ============================================================================
--- Replaces the client-side getAggregatedClassData() function that was
--- downloading 6000+ attendance_log rows to the phone and processing them in JS.
--- The phone receives only ~60 pre-aggregated rows instead of 6000+ raw logs.
--- ============================================================================
-
-CREATE OR REPLACE FUNCTION get_class_attendance_aggregates(
-  p_dept TEXT,
-  p_year INT,
-  p_section TEXT,
-  p_threshold FLOAT DEFAULT NULL
-)
-RETURNS TABLE (
-  student_id UUID,
-  roll_no TEXT,
-  full_name TEXT,
-  dept TEXT,
-  section TEXT,
-  year INT,
-  present_sessions BIGINT,
-  absent_sessions BIGINT,
-  od_sessions BIGINT,
-  leave_sessions BIGINT,
-  total_sessions BIGINT,
-  attendance_percentage INT,
-  student_mobile TEXT,
-  parent_mobile TEXT
-)
-LANGUAGE sql
-STABLE
-AS $$
-  WITH session_count AS (
-    SELECT COUNT(*) AS total
-    FROM attendance_sessions
-    WHERE target_dept = p_dept
-      AND target_year = p_year
-      AND target_section = p_section
-  ),
-  student_stats AS (
-    SELECT
-      s.id AS student_id,
-      s.roll_no,
-      s.full_name,
-      s.dept,
-      s.section,
-      s.year,
-      COALESCE(SUM(CASE WHEN al.status = 'present' THEN 1 ELSE 0 END), 0) AS present_sessions,
-      COALESCE(SUM(CASE WHEN al.status = 'absent'  THEN 1 ELSE 0 END), 0) AS absent_sessions,
-      COALESCE(SUM(CASE WHEN al.status = 'od'      THEN 1 ELSE 0 END), 0) AS od_sessions,
-      COALESCE(SUM(CASE WHEN al.status = 'leave'   THEN 1 ELSE 0 END), 0) AS leave_sessions,
-      s.mobile AS student_mobile,
-      s.parent_mobile
-    FROM students s
-    LEFT JOIN attendance_logs al ON al.student_id = s.id
-    LEFT JOIN attendance_sessions asess 
-      ON asess.id = al.session_id
-      AND asess.target_dept = p_dept
-      AND asess.target_year = p_year
-      AND asess.target_section = p_section
-    WHERE s.dept = p_dept
-      AND s.year = p_year
-      AND s.section = p_section
-      AND s.is_active = true
-    GROUP BY s.id, s.roll_no, s.full_name, s.dept, s.section, s.year, s.mobile, s.parent_mobile
-  )
-  SELECT
-    ss.student_id,
-    ss.roll_no,
-    ss.full_name,
-    ss.dept,
-    ss.section,
-    ss.year,
-    ss.present_sessions,
-    ss.absent_sessions,
-    ss.od_sessions,
-    ss.leave_sessions,
-    sc.total AS total_sessions,
-    CASE 
-      WHEN (ss.present_sessions + ss.absent_sessions + ss.od_sessions) > 0 
-      THEN ROUND(((ss.present_sessions + ss.od_sessions)::FLOAT / (ss.present_sessions + ss.absent_sessions + ss.od_sessions)::FLOAT) * 100)::INT
-      ELSE 0
-    END AS attendance_percentage,
-    ss.student_mobile,
-    ss.parent_mobile
-  FROM student_stats ss
-  CROSS JOIN session_count sc
-  WHERE (p_threshold IS NULL OR 
-    CASE 
-      WHEN (ss.present_sessions + ss.absent_sessions + ss.od_sessions) > 0 
-      THEN ROUND(((ss.present_sessions + ss.od_sessions)::FLOAT / (ss.present_sessions + ss.absent_sessions + ss.od_sessions)::FLOAT) * 100)
-      ELSE 0
-    END < p_threshold)
-  ORDER BY ss.roll_no;
-$$;
-
--- ============================================================================
--- RPC: get_dashboard_stats
--- ============================================================================
--- Replaces the client-side getDashboardStats() that did N+1 queries
--- (one COUNT per unique class). Single call returns all stats.
--- ============================================================================
-
-CREATE OR REPLACE FUNCTION get_dashboard_stats(
-  p_faculty_id UUID,
-  p_day TEXT,
-  p_date TEXT
-)
-RETURNS TABLE (
-  classes_today INT,
-  pending_count INT,
-  total_students BIGINT
-)
-LANGUAGE sql
-STABLE
-AS $$
-  WITH today_slots AS (
-    SELECT slot_id
-    FROM master_timetables
-    WHERE faculty_id = p_faculty_id
-      AND day = p_day
-      AND is_active = true
-  ),
-  completed_slots AS (
-    SELECT slot_id
-    FROM attendance_sessions
-    WHERE faculty_id = p_faculty_id
-      AND date = p_date::DATE
-  ),
-  unique_classes AS (
-    SELECT DISTINCT target_dept, target_year, target_section
-    FROM master_timetables
-    WHERE faculty_id = p_faculty_id
-      AND is_active = true
-  ),
-  student_counts AS (
-    SELECT COUNT(*) AS cnt
-    FROM students s
-    INNER JOIN unique_classes uc
-      ON s.dept = uc.target_dept
-      AND s.year = uc.target_year
-      AND s.section = uc.target_section
-    WHERE s.is_active = true
-  )
-  SELECT
-    (SELECT COUNT(*)::INT FROM today_slots) AS classes_today,
-    (SELECT COUNT(*)::INT FROM today_slots ts WHERE ts.slot_id NOT IN (SELECT slot_id FROM completed_slots)) AS pending_count,
-    (SELECT cnt FROM student_counts) AS total_students;
-$$;
-
--- ============================================================================
--- RPC: get_faculty_schedule
--- ============================================================================
--- Replaces the client-side getTodaySchedule() that did N+1 queries for swaps.
--- Returns the fully resolved schedule = base timetable - swapped out + swapped in.
--- ============================================================================
-
-CREATE OR REPLACE FUNCTION get_faculty_schedule(
-  p_faculty_id UUID,
-  p_day TEXT,
-  p_date TEXT
-)
-RETURNS TABLE (
-  id UUID,
-  day TEXT,
-  slot_id TEXT,
-  start_time TIME,
-  end_time TIME,
-  room TEXT,
-  target_dept TEXT,
-  target_year INT,
-  target_section TEXT,
-  batch INT,
-  subject_id UUID,
-  subject_name TEXT,
-  subject_code TEXT,
-  is_swap BOOLEAN
-)
-LANGUAGE sql
-STABLE
-AS $$
-  -- Base schedule (own classes, excluding swapped-out slots)
-  WITH accepted_swaps AS (
-    SELECT id, faculty_a_id, faculty_b_id, slot_a_id, slot_b_id
-    FROM class_swaps
-    WHERE date = p_date::DATE
-      AND status = 'accepted'
-      AND (faculty_a_id = p_faculty_id OR faculty_b_id = p_faculty_id)
-  ),
-  swapped_out_slots AS (
-    -- Slots I gave away
-    SELECT slot_a_id AS slot_id FROM accepted_swaps WHERE faculty_a_id = p_faculty_id
-    UNION ALL
-    SELECT slot_b_id AS slot_id FROM accepted_swaps WHERE faculty_b_id = p_faculty_id
-  ),
-  base_schedule AS (
-    SELECT mt.id, mt.day, mt.slot_id, mt.start_time, mt.end_time, mt.room,
-           mt.target_dept, mt.target_year, mt.target_section, mt.batch,
-           mt.subject_id, sub.name AS subject_name, sub.code AS subject_code,
-           false AS is_swap
-    FROM master_timetables mt
-    JOIN subjects sub ON sub.id = mt.subject_id
-    WHERE mt.faculty_id = p_faculty_id
-      AND mt.day = p_day
-      AND mt.is_active = true
-      AND mt.slot_id NOT IN (SELECT slot_id FROM swapped_out_slots)
-  ),
-  acquired_schedule AS (
-    -- Slots I acquired from swap partners
-    SELECT mt.id, mt.day, mt.slot_id, mt.start_time, mt.end_time, mt.room,
-           mt.target_dept, mt.target_year, mt.target_section, mt.batch,
-           mt.subject_id, sub.name AS subject_name, sub.code AS subject_code,
-           true AS is_swap
-    FROM accepted_swaps sw
-    JOIN master_timetables mt ON (
-      -- If I'm Faculty A, I acquire B's slot
-      (sw.faculty_a_id = p_faculty_id AND mt.faculty_id = sw.faculty_b_id AND mt.slot_id = sw.slot_b_id)
-      OR
-      -- If I'm Faculty B, I acquire A's slot
-      (sw.faculty_b_id = p_faculty_id AND mt.faculty_id = sw.faculty_a_id AND mt.slot_id = sw.slot_a_id)
-    )
-    JOIN subjects sub ON sub.id = mt.subject_id
-    WHERE mt.day = p_day
-      AND mt.is_active = true
-  )
-  SELECT * FROM base_schedule
-  UNION ALL
-  SELECT * FROM acquired_schedule
-  ORDER BY start_time;
-$$;
 
 -- ============================================================================
 -- END OF SCHEMA

@@ -341,13 +341,11 @@ export const ScanScreen: React.FC = () => {
   // Reset state when screen comes into focus and check for previous attendance
   useFocusEffect(
     useCallback(() => {
-      console.warn('[DIAG] ScanScreen FOCUSED — resetting state');
       // Reset to initial state
       setScanState("HANDSHAKE");
       setIsScanning(false);
       setShowHeadcount(false);
       setShowOverride(false);
-      console.warn('[DIAG] ScanScreen — calling refreshStudents');
       refreshStudents();
       // Reset animations
       handshakeProgress.setValue(0);
@@ -609,7 +607,7 @@ export const ScanScreen: React.FC = () => {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isScanning, isAutoPilot]); // removed timeRemaining - it changes every tick
+  }, [isScanning, isAutoPilot, timeRemaining]);
 
   // Real BLE scanning integration
   const {
@@ -1036,8 +1034,7 @@ export const ScanScreen: React.FC = () => {
           isScanning={isScanning}
           isAutoPilot={isAutoPilot}
           endTime={endTime}
-          batchLabel={batchLabel}
-          hasBatch={!!classData?.batch}
+          currentBatch={effectiveBatch === 1 ? 'b1' : effectiveBatch === 2 ? 'b2' : 'full'}
           onToggleScan={handleToggleScan}
           onRescan={handleRescan}
           onTimerPress={handleTimerPress}

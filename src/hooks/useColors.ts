@@ -13,7 +13,7 @@ import { useTheme } from '../contexts';
 import { LightTheme, DarkTheme, Gradients, Shadows, Primary, Accent, Success, Danger, Warning, Info, Neutral } from '../constants/Theme';
 
 // Extended color type with all theme properties
-export type ThemeColors = { [K in keyof typeof LightTheme]: string } & {
+export type ThemeColors = Record<keyof typeof LightTheme, string> & {
   // Gradients
   gradients: typeof Gradients;
   // Shadows

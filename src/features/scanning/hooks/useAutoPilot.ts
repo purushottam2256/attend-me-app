@@ -83,7 +83,7 @@ export const useAutoPilot = (options: UseAutoPilotOptions): UseAutoPilotReturn =
 
     const handleAppStateChange = (nextState: AppStateStatus) => {
       // In real implementation, would use expo-keep-awake here
-
+      console.log('App state changed:', nextState);
     };
 
     const subscription = AppState.addEventListener('change', handleAppStateChange);

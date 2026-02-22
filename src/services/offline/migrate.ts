@@ -33,15 +33,7 @@ export async function migrateToSQLite(): Promise<void> {
 
     // 2. Get all data from AsyncStorage
     const keys = await AsyncStorage.getAllKeys();
-    
-    // We intentionally SKIP the legacy `CACHED_ROSTERS` and `PENDING_SUBMISSIONS` blobs. 
-    // They are massive JSON objects that cause memory heap freezes if pulled synchronously here. 
-    // The new architectural update uses relational tables for these anyway, so moving the raw string blobs is useless and harmful.
-    const relevantKeys = keys.filter(k => 
-      k !== MIGRATION_KEY && 
-      k !== "@attend_me/cached_rosters" &&
-      k !== "@attend_me/pending_submissions"
-    );
+    const relevantKeys = keys.filter(k => k !== MIGRATION_KEY); // just in case
 
     if (relevantKeys.length === 0) {
       log.info('No data in AsyncStorage to migrate.');

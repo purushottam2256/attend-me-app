@@ -7,7 +7,7 @@
  * - Offline support with fallback to cached roster
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   getStudentsForClass, 
   createAttendanceSession, 
@@ -15,7 +15,6 @@ import {
   getClassPermissions
 } from '../../../services/dashboardService';
 import { supabase } from '../../../config/supabase';
-import { withTimeout } from '../../../utils/withTimeout';
 import {
   findCachedRoster, 
   queueSubmission, 
@@ -87,9 +86,6 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
   const [isOfflineMode, setIsOfflineMode] = useState(false);
   
   const { isOnline } = useNetworkStatus();
-  // Use a ref so fetchStudents doesn't re-run when network status flickers
-  const isOnlineRef = useRef(isOnline);
-  useEffect(() => { isOnlineRef.current = isOnline; }, [isOnline]);
 
   // Derived counts
   const presentCount = students.filter(s => s.status === 'present' || s.status === 'od').length;
@@ -116,26 +112,18 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
       
       let mappedStudents: AttendanceStudent[] = [];
       
-      if (isOnlineRef.current) {
+      if (isOnline) {
         try {
-          const fetchedStudents = await withTimeout(
-            getStudentsForClass(
-              target_dept,
-              target_year,
-              target_section,
-              batchNumber
-            ),
-            10000,
-            'useAttendance:getStudents',
+          const fetchedStudents = await getStudentsForClass(
+            target_dept,
+            target_year,
+            target_section,
+            batchNumber
           );
 
           if (signal?.aborted) return;
 
-          const permissions = await withTimeout(
-            getClassPermissions(fetchedStudents.map(s => s.id)),
-            10000,
-            'useAttendance:getPermissions',
-          );
+          const permissions = await getClassPermissions(fetchedStudents.map(s => s.id));
           const permissionMap = new Map(permissions.map(p => [p.student_id, p.type]));
 
           mappedStudents = fetchedStudents.map(s => {
@@ -195,7 +183,7 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
           }
           
           setIsOfflineMode(true);
-        } else if (!isOnlineRef.current) {
+        } else if (!isOnline) {
           setError('Offline - No cached roster available');
           setIsOfflineMode(true);
         }
@@ -234,7 +222,7 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
         setLoading(false);
       }
     }
-  }, [classData, batchOverride]);
+  }, [classData, batchOverride, isOnline]);
 
   // Fetch on mount and when class/batch changes
   useEffect(() => {
@@ -315,11 +303,7 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
 
     // Online submission
     try {
-      const { data: { user } } = await withTimeout(
-        supabase.auth.getUser(),
-        10000,
-        'useAttendance:getUser',
-      );
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         return { success: false, error: 'Not authenticated' };
       }
@@ -328,8 +312,7 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
         return { success: false, error: 'Missing subject ID' };
       }
 
-      const { sessionId, error: sessionError } = await withTimeout(
-        createAttendanceSession(
+      const { sessionId, error: sessionError } = await createAttendanceSession(
         user.id,
         classData.subject.id,
         classData.slot_id,
@@ -340,23 +323,16 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
         classData.batch,
         classData.isSubstitute || false,
         classData.originalFacultyId || null
-      ),
-      15000,
-      'useAttendance:createSession',
       );
 
       if (sessionError || !sessionId) {
         return { success: false, error: sessionError || 'Failed to create session' };
       }
 
-      const { success, error: submitError } = await withTimeout(
-        submitAttendance(
-          sessionId,
-          user.id,
-          records
-        ),
-        15000,
-        'useAttendance:submitAttendance',
+      const { success, error: submitError } = await submitAttendance(
+        sessionId,
+        user.id,
+        records
       );
 
       if (!success) {

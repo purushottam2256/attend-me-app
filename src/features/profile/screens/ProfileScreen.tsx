@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useDeferredLoad } from '../../../hooks/useDeferredLoad';
+
 import {
   View,
   Text,
@@ -122,10 +122,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ userName, onLogout
   const [holidays, setHolidays] = useState<any[]>([]);
   const [timetable, setTimetable] = useState<any[]>([]);
 
-  useDeferredLoad(() => {
-    loadUserData();
-    loadSettings();
-    loadHolidays();
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadUserData();
+      loadSettings();
+      loadHolidays();
+    }, 100);
+    return () => clearTimeout(timer);
   }, []);
 
   const loadHolidays = async () => {

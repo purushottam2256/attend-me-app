@@ -74,8 +74,10 @@ export const SubstituteRequestCard: React.FC<SubstituteRequestCardProps> = ({
 
     return (
         <View style={styles.container}>
-            <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
-                {/* Header: Type & Time Ago */}
+            <View
+                style={[styles.card, { backgroundColor: cardBg, borderColor }]}
+            >
+                {/* Header */}
                 <View style={styles.header}>
                     <View style={styles.badge}>
                         <Ionicons 
@@ -88,67 +90,11 @@ export const SubstituteRequestCard: React.FC<SubstituteRequestCardProps> = ({
                     <Text style={[styles.timeAgo, { color: subTextColor }]}>{timeAgo}</Text>
                 </View>
 
-                {/* Professional Content Body */}
-                <View style={styles.contentBody}>
-                    <View style={styles.row}>
-                        <Ionicons name="person-outline" size={normalizeFont(16)} color={subTextColor} style={styles.iconSpaced} />
-                        <Text style={[styles.facultyName, { color: textColor }]}>
-                            {senderName || 'Unknown Faculty'}
-                        </Text>
-                    </View>
-
-                    {isSwap ? (
-                         <>
-                            {/* Swap A Detail */}
-                            <View style={[styles.row, { marginTop: verticalScale(8) }]}>
-                                <Ionicons name="log-out-outline" size={normalizeFont(16)} color="#F59E0B" style={styles.iconSpaced} />
-                                <View>
-                                    <Text style={[styles.detailLabel, { color: subTextColor }]}>Take Class</Text>
-                                    <Text style={[styles.detailValue, { color: textColor }]}>
-                                        {request.slot_a_id?.replace('_', ' ')} • {request.slot_a_details?.subjects?.code || 'Slot A'}
-                                    </Text>
-                                    {request.slot_a_details && (
-                                        <Text style={[styles.detailValueSub, { color: subTextColor }]}>
-                                            {request.slot_a_details?.target_dept}-{request.slot_a_details?.target_year}-{request.slot_a_details?.target_section} • {request.slot_a_details?.start_time?.slice(0, 5)}
-                                        </Text>
-                                    )}
-                                </View>
-                            </View>
-
-                            {/* Swap B Detail */}
-                            <View style={[styles.row, { marginTop: verticalScale(6) }]}>
-                                <Ionicons name="log-in-outline" size={normalizeFont(16)} color="#10B981" style={styles.iconSpaced} />
-                                <View>
-                                    <Text style={[styles.detailLabel, { color: subTextColor }]}>Give Class</Text>
-                                    <Text style={[styles.detailValue, { color: textColor }]}>
-                                        {request.slot_b_id?.replace('_', ' ')} • {request.slot_b_details?.subjects?.code || 'Slot B'}
-                                    </Text>
-                                    {request.slot_b_details && (
-                                        <Text style={[styles.detailValueSub, { color: subTextColor }]}>
-                                            {request.slot_b_details?.target_dept}-{request.slot_b_details?.target_year}-{request.slot_b_details?.target_section} • {request.slot_b_details?.start_time?.slice(0, 5)}
-                                        </Text>
-                                    )}
-                                </View>
-                            </View>
-                         </>
-                    ) : (
-                         <View style={[styles.row, { marginTop: verticalScale(8) }]}>
-                             <Ionicons name="book-outline" size={normalizeFont(16)} color="#3B82F6" style={styles.iconSpaced} />
-                             <View>
-                                 <Text style={[styles.detailLabel, { color: subTextColor }]}>Class to Cover</Text>
-                                 <Text style={[styles.detailValue, { color: textColor }]} numberOfLines={1}>
-                                     {request.subject?.code} • {request.target_dept}-{request.target_year}-{request.target_section}
-                                 </Text>
-                                 <Text style={[styles.detailValueSub, { color: subTextColor }]}>
-                                     {request.slot_id?.replace('_', ' ')} • {timeInfo ? formatDistanceToNow(new Date(timeInfo), { addSuffix: true }) : 'Pending Date'}
-                                 </Text>
-                             </View>
-                         </View>
-                    )}
+                {/* Content */}
+                <View style={styles.content}>
+                    <Text style={[styles.facultyName, { color: textColor }]}>{body}</Text>
+                    <Text style={[styles.classDetails, { color: subTextColor }]}>{details}</Text>
                 </View>
-
-                {/* Divider */}
-                <View style={[styles.divider, { backgroundColor: borderColor }]} />
 
                 {/* Actions or Status */}
                 {isDone || isExpired ? (
@@ -195,126 +141,102 @@ const styles = StyleSheet.create({
     container: { 
         marginHorizontal: scale(16),
         marginBottom: verticalScale(12), 
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: verticalScale(4) }, 
-        shadowOpacity: 0.1, 
-        shadowRadius: moderateScale(8), 
-        elevation: 4 
+        borderRadius: moderateScale(16), 
+        shadowColor: '#0D4A4A',
+        shadowOffset: { width: 0, height: verticalScale(6) }, 
+        shadowOpacity: 0.2, 
+        shadowRadius: moderateScale(12), 
+        elevation: 6 
     },
     card: { 
-        padding: scale(16),
-        borderRadius: moderateScale(16),
-        borderWidth: 1,
+        padding: scale(8),
+        borderRadius: moderateScale(12),
+        borderWidth: 0.5,
     },
     header: { 
         flexDirection: 'row', 
         justifyContent: 'space-between', 
         alignItems: 'center', 
-        marginBottom: verticalScale(12)
+        marginBottom: verticalScale(2)
     },
     badge: { 
         flexDirection: 'row', 
         alignItems: 'center', 
-        backgroundColor: 'rgba(61, 220, 151, 0.15)', 
-        paddingHorizontal: scale(8), 
-        paddingVertical: verticalScale(4), 
-        borderRadius: moderateScale(6), 
+        backgroundColor: 'rgba(61, 220, 151, 0.2)', 
+        paddingHorizontal: scale(6), 
+        paddingVertical: verticalScale(2), 
+        borderRadius: moderateScale(100), 
         gap: scale(4) 
     },
     badgeText: { 
-        fontSize: normalizeFont(10), 
-        fontWeight: '800',
+        fontSize: normalizeFont(9), 
+        fontWeight: '700',
         color: '#3DDC97',
-        letterSpacing: 0.5
     },
     timeAgo: { 
-        fontSize: normalizeFont(11),
+        fontSize: normalizeFont(10),
         fontWeight: '500'
     },
-    contentBody: {
-        marginBottom: verticalScale(12),
-    },
-    row: {
+    content: { 
         flexDirection: 'row',
         alignItems: 'center',
-    },
-    iconSpaced: {
-        marginRight: scale(12),
-        width: normalizeFont(20),
-        textAlign: 'center'
+        justifyContent: 'space-between',
+        marginBottom: verticalScale(8)
     },
     facultyName: { 
-        fontSize: normalizeFont(16),
-        fontWeight: '700', 
-    },
-    detailLabel: {
-        fontSize: normalizeFont(11),
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
-        fontWeight: '600',
-        marginBottom: verticalScale(2)
-    },
-    detailValue: { 
         fontSize: normalizeFont(14),
         fontWeight: '600', 
     },
-    detailValueSub: {
+    classDetails: { 
         fontSize: normalizeFont(12),
-        marginTop: verticalScale(2)
-    },
-    divider: {
-        height: 1,
-        width: '100%',
-        marginVertical: verticalScale(12)
+        fontWeight: '400', 
     },
     actions: { 
         flexDirection: 'row', 
         justifyContent: 'flex-end',
         gap: scale(12),
+        marginTop: verticalScale(4)
     },
     declineBtn: { 
-        flex: 1,
-        paddingVertical: verticalScale(10),
-        borderRadius: moderateScale(8), 
+        paddingHorizontal: scale(16),
+        paddingVertical: verticalScale(6),
+        borderRadius: moderateScale(100), 
         justifyContent: 'center', 
         alignItems: 'center',
         borderWidth: 1, 
     },
     declineBtnText: {
-        fontWeight: '700',
-        fontSize: normalizeFont(13)
+        fontWeight: '600',
+        fontSize: normalizeFont(12)
     },
     acceptBtn: { 
-        flex: 1,
-        paddingVertical: verticalScale(10),
-        borderRadius: moderateScale(8), 
+        paddingHorizontal: scale(20),
+        paddingVertical: verticalScale(6),
+        borderRadius: moderateScale(100), 
         justifyContent: 'center', 
         alignItems: 'center' 
     },
     acceptBtnText: { 
         color: '#000', 
-        fontWeight: '800', 
-        fontSize: normalizeFont(13) 
+        fontWeight: '700', 
+        fontSize: normalizeFont(12) 
     },
     statusRow: { 
         flexDirection: 'row', 
-        justifyContent: 'center',
+        justifyContent: 'flex-end',
+        marginTop: verticalScale(4) 
     },
     statusBadge: { 
         flexDirection: 'row', 
         alignItems: 'center', 
         gap: scale(6), 
-        paddingHorizontal: scale(20), 
-        paddingVertical: verticalScale(8), 
-        borderRadius: moderateScale(8),
-        width: '100%',
-        justifyContent: 'center'
+        paddingHorizontal: scale(16), 
+        paddingVertical: verticalScale(10), 
+        borderRadius: moderateScale(20) 
     },
     statusText: { 
         fontWeight: '800', 
-        fontSize: normalizeFont(13), 
-        letterSpacing: 1 
+        fontSize: normalizeFont(12), 
+        letterSpacing: 0.8 
     }
 });
-
-

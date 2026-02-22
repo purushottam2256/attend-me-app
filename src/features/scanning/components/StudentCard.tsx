@@ -309,4 +309,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default React.memo(StudentCard);
+export default StudentCard;

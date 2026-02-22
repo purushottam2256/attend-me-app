@@ -7,14 +7,9 @@
  * - Student device detection with auto-marking
  * - Scan timeout protection
  * - Proper cleanup on unmount/blur
- * 
- * ⚠️ IMPORTANT: Every useEffect dependency is carefully controlled to prevent
- * infinite re-render loops. Do NOT add `startBLEScan`, `students`, or other
- * unstable references to effect dep arrays without using refs.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { AppState, AppStateStatus } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import {
   initBLE,
@@ -74,31 +69,13 @@ export const useBLE = ({
   
   const stopScanRef = useRef<(() => void) | null>(null);
   const detectedUUIDsRef = useRef<Set<string>>(new Set());
-  const isStartingRef = useRef(false);
-  const wasScanningBeforeBackground = useRef(false);
-  const isScanningRef = useRef(false); // Mirror of isScanning for use inside callbacks without deps
-  
-  // ─── Stable refs for callbacks used inside effects ─────────────────
-  // These let effects call the latest version of a function without
-  // depending on its identity (which would cause re-render loops).
-  const onStudentDetectedRef = useRef(onStudentDetected);
-  onStudentDetectedRef.current = onStudentDetected;
-
-  const studentsRef = useRef(students);
-  studentsRef.current = students;
+  const isStartingRef = useRef(false); // Prevent concurrent start attempts
   
   // Create UUID to student ID map
   const uuidToStudentMap = useRef<Map<string, string>>(new Map());
   const studentsWithUUIDRef = useRef(0);
   
-  // Build UUID map when students change (uses serialized key to avoid
-  // re-running when the array reference changes but contents are the same)
-  const studentUUIDKey = students
-    .map(s => s.bluetooth_uuid || '')
-    .filter(Boolean)
-    .sort()
-    .join(',');
-
+  // Build UUID map when students change
   useEffect(() => {
     const map = new Map<string, string>();
     let countWithUUID = 0;
@@ -108,146 +85,198 @@ export const useBLE = ({
         const normalizedUUID = normalizeUUID(student.bluetooth_uuid);
         map.set(normalizedUUID, student.id);
         countWithUUID++;
+        
+        // Log first 5 mappings for debugging
+        if (countWithUUID <= 5) {
+          console.log('[useBLE] Mapping UUID:', normalizedUUID.substring(0, 12) + '...', '→ Student:', student.name);
+        }
       }
     });
     
     uuidToStudentMap.current = map;
     studentsWithUUIDRef.current = countWithUUID;
     
-    // Log only once per distinct set of UUIDs (not every render)
-    console.log('[useBLE] UUID map rebuilt:', countWithUUID, 'of', students.length, 'students have BLE UUIDs');
+    console.log('[useBLE] ==========================================');
+    console.log('[useBLE] Students with BLE UUID:', countWithUUID, 'of', students.length);
     if (countWithUUID === 0 && students.length > 0) {
-      console.warn('[useBLE] ⚠️ No students have bluetooth_uuid set');
+      console.warn('[useBLE] ⚠️ WARNING: No students have bluetooth_uuid set!');
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [studentUUIDKey]); // ← stable string key, NOT the students array ref
+    console.log('[useBLE] ==========================================');
+  }, [students]);
+  
+
   
   // Request permissions
   const requestPermissions = useCallback(async (): Promise<boolean> => {
     try {
+      console.log('[useBLE] Requesting BLE permissions...');
       const granted = await requestBLEPermissions();
       setPermissionsGranted(granted);
       if (!granted) {
         setError('Bluetooth permissions denied');
+        console.error('[useBLE] ❌ Permissions denied');
+      } else {
+        console.log('[useBLE] ✅ Permissions granted');
       }
       return granted;
     } catch (e) {
-      console.error('[useBLE] Permission request failed:', e);
+      console.error('[useBLE] ❌ Permission request failed:', e);
       setError('Failed to request permissions');
       return false;
     }
   }, []);
   
-  // Handle detected device (uses refs to avoid depending on onStudentDetected)
+  // Handle detected device
   const handleDeviceDetected = useCallback((device: DetectedStudent) => {
     const uuid = normalizeUUID(device.uuid);
     
-    if (detectedUUIDsRef.current.has(uuid)) return;
+    // Removed verbose logging
+    
+    // Check if already detected
+    if (detectedUUIDsRef.current.has(uuid)) {
+      console.log('[useBLE] Already detected, skipping');
+      return;
+    }
+    
+    // Check if matches a student
+    const mapSize = uuidToStudentMap.current.size;
+    console.log('[useBLE] Looking up in map with', mapSize, 'entries');
     
     const studentId = uuidToStudentMap.current.get(uuid);
     
     if (studentId) {
-      console.log('[useBLE] ✅ Match:', uuid.substring(0, 12) + '... → Student:', studentId);
+      console.log('[useBLE] ✅ MATCH FOUND! UUID → StudentID:', studentId);
+      
+      // Mark as detected
       detectedUUIDsRef.current.add(uuid);
       setDetectedCount(prev => prev + 1);
       setLastDetected(uuid);
+      
+      // Haptic feedback
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      onStudentDetectedRef.current(studentId);
+      
+      // Notify parent
+      onStudentDetected(studentId);
+    } else {
+      console.log('[useBLE] ❌ No match for UUID:', uuid.substring(0, 12) + '...');
+      // Show first few available UUIDs for debugging
+      const availableUUIDs = Array.from(uuidToStudentMap.current.keys()).slice(0, 3);
+      if (availableUUIDs.length > 0) {
+        console.log('[useBLE] Available UUIDs (first 3):', availableUUIDs.map(u => u.substring(0, 12) + '...'));
+      }
     }
-  }, []); // ← no deps! Uses refs for everything
+  }, [onStudentDetected]);
   
   // Start scanning
   const startBLEScan = useCallback(async () => {
-    if (isStartingRef.current || isScanningActive()) return;
+    // Guard: prevent concurrent starts
+    if (isStartingRef.current) {
+      console.log('[useBLE] Start already in progress, ignoring');
+      return;
+    }
+    
+    // Guard: check if already scanning
+    if (isScanningActive()) {
+      console.log('[useBLE] Already scanning, ignoring');
+      return;
+    }
     
     isStartingRef.current = true;
     
     try {
+      // Check if BLE is ready
       const { ready, reason } = await isBLEReady();
       if (!ready) {
+        console.error('[useBLE] ❌ BLE not ready:', reason);
         setError(reason || 'BLE not ready');
         return;
       }
       
+      // Reset detected UUIDs for new scan
       detectedUUIDsRef.current.clear();
       setDetectedCount(0);
       setError(null);
       
-      // Read students from ref (stable, no dep needed)
-      const studentUUIDs = studentsRef.current
+      // Get student UUIDs for filtering
+      const studentUUIDs = students
         .filter(s => s.bluetooth_uuid)
         .map(s => s.bluetooth_uuid!);
       
       if (studentUUIDs.length === 0) {
-        console.warn('[useBLE] No students have Bluetooth UUIDs');
+        console.warn('[useBLE] ⚠️ No students have Bluetooth UUIDs!');
         setError('No students have Bluetooth UUIDs configured');
         return;
       }
       
       console.log('[useBLE] Starting scan with', studentUUIDs.length, 'UUIDs');
       
+      // Start scanning with timeout
       const stop = startScanning(handleDeviceDetected, studentUUIDs, {
         timeout: scanTimeout,
         onTimeout: () => {
-          console.log('[useBLE] Scan timed out');
+          console.log('[useBLE] ⏰ Scan timed out');
           setIsScanning(false);
-          isScanningRef.current = false;
-          setError('Scan timed out');
+          setError('Scan timed out - please restart if needed');
         },
         onError: (err) => {
-          console.error('[useBLE] Scan error:', err.message);
+          console.error('[useBLE] ❌ Scan error:', err.message);
           setError(err.message);
         },
       });
       
       stopScanRef.current = stop;
       setIsScanning(true);
-      isScanningRef.current = true;
       console.log('[useBLE] ✅ Scan started');
     } finally {
       isStartingRef.current = false;
     }
-  }, [handleDeviceDetected, scanTimeout]); // ← students removed (uses ref)
+  }, [students, handleDeviceDetected, scanTimeout]);
   
   // Stop scanning
   const stopBLEScan = useCallback(() => {
+    console.log('[useBLE] Stopping scan...');
+    
     if (stopScanRef.current) {
       stopScanRef.current();
       stopScanRef.current = null;
     }
+    
+    // Also call global stop to be sure
     stopScanning();
+    
     setIsScanning(false);
-    isScanningRef.current = false;
+    console.log('[useBLE] Scan stopped');
   }, []);
   
-  // ─── Store latest startBLEScan in a ref for use by effects ──────────
-  const startBLEScanRef = useRef(startBLEScan);
-  startBLEScanRef.current = startBLEScan;
-  
-  // ─── Initialize BLE and listen for state changes ────────────────────
-  // Deps: [enabled] ONLY. Never depend on startBLEScan here!
+  // Initialize BLE and listen for state changes with auto-resume
   useEffect(() => {
     if (!enabled) return;
     
     initBLE();
     let previousState: BLEState = 'unknown';
     
+    // Get initial state
     getBLEState().then(state => {
       console.log('[useBLE] Initial BLE state:', state);
       setBLEState(state);
       previousState = state;
     });
     
+    // Subscribe to state changes with auto-resume
     const unsubscribe = onBLEStateChange((state) => {
       console.log('[useBLE] BLE state changed:', previousState, '→', state);
       setBLEState(state);
       
+      // Auto-resume: if Bluetooth was off and is now on, restart scan
       if (previousState === 'off' && state === 'on') {
-        console.log('[useBLE] Bluetooth enabled — auto-resuming scan...');
-        setError(null);
+        console.log('[useBLE] 🔄 Bluetooth enabled! Auto-resuming scan...');
+        setError(null); // Clear any previous errors
+        
+        // Small delay to let BLE fully initialize
         setTimeout(() => {
           if (!isScanningActive()) {
-            startBLEScanRef.current().catch(err => {
+            console.log('[useBLE] Starting scan after BLE enabled...');
+            startBLEScan().catch(err => {
               console.error('[useBLE] Auto-resume failed:', err);
             });
           }
@@ -261,7 +290,7 @@ export const useBLE = ({
       unsubscribe();
       stopScanning();
     };
-  }, [enabled]); // ← startBLEScan REMOVED (uses ref instead)
+  }, [enabled, startBLEScan]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -270,54 +299,28 @@ export const useBLE = ({
       stopBLEScan();
     };
   }, [stopBLEScan]);
-
-  // ─── AppState listener: auto-resume scan after background ──────────
-  // Deps: [enabled] ONLY. Uses refs for isScanning and startBLEScan.
-  useEffect(() => {
-    if (!enabled) return;
-
-    const handleAppStateChange = (nextAppState: AppStateStatus) => {
-      if (nextAppState === 'background' || nextAppState === 'inactive') {
-        if (isScanningRef.current || isScanningActive()) {
-          wasScanningBeforeBackground.current = true;
-          console.log('[useBLE] App backgrounded while scanning');
-        }
-      } else if (nextAppState === 'active') {
-        if (wasScanningBeforeBackground.current) {
-          wasScanningBeforeBackground.current = false;
-          console.log('[useBLE] 🔄 App foregrounded — auto-resuming scan...');
-          setTimeout(() => {
-            if (!isScanningActive()) {
-              startBLEScanRef.current().catch(err => {
-                console.error('[useBLE] Auto-resume after background failed:', err);
-              });
-            }
-          }, 600);
-        }
-      }
-    };
-
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => subscription.remove();
-  }, [enabled]); // ← isScanning & startBLEScan REMOVED (uses refs)
   
   // React to enabled changes (play/pause toggle)
   useEffect(() => {
     if (enabled) {
-      console.log('[useBLE] Enabled — requesting permissions then scan');
+      // When enabled (play), request permissions then start scanning
+      console.log('[useBLE] Enabled=true - requesting permissions then scan');
       requestBLEPermissions().then((granted) => {
         setPermissionsGranted(granted);
         if (granted) {
-          startBLEScanRef.current();
+          console.log('[useBLE] Permissions granted - starting scan');
+          startBLEScan();
         } else {
+          console.log('[useBLE] Permissions denied');
           setError('Bluetooth permissions denied');
         }
       });
     } else {
-      console.log('[useBLE] Disabled — stopping scan');
+      // When disabled (pause), stop scanning immediately
+      console.log('[useBLE] Enabled=false - stopping scan');
       stopBLEScan();
     }
-  }, [enabled, stopBLEScan]); // ← uses ref for startBLEScan
+  }, [enabled]); // Intentionally not including other deps to avoid loops
   
   return {
     bleState,
@@ -334,4 +337,3 @@ export const useBLE = ({
 };
 
 export default useBLE;
-

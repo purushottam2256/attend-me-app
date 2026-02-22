@@ -54,21 +54,14 @@ export const AsyncStorageAdapter: StorageAdapter = {
  */
 import * as SQLite from 'expo-sqlite';
 
-/**
- * SQLite Implementation
- * Optimized for larger datasets and structured queries.
- */
-export class SQLiteStorageAdapter implements StorageAdapter {
-  private db: Promise<SQLite.SQLiteDatabase>;
+let sqliteDbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
-  constructor() {
-    this.db = this.init();
-  }
-
-  private async init() {
-    try {
-      const db = await SQLite.openDatabaseAsync('offline.db');
-      await db.execAsync(`
+export async function getSqliteDb(): Promise<SQLite.SQLiteDatabase> {
+  if (!sqliteDbPromise) {
+    sqliteDbPromise = (async () => {
+      try {
+        const db = await SQLite.openDatabaseAsync('offline.db');
+        await db.execAsync(`
         PRAGMA journal_mode = WAL;
         CREATE TABLE IF NOT EXISTS kv_store (key TEXT PRIMARY KEY NOT NULL, value TEXT);
         
@@ -114,35 +107,51 @@ export class SQLiteStorageAdapter implements StorageAdapter {
            requested_at TEXT,
            is_hidden INTEGER DEFAULT 0
         );
-
+        
         CREATE TABLE IF NOT EXISTS rosters (
-            class_id TEXT PRIMARY KEY,
-            subject_name TEXT,
-            subject_id TEXT,
-            section TEXT,
-            cached_at TEXT
+           class_id TEXT PRIMARY KEY,
+           subject_name TEXT,
+           subject_id TEXT,
+           section TEXT,
+           cached_at TEXT
         );
-
+        
         CREATE TABLE IF NOT EXISTS students (
-            id TEXT PRIMARY KEY,
-            class_id TEXT NOT NULL,
-            name TEXT,
-            roll_no TEXT,
-            bluetooth_uuid TEXT,
-            batch INTEGER,
-            FOREIGN KEY(class_id) REFERENCES rosters(class_id) ON DELETE CASCADE
+           id TEXT PRIMARY KEY,
+           class_id TEXT,
+           name TEXT,
+           roll_no TEXT,
+           bluetooth_uuid TEXT,
+           batch INTEGER
+        );
+        
+        CREATE TABLE IF NOT EXISTS pending_submissions (
+           id TEXT PRIMARY KEY,
+           data TEXT,
+           slot_id TEXT,
+           date TEXT,
+           created_at TEXT
         );
       `);
-      log.info('Database initialized successfully');
-      return db;
-    } catch (error) {
-      log.error('Failed to initialize database:', error);
-      throw error;
-    }
+        log.info('Database initialized successfully');
+        return db;
+      } catch (error) {
+        log.error('Failed to initialize database:', error);
+        throw error;
+      }
+    })();
   }
+  return sqliteDbPromise;
+}
 
-  public getDb(): Promise<SQLite.SQLiteDatabase> {
-    return this.db;
+/**
+ * SQLite Implementation
+ */
+export class SQLiteStorageAdapter implements StorageAdapter {
+  private db: Promise<SQLite.SQLiteDatabase>;
+
+  constructor() {
+    this.db = getSqliteDb();
   }
 
   async getItem(key: string): Promise<string | null> {
@@ -267,15 +276,4 @@ export function getStorage(): StorageAdapter {
     // storageInstance = AsyncStorageAdapter; 
   }
   return storageInstance;
-}
-
-/**
- * Returns the raw SQLite database instance if active, for structured queries.
- */
-export function getSqliteDb(): Promise<SQLite.SQLiteDatabase> {
-  const adapter = getStorage();
-  if (adapter instanceof SQLiteStorageAdapter) {
-    return adapter.getDb();
-  }
-  throw new Error("SQLite adapter is not active");
 }

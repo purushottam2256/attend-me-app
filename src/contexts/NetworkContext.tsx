@@ -4,7 +4,6 @@
  */
 
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
-import { InteractionManager } from 'react-native';
 import NetInfo, { NetInfoState } from '@react-native-community/netinfo';
 import createLogger from '../utils/logger';
 
@@ -53,27 +52,17 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({ children }) =>
     return () => unsubscribe();
   }, []);
 
-  const processQueue = () => {
-    // Defer queue processing so it doesn't block UI
-    InteractionManager.runAfterInteractions(async () => {
-      const actions = [...queuedActions.current];
-      queuedActions.current = [];
+  const processQueue = async () => {
+    const actions = [...queuedActions.current];
+    queuedActions.current = [];
 
-      for (const { action, description } of actions) {
-        try {
-          // 10s timeout per action so one slow action can't freeze the queue
-          await Promise.race([
-            action(),
-            new Promise((_, reject) =>
-              setTimeout(() => reject(new Error(`Queued action timed out: ${description}`)), 10000)
-            ),
-          ]);
-        } catch (error) {
-          log.error(`Queued action failed (${description}):`, error);
-          // Continue with next action — don't let one failure block others
-        }
+    for (const { action } of actions) {
+      try {
+        await action();
+      } catch (error) {
+        log.error('Queued action failed:', error);
       }
-    });
+    }
   };
 
   const queueAction = (action: () => Promise<void>, description: string) => {

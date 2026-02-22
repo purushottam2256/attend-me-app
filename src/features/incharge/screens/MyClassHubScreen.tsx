@@ -28,8 +28,6 @@ import {
 
   Linking,
 } from 'react-native';
-import { safeRefresh } from '../../../utils/safeRefresh';
-import { useDeferredLoad } from '../../../hooks/useDeferredLoad';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -291,11 +289,17 @@ export const MyClassHubScreen: React.FC = () => {
      fetchTrends();
   }, [classInfo, trendRange]);
 
-  useDeferredLoad(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+        loadData();
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [loadData]);
 
-  const onRefresh = useCallback(() => {
-    safeHaptic(Haptics.ImpactFeedbackStyle.Light);
-    safeRefresh(setRefreshing, () => loadData());
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadData();
+    setRefreshing(false);
   }, [loadData]);
 
 

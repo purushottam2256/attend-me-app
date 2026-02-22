@@ -29,6 +29,8 @@ import { supabase } from '@config/supabase';
 import { ZenToast } from '@components/ZenToast';
 import { scale, verticalScale, moderateScale, normalizeFont } from '@utils/responsive';
 
+// Types
+type BatchFilter = 'all' | 1 | 2;
 
 // Stats Component
 const StatsBar = ({ counts, onBulkAction }: { 
@@ -83,7 +85,7 @@ export const ManualEntryScreen: React.FC = () => {
   const { classData } = route.params;
 
   // State
-  const [batchOverride, setBatchOverride] = useState<'full' | null>(null);
+  const [batchFilter, setBatchFilter] = useState<BatchFilter>('all');
   const [hasChanges, setHasChanges] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<any | null>(null); // For Modal
@@ -106,18 +108,17 @@ export const ManualEntryScreen: React.FC = () => {
     updateStudentStatus,
     submitAttendance,
     isOfflineMode,
-  } = useAttendance({ classData, batchOverride });
+  } = useAttendance({ classData, batchOverride: 'full' });
 
-  // Batch label for display (respects override)
-  const effectiveBatch = batchOverride === 'full' ? null : (classData?.batch ?? null);
-  const batchLabel = effectiveBatch === 1 ? 'Batch 1' : effectiveBatch === 2 ? 'Batch 2' : null;
-
+  // Filter Logic
+  const filteredStudents = students.filter(s => batchFilter === 'all' || s.batch === batchFilter);
+  
   const stats = {
-      present: students.filter(s => s.status === 'present').length,
-      absent: students.filter(s => s.status === 'absent').length,
-      od: students.filter(s => s.status === 'od').length,
-      leave: students.filter(s => s.status === 'leave').length,
-      total: students.length
+      present: filteredStudents.filter(s => s.status === 'present').length,
+      absent: filteredStudents.filter(s => s.status === 'absent').length,
+      od: filteredStudents.filter(s => s.status === 'od').length,
+      leave: filteredStudents.filter(s => s.status === 'leave').length,
+      total: filteredStudents.length
   };
 
 
@@ -125,7 +126,7 @@ export const ManualEntryScreen: React.FC = () => {
   const handleBulkAction = useCallback((action: 'present_all' | 'absent_all') => {
       const targetStatus = action === 'present_all' ? 'present' : 'absent';
       let changesMade = false;
-      students.forEach(s => {
+      filteredStudents.forEach(s => {
           if (s.status === 'od' || s.status === 'leave') return;
           if (s.status !== targetStatus) {
               updateStudentStatus(s.id, targetStatus);
@@ -133,7 +134,7 @@ export const ManualEntryScreen: React.FC = () => {
           }
       });
       if (changesMade) setHasChanges(true);
-  }, [students, updateStudentStatus]);
+  }, [filteredStudents, updateStudentStatus]);
 
   // Dirty State Protection
   useEffect(() => {
@@ -184,6 +185,11 @@ export const ManualEntryScreen: React.FC = () => {
     }
   };
 
+  const cycleFilter = () => {
+      if (batchFilter === 'all') setBatchFilter(1);
+      else if (batchFilter === 1) setBatchFilter(2);
+      else setBatchFilter('all');
+  };
 
   const colors = {
       bgGradient: ['#0D4A4A', '#1A6B6B', '#0F3D3D'],
@@ -220,7 +226,7 @@ export const ManualEntryScreen: React.FC = () => {
         <View style={styles.headerTitleContainer}>
             <Text style={styles.headerTitle}>{classData?.subject?.name || 'Attendance'}</Text>
             <Text style={styles.headerSubtitle}>
-                {classData?.target_dept} • {classData?.target_year} • {classData?.target_section}{batchLabel ? ` • ${batchLabel}` : ''}
+                {classData?.target_dept} • {classData?.target_year} • {classData?.target_section}
             </Text>
             {isOfflineMode && (
                 <View style={{ 
@@ -241,18 +247,13 @@ export const ManualEntryScreen: React.FC = () => {
             )}
         </View>
 
-        {/* Batch Toggle for labs */}
-        {!!classData?.batch && (
-          <TouchableOpacity 
-            onPress={() => setBatchOverride(prev => prev === 'full' ? null : 'full')}
-            style={styles.filterButton}
-          >
-            <Ionicons name="people-outline" size={normalizeFont(16)} color="#FFF" />
+        {/* Filter Button (Replacing Save) */}
+        <TouchableOpacity onPress={cycleFilter} style={styles.filterButton}>
+            <Ionicons name="filter" size={normalizeFont(16)} color="#FFF" />
             <Text style={styles.filterText}>
-              {batchLabel || 'All'}
+                {batchFilter === 'all' ? 'All' : `B${batchFilter}`}
             </Text>
-          </TouchableOpacity>
-        )}
+        </TouchableOpacity>
       </View>
 
       {/* Stats & Actions */}
@@ -263,6 +264,7 @@ export const ManualEntryScreen: React.FC = () => {
         students={students}
         onToggleStatus={handleToggle}
         onLongPress={setSelectedStudent}
+        batchFilter={batchFilter}
         isDark={true}
       />
 
@@ -279,7 +281,7 @@ export const ManualEntryScreen: React.FC = () => {
                 ) : (
                     <>
                         <Ionicons name={isOfflineMode ? "cloud-upload" : "save"} size={normalizeFont(20)} color="#0D4A4A" />
-                        <Text style={styles.fabText}>{isOfflineMode ? 'Queue & Sync Later' : `Submit (${students.filter(s => s.status === 'absent').length} Absent)`}</Text>
+                        <Text style={styles.fabText}>{isOfflineMode ? 'Queue & Sync Later' : `Submit (${filteredStudents.filter(s => s.status === 'absent').length} Absent)`}</Text>
                     </>
                 )}
             </TouchableOpacity>
