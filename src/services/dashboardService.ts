@@ -6,6 +6,7 @@
 
 import { supabase } from '../config/supabase';
 import createLogger from '../utils/logger';
+import { withTimeout } from '../utils/withTimeout';
 
 const log = createLogger('DashboardService');
 
@@ -67,11 +68,15 @@ export async function getTodaySchedule(facultyId: string): Promise<TimetableSlot
     const todayDay = days[todayDate.getDay()];
     const todayStr = todayDate.toISOString().split('T')[0];
 
-    const { data, error } = await supabase.rpc('get_faculty_schedule', {
-      p_faculty_id: facultyId,
-      p_day: todayDay,
-      p_date: todayStr,
-    });
+    const { data, error } = await withTimeout(
+      supabase.rpc('get_faculty_schedule', {
+        p_faculty_id: facultyId,
+        p_day: todayDay,
+        p_date: todayStr,
+      }),
+      10000,
+      'getTodaySchedule',
+    );
 
     if (error) {
       log.error('RPC get_faculty_schedule error:', error);
@@ -109,25 +114,29 @@ export async function getTodaySchedule(facultyId: string): Promise<TimetableSlot
  */
 export async function getWeeklySchedule(facultyId: string): Promise<TimetableSlot[]> {
   try {
-    const { data, error } = await supabase
-      .from('master_timetables')
-      .select(`
-        id,
-        day,
-        slot_id,
-        start_time,
-        end_time,
-        room,
-        target_dept,
-        target_year,
-        target_section,
-        batch,
-        subjects:subject_id (id, name, code)
-      `)
-      .eq('faculty_id', facultyId)
-      .eq('is_active', true)
-      .order('day')
-      .order('start_time');
+    const { data, error } = await withTimeout(
+      supabase
+        .from('master_timetables')
+        .select(`
+          id,
+          day,
+          slot_id,
+          start_time,
+          end_time,
+          room,
+          target_dept,
+          target_year,
+          target_section,
+          batch,
+          subjects:subject_id (id, name, code)
+        `)
+        .eq('faculty_id', facultyId)
+        .eq('is_active', true)
+        .order('day')
+        .order('start_time'),
+      10000,
+      'getWeeklySchedule',
+    );
 
     if (error) {
       log.error('Error fetching schedule for day:', error);
@@ -149,25 +158,29 @@ export async function getWeeklySchedule(facultyId: string): Promise<TimetableSlo
  */
 export async function getScheduleForDay(facultyId: string, day: string): Promise<TimetableSlot[]> {
   try {
-    const { data, error } = await supabase
-      .from('master_timetables')
-      .select(`
-        id,
-        day,
-        slot_id,
-        start_time,
-        end_time,
-        room,
-        target_dept,
-        target_year,
-        target_section,
-        batch,
-        subjects:subject_id (id, name, code)
-      `)
-      .eq('faculty_id', facultyId)
-      .eq('day', day)
-      .eq('is_active', true)
-      .order('start_time');
+    const { data, error } = await withTimeout(
+      supabase
+        .from('master_timetables')
+        .select(`
+          id,
+          day,
+          slot_id,
+          start_time,
+          end_time,
+          room,
+          target_dept,
+          target_year,
+          target_section,
+          batch,
+          subjects:subject_id (id, name, code)
+        `)
+        .eq('faculty_id', facultyId)
+        .eq('day', day)
+        .eq('is_active', true)
+        .order('start_time'),
+      10000,
+      'getScheduleForDay',
+    );
 
     if (error) {
       log.error('Error fetching schedule for day:', error);
@@ -205,11 +218,15 @@ export async function getScheduleWithStatus(facultyId: string): Promise<(Timetab
     const todayStr = new Date().toISOString().split('T')[0];
 
     // Get today's sessions
-    const { data: sessions } = await supabase
-      .from('attendance_sessions')
-      .select('slot_id')
-      .eq('faculty_id', facultyId)
-      .eq('date', todayStr);
+    const { data: sessions } = await withTimeout(
+      supabase
+        .from('attendance_sessions')
+        .select('slot_id')
+        .eq('faculty_id', facultyId)
+        .eq('date', todayStr),
+      10000,
+      'getScheduleWithStatus',
+    );
 
     const markedSlots = new Set((sessions || []).map(s => s.slot_id));
 
@@ -277,12 +294,16 @@ export async function getSwapsAndSubstitutions(
 ): Promise<{ swaps: SwapInfo[]; substitutions: SubstitutionInfo[] }> {
   try {
     // Fetch swaps where faculty is involved
-    const { data: swaps } = await supabase
-      .from('class_swaps')
-      .select('*')
-      .eq('date', date)
-      .eq('status', 'accepted')
-      .or(`faculty_a_id.eq.${facultyId},faculty_b_id.eq.${facultyId}`);
+    const { data: swaps } = await withTimeout(
+      supabase
+        .from('class_swaps')
+        .select('*')
+        .eq('date', date)
+        .eq('status', 'accepted')
+        .or(`faculty_a_id.eq.${facultyId},faculty_b_id.eq.${facultyId}`),
+      10000,
+      'getSwaps:fetchSwaps',
+    );
 
     // Enrich swaps with acquired class details
     const enrichedSwaps = await Promise.all((swaps || []).map(async (swap: any) => {
@@ -295,18 +316,22 @@ export async function getSwapsAndSubstitutions(
       const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
       const dayName = days[new Date(date).getDay()];
 
-      const { data: details } = await supabase
-         .from('master_timetables')
-         .select(`
+      const { data: details } = await withTimeout(
+        supabase
+          .from('master_timetables')
+          .select(`
             id, slot_id,
             start_time, end_time, room, 
             target_dept, target_year, target_section,
             subjects:subject_id(id, name, code)
-         `)
-         .eq('faculty_id', targetFacultyId)
-         .eq('slot_id', targetSlotId)
-         .eq('day', dayName)
-         .maybeSingle();
+          `)
+          .eq('faculty_id', targetFacultyId)
+          .eq('slot_id', targetSlotId)
+          .eq('day', dayName)
+          .maybeSingle(),
+        10000,
+        'getSwaps:fetchSlotDetails',
+      );
       
       return {
         ...swap,
@@ -315,23 +340,27 @@ export async function getSwapsAndSubstitutions(
     }));
 
     // Fetch substitutions where faculty is the substitute
-    const { data: subs } = await supabase
-      .from('substitutions')
-      .select(`
-        id,
-        date,
-        slot_id,
-        original_faculty_id,
-        substitute_faculty_id,
-        subject:subject_id (id, name, code),
-        target_dept,
-        target_year,
-        target_section,
-        status
-      `)
-      .eq('date', date)
-      .eq('status', 'accepted')
-      .eq('substitute_faculty_id', facultyId);
+    const { data: subs } = await withTimeout(
+      supabase
+        .from('substitutions')
+        .select(`
+          id,
+          date,
+          slot_id,
+          original_faculty_id,
+          substitute_faculty_id,
+          subject:subject_id (id, name, code),
+          target_dept,
+          target_year,
+          target_section,
+          status
+        `)
+        .eq('date', date)
+        .eq('status', 'accepted')
+        .eq('substitute_faculty_id', facultyId),
+      10000,
+      'getSwaps:fetchSubs',
+    );
 
     return {
       swaps: enrichedSwaps as SwapInfo[],
@@ -353,12 +382,16 @@ export async function getHolidayInfo(
   date: string = new Date().toISOString().split('T')[0]
 ): Promise<HolidayInfo | null> {
   try {
-    const { data, error } = await supabase
-      .from('academic_calendar')
-      .select('*')
-      .eq('date', date)
-      .eq('type', 'holiday')
-      .single();
+    const { data, error } = await withTimeout(
+      supabase
+        .from('academic_calendar')
+        .select('*')
+        .eq('date', date)
+        .eq('type', 'holiday')
+        .single(),
+      10000,
+      'getHolidayInfo',
+    );
 
     if (error || !data) return null;
     return data;
@@ -382,14 +415,18 @@ export async function getLeaveInfo(
 ): Promise<LeaveInfo | null> {
   try {
     // Check if there is an approved leave overlapping today
-    const { data, error } = await supabase
-      .from('faculty_leaves')
-      .select('id, leave_type, status')
-      .eq('faculty_id', facultyId)
-      .eq('status', 'approved')
-      .lte('start_date', date)
-      .gte('end_date', date)
-      .maybeSingle();
+    const { data, error } = await withTimeout(
+      supabase
+        .from('faculty_leaves')
+        .select('id, leave_type, status')
+        .eq('faculty_id', facultyId)
+        .eq('status', 'approved')
+        .lte('start_date', date)
+        .gte('end_date', date)
+        .maybeSingle(),
+      10000,
+      'getLeaveInfo',
+    );
 
     if (error || !data) return null;
     return data as LeaveInfo;
@@ -424,7 +461,7 @@ export async function getStudentsForClass(
       query = query.eq('batch', batch);
     }
 
-    const { data, error } = await query;
+    const { data, error } = await withTimeout(query, 10000, 'getStudentsForClass');
 
     if (error) {
       log.error('Error fetching students:', error);
@@ -716,11 +753,15 @@ export async function getDashboardStats(facultyId: string): Promise<{
     const today = days[new Date().getDay()];
     const todayStr = new Date().toISOString().split('T')[0];
 
-    const { data, error } = await supabase.rpc('get_dashboard_stats', {
-      p_faculty_id: facultyId,
-      p_day: today,
-      p_date: todayStr,
-    });
+    const { data, error } = await withTimeout(
+      supabase.rpc('get_dashboard_stats', {
+        p_faculty_id: facultyId,
+        p_day: today,
+        p_date: todayStr,
+      }),
+      10000,
+      'getDashboardStats',
+    );
 
     if (error) {
       log.error('RPC get_dashboard_stats error:', error);
@@ -786,13 +827,17 @@ export async function getClassPermissions(
   date: string = new Date().toISOString().split('T')[0]
 ): Promise<{ student_id: string; type: 'od' | 'leave' }[]> {
   try {
-    const { data, error } = await supabase
-      .from('attendance_permissions')
-      .select('student_id, type')
-      .in('student_id', studentIds)
-      .eq('is_active', true)
-      .lte('start_date', date)
-      .gte('end_date', date);
+    const { data, error } = await withTimeout(
+      supabase
+        .from('attendance_permissions')
+        .select('student_id, type')
+        .in('student_id', studentIds)
+        .eq('is_active', true)
+        .lte('start_date', date)
+        .gte('end_date', date),
+      10000,
+      'getClassPermissions',
+    );
 
     if (error) {
       console.error('Error fetching class permissions:', error);
@@ -819,16 +864,20 @@ export async function getClassPermissions(
  */
 export async function getAllFacultyClasses(facultyId: string): Promise<{ target_dept: string; target_year: number; target_section: string; subject_name: string }[]> {
   try {
-    const { data, error } = await supabase
-      .from('master_timetables')
-      .select(`
-        target_dept,
-        target_year,
-        target_section,
-        subjects:subject_id (name)
-      `)
-      .eq('faculty_id', facultyId)
-      .eq('is_active', true);
+    const { data, error } = await withTimeout(
+      supabase
+        .from('master_timetables')
+        .select(`
+          target_dept,
+          target_year,
+          target_section,
+          subjects:subject_id (name)
+        `)
+        .eq('faculty_id', facultyId)
+        .eq('is_active', true),
+      10000,
+      'getAllFacultyClasses',
+    );
 
     if (error) {
       console.error('Error fetching all faculty classes:', error);

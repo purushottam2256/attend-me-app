@@ -9,7 +9,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { RootNavigator } from '@navigation';
-import { NetworkProvider, ThemeProvider, OfflineSyncProvider, AuthProvider } from '@contexts';
+import { NetworkProvider, ThemeProvider, OfflineSyncProvider, AuthProvider, ConnectionStatusProvider } from '@contexts';
 import { NotificationProvider } from '@contexts/NotificationContext';
 import { OfflineBanner } from '@components/ui/OfflineBanner';
 import ErrorBoundary from '@components/ErrorBoundary';
@@ -42,13 +42,15 @@ export default function App() {
           <ThemeProvider>
             <AuthProvider>
               <NetworkProvider>
-                <OfflineSyncProvider>
-                  <NotificationProvider>
-                    <StatusBar style="auto" />
-                    <OfflineBanner />
-                    <RootNavigator />
-                  </NotificationProvider>
-                </OfflineSyncProvider>
+                <ConnectionStatusProvider>
+                  <OfflineSyncProvider>
+                    <NotificationProvider>
+                      <StatusBar style="auto" />
+                      <OfflineBanner />
+                      <RootNavigator />
+                    </NotificationProvider>
+                  </OfflineSyncProvider>
+                </ConnectionStatusProvider>
               </NetworkProvider>
             </AuthProvider>
           </ThemeProvider>

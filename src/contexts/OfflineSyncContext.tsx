@@ -23,6 +23,7 @@ import {
 import { registerBackgroundSync, triggerForegroundSync } from '../services/backgroundSync';
 import { getTodaySchedule } from '../services/dashboardService';
 import { supabase } from '../config/supabase';
+import { withTimeout } from '../utils/withTimeout';
 import createLogger from '../utils/logger';
 
 const log = createLogger('OfflineSync');
@@ -75,14 +76,17 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
     return () => task.cancel();
   }, [refreshStatus]);
 
-  // Auto-sync pending submissions when coming back online
+  // Auto-sync pending submissions when coming back online — debounced to prevent rapid-fire
   useEffect(() => {
     if (justCameOnline && syncStatus.pendingCount > 0) {
-      log.info('Network restored - auto-syncing pending submissions');
-      triggerForegroundSync().then(result => {
-        log.info('Foreground sync result:', result);
-        refreshStatus();
-      });
+      const timer = setTimeout(() => {
+        log.info('Network restored - auto-syncing pending submissions');
+        triggerForegroundSync().then(result => {
+          log.info('Foreground sync result:', result);
+          refreshStatus();
+        });
+      }, 2000); // 2s debounce to avoid rapid network flip triggers
+      return () => clearTimeout(timer);
     }
   }, [justCameOnline, syncStatus.pendingCount]);
 
@@ -114,7 +118,11 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
 
     try {
       // Get current user
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await withTimeout(
+        supabase.auth.getUser(),
+        10000,
+        'OfflineSync:getUser',
+      );
       if (!user) {
         throw new Error('Not authenticated');
       }
@@ -137,7 +145,8 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
     }
   }, [isOnline, refreshStatus]);
 
-  // Auto-sync rosters — deferred by 2s so the home screen renders first
+  // Auto-sync rosters — deferred by 5s so the home screen renders first
+  // (loadSchedule takes ~2-3s with its 7 Supabase calls)
   const [hasInitialSynced, setHasInitialSynced] = useState(false);
   useEffect(() => {
     if (isOnline && !hasInitialSynced) {
@@ -145,7 +154,7 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
         log.info('Triggering initial Smart Roster Sync');
         syncRosters();
         setHasInitialSynced(true);
-      }, 2000);
+      }, 5000);
       return () => clearTimeout(timer);
     }
   }, [isOnline, hasInitialSynced, syncRosters]);
@@ -172,18 +181,8 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
     }
   }, [isOnline, refreshStatus]);
 
-  // Periodically check for pending submissions
-  useEffect(() => {
-    const interval = setInterval(() => {
-      getPendingCount().then(count => {
-        if (count !== syncStatus.pendingCount) {
-          refreshStatus();
-        }
-      });
-    }, 30000); // Check every 30s, not 5s — reduces JS thread pressure
-
-    return () => clearInterval(interval);
-  }, [syncStatus.pendingCount, refreshStatus]);
+  // Refresh status after sync events (removed the 30s interval — it caused unnecessary JS thread pressure)
+  // Status is now refreshed only at mount, after syncs, and after manual triggers.
 
   return (
     <OfflineSyncContext.Provider

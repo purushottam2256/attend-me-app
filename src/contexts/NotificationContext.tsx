@@ -21,6 +21,7 @@ import React, {
 import { InteractionManager } from "react-native";
 import * as Notifications from "expo-notifications";
 import { supabase } from "../config/supabase";
+import { withTimeout } from '../utils/withTimeout';
 import { useAuth } from "./AuthContext";
 import {
   NotificationService,
@@ -349,11 +350,15 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
   const fetchUnreadCount = useCallback(async () => {
     if (!user) return;
 
-    const { count, error } = await supabase
-      .from("notifications")
-      .select("*", { count: "exact", head: true })
-      .eq("user_id", user.id)
-      .eq("is_read", false);
+    const { count, error } = await withTimeout(
+      supabase
+        .from("notifications")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .eq("is_read", false),
+      10000,
+      'fetchUnreadCount',
+    );
 
     if (!error && count !== null) {
       setUnreadCount(count);
@@ -366,10 +371,14 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
   // --------------------------------------------------------------------------
 
   const markNotificationAsRead = async (notificationId: string) => {
-    await supabase
-      .from("notifications")
-      .update({ is_read: true })
-      .eq("id", notificationId);
+    await withTimeout(
+      supabase
+        .from("notifications")
+        .update({ is_read: true })
+        .eq("id", notificationId),
+      10000,
+      'markNotificationAsRead',
+    );
 
     setUnreadCount((prev) => Math.max(0, prev - 1));
   };
@@ -409,11 +418,15 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
   const markAllAsRead = async () => {
     if (!user) return;
 
-    await supabase
-      .from("notifications")
-      .update({ is_read: true })
-      .eq("user_id", user.id)
-      .eq("is_read", false);
+    await withTimeout(
+      supabase
+        .from("notifications")
+        .update({ is_read: true })
+        .eq("user_id", user.id)
+        .eq("is_read", false),
+      10000,
+      'markAllAsRead',
+    );
 
     setUnreadCount(0);
     NotificationService.clearBadge();
@@ -447,11 +460,15 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
 
     try {
       // 1. Fetch request details
-      const { data: request, error: fetchError } = await supabase
-        .from("substitutions")
-        .select("status, original_faculty_id, slot_id")
-        .eq("id", requestId)
-        .single();
+      const { data: request, error: fetchError } = await withTimeout(
+        supabase
+          .from("substitutions")
+          .select("status, original_faculty_id, slot_id")
+          .eq("id", requestId)
+          .single(),
+        10000,
+        'respondToSub:fetchRequest',
+      );
 
       if (fetchError || !request) {
         return { success: false, message: "Request not found", type: "error" };
