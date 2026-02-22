@@ -8,7 +8,6 @@ import {
   RefreshControl,
   ActivityIndicator,
   Image,
-  InteractionManager,
 } from 'react-native';
 
 import { LinearGradient } from 'expo-linear-gradient';
@@ -21,7 +20,6 @@ import { deferLoad } from '../../../hooks/useDeferredLoad';
 import { useTheme } from '../../../contexts';
 import { Colors } from '../../../constants';
 import { supabase } from '../../../config/supabase';
-import { withTimeout } from '../../../utils/withTimeout';
 import { 
   getTodaySchedule, 
   TimetableSlot, 
@@ -104,25 +102,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
   const { isOnline, syncStatus, syncPending, lastSyncAge } = useOfflineSync();
   const [isSyncingManually, setIsSyncingManually] = useState(false);
 
-  // Load Profile Image — deferred so it doesn't compete with first render
+  // Load Profile Image
   useEffect(() => {
-    const task = InteractionManager.runAfterInteractions(async () => {
+    const loadProfileImage = async () => {
       try {
-        const { data: { user } } = await withTimeout(
-          supabase.auth.getUser(),
-          10000,
-          'HomeScreen:getUser(profile)',
-        );
+        const { data: { user } } = await supabase.auth.getUser();
         if (user) {
-          const { data } = await withTimeout(
-            supabase
-              .from('profiles')
-              .select('avatar_url')
-              .eq('id', user.id)
-              .single(),
-            10000,
-            'HomeScreen:getAvatar',
-          );
+          const { data } = await supabase
+            .from('profiles')
+            .select('avatar_url')
+            .eq('id', user.id)
+            .single();
           if (data?.avatar_url) {
             setProfileImage(data.avatar_url);
           }
@@ -130,8 +120,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
       } catch (e) {
         console.log('Error loading profile image:', e);
       }
-    });
-    return () => task.cancel();
+    };
+    loadProfileImage();
   }, []);
 
   // Reset slider when screen comes into focus
@@ -203,15 +193,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
     return merged;
   };
 
-  const determineHeroState = useCallback((slots: ScheduleSlot[]) => {
+  const determineHeroState = useCallback((
+    slots: ScheduleSlot[],
+    currentHoliday: HolidayInfo | null,
+    currentLeave: LeaveInfo | null
+  ) => {
     const now = new Date();
     
-    if (leave) {
+    if (currentLeave) {
       setHeroState('LEAVE');
       return;
     }
     
-    if (holiday && holiday.type === 'holiday') {
+    if (currentHoliday && currentHoliday.type === 'holiday') {
       setHeroState('HOLIDAY');
       return;
     }
@@ -260,33 +254,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
     const mins = Math.ceil((nextStart.getTime() - now.getTime()) / 60000);
     setMinutesUntilNext(mins);
     setHeroState('BREAK');
-  }, [holiday, leave]);
-
-  // ── CRITICAL: Use a ref so loadSchedule's dependency never changes ──
-  // Without this: loadSchedule → setHoliday/Leave → re-render →
-  // determineHeroState gets new ref → loadSchedule gets new ref →
-  // useFocusEffect re-fires → INFINITE LOOP that freezes the JS thread
-  const determineHeroStateRef = useRef(determineHeroState);
-  useEffect(() => { determineHeroStateRef.current = determineHeroState; }, [determineHeroState]);
-
-  // Simple re-entry guard — only reset in finally, NEVER in cleanup
-  const loadingRef = useRef(false);
+  }, []);
 
   const loadSchedule = useCallback(async (forceRefresh = false) => {
-    console.warn('[DIAG] loadSchedule called, loadingRef =', loadingRef.current);
-    if (loadingRef.current) {
-      console.warn('[DIAG] loadSchedule SKIPPED (already running)');
-      return;
-    }
-    loadingRef.current = true;
-    console.warn('[DIAG] loadSchedule STARTED');
-
-    // ESCAPE HATCH: force-release lock after 20s to prevent permanent freeze
-    const escapeTimer = setTimeout(() => {
-      console.warn('[DIAG] ⚠️ ESCAPE HATCH — 20s, releasing lock');
-      loadingRef.current = false;
-    }, 20000);
-
     try {
       if (!forceRefresh) {
         const cached = await AsyncStorage.getItem(SCHEDULE_CACHE_KEY);
@@ -294,19 +264,21 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
           const { data, timestamp } = JSON.parse(cached);
           if (Date.now() - timestamp < 5 * 60 * 1000) {
             setSchedule(data);
-            determineHeroStateRef.current(data);
+            determineHeroState(data, holiday, leave);
           }
         }
       }
 
+      // OFFLINE FALLBACK: If offline, use cached data
       if (connectionStatus !== 'online') {
+
         const cachedSchedule = await getCachedTodaySchedule();
         if (cachedSchedule && cachedSchedule.length > 0) {
           const age = await getCacheAge('todaySchedule');
           setCacheAge(age);
           setIsOfflineData(true);
           setSchedule(cachedSchedule as ScheduleSlot[]);
-          determineHeroStateRef.current(cachedSchedule as ScheduleSlot[]);
+          determineHeroState(cachedSchedule as ScheduleSlot[], holiday, leave);
           return;
         } else {
           setHeroState('NO_CLASSES');
@@ -317,147 +289,198 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
       
       setIsOfflineData(false);
       
-      console.warn('[DIAG] step 1: getUser');
-      const { data: { user } } = await withTimeout(
-        supabase.auth.getUser(), 10000, 'HomeScreen:getUser',
-      );
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const today = new Date();
-      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-
-      console.warn('[DIAG] step 2: getTodaySchedule');
-      const slots = await withTimeout(getTodaySchedule(user.id), 10000, 'getTodaySchedule');
-      console.warn('[DIAG] step 3: getSwaps');
-      const { swaps, substitutions } = await withTimeout(getSwapsAndSubstitutions(user.id), 10000, 'getSwaps');
-      console.warn('[DIAG] step 4: getHoliday');
-      const holidayInfo = await withTimeout(getHolidayInfo(), 10000, 'getHoliday');
-      console.warn('[DIAG] step 5: getLeave');
-      const leaveInfo = await withTimeout(getLeaveInfo(user.id), 10000, 'getLeave');
-      console.warn('[DIAG] step 6: getSessions');
-      const { data: completedSessions } = await withTimeout(
-        supabase.from('attendance_sessions').select('slot_id')
-          .eq('faculty_id', user.id).eq('date', todayStr),
-        10000, 'HomeScreen:getCompletedSessions',
-      );
-
-      console.warn('[DIAG] step 7: processing');
+      const slots = await getTodaySchedule(user.id);
+      
+      // Fetch swaps and substitutions
+      const { swaps, substitutions } = await getSwapsAndSubstitutions(user.id);
+      
+      // Fetch Holiday Info
+      const holidayInfo = await getHolidayInfo();
       setHoliday(holidayInfo);
+      
+      // Fetch Leave Info
+      const leaveInfo = await getLeaveInfo(user.id);
       setLeave(leaveInfo);
-
+      
+      // Create sets for quick lookup
       const swappedSlots = new Set(swaps.flatMap(s => [s.slot_a_id, s.slot_b_id]));
+      const substituteSlots = substitutions.map(s => s.slot_id);
+
+      // Fetch today's completed sessions from backend (Source of Truth)
+      const today = new Date();
+      const year = today.getFullYear();
+      const month = String(today.getMonth() + 1).padStart(2, '0');
+      const day = String(today.getDate()).padStart(2, '0');
+      const todayStr = `${year}-${month}-${day}`;
+
+      const { data: completedSessions } = await supabase
+        .from('attendance_sessions')
+        .select('slot_id')
+        .eq('faculty_id', user.id)
+        .eq('date', todayStr);
+      
       const completedSlotIds = new Set((completedSessions || []).map(s => s.slot_id));
+      
+      // Grace period in minutes after class ends (for scanning)
       const GRACE_MINUTES = 10;
       
-      const processed: ScheduleSlot[] = slots.map(slot => {
+      const processed: ScheduleSlot[] = await Promise.all(slots.map(async slot => {
         const now = new Date();
         const start = parseTime(slot.start_time);
         const end = parseTime(slot.end_time);
         const graceEnd = new Date(end.getTime() + GRACE_MINUTES * 60 * 1000);
+        
         let status: 'live' | 'completed' | 'incomplete' | 'upcoming';
-        if (now >= start && now <= end) status = 'live';
-        else if (now > end && now <= graceEnd) status = 'live';
-        else if (now > graceEnd) status = completedSlotIds.has(slot.slot_id) ? 'completed' : 'incomplete';
-        else status = 'upcoming';
-        return { ...slot, status, isSwap: swappedSlots.has(slot.slot_id), isSubstitute: false };
-      });
+        
+        if (now >= start && now <= end) {
+          status = 'live';
+        } else if (now > end && now <= graceEnd) {
+          // Within grace period - still can scan
+          status = 'live';
+        } else if (now > graceEnd) {
+          // Past grace period - check if attendance was taken
+          status = completedSlotIds.has(slot.slot_id) ? 'completed' : 'incomplete';
+        } else {
+          status = 'upcoming';
+        }
+        
+        return { 
+          ...slot, 
+          status,
+          isSwap: swappedSlots.has(slot.slot_id),
+          isSubstitute: false,
+        };
+      }));
 
+      // Add substitute classes (classes you're covering for someone else)
       const subClasses: ScheduleSlot[] = substitutions.map(sub => {
         const now = new Date();
+        const start = parseTime(sub.slot_id.split('_')[1] || '09:00'); // Extract time from slot_id or default
+        
         return {
-          id: sub.id, day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
-          slot_id: sub.slot_id, start_time: sub.slot_id.split('_')[1] || '09:00',
-          end_time: sub.slot_id.split('_')[2] || '10:00', room: null,
-          subject: sub.subject, target_dept: sub.target_dept,
-          target_year: sub.target_year, target_section: sub.target_section, batch: null,
+          id: sub.id,
+          day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
+          slot_id: sub.slot_id,
+          start_time: sub.slot_id.split('_')[1] || '09:00',
+          end_time: sub.slot_id.split('_')[2] || '10:00',
+          room: null,
+          subject: sub.subject,
+          target_dept: sub.target_dept,
+          target_year: sub.target_year,
+          target_section: sub.target_section,
+          batch: null,
           status: now > parseTime(sub.slot_id.split('_')[2] || '10:00') ? 'incomplete' : 'upcoming' as const,
-          isSwap: false, isSubstitute: true, originalFacultyId: sub.original_faculty_id,
+          isSwap: false,
+          isSubstitute: true,
+          originalFacultyId: sub.original_faculty_id, // Track who we're substituting for
         };
       });
 
       const allClasses = [...processed, ...subClasses];
       allClasses.sort((a, b) => a.start_time.localeCompare(b.start_time));
+      
+      // Merge consecutive same-subject classes
       const mergedClasses = mergeConsecutiveClasses(allClasses);
       
       setSchedule(mergedClasses);
-      determineHeroStateRef.current(mergedClasses);
+      determineHeroState(mergedClasses, holidayInfo, leaveInfo);
       
-      console.warn('[DIAG] step 8: notifications (fire-and-forget)');
-      // FIRE-AND-FORGET: notification scheduling runs in background
-      // NEVER blocks loadSchedule — this was the freeze source
-      const _user = user;
-      const _mergedClasses = mergedClasses;
-      const _holidayInfo = holidayInfo;
-      setTimeout(async () => {
-        try {
+      // Schedule Reminders (Professional Feature)
+      try {
           const NOTIF_PREF_KEY = '@attend_me/notifications_enabled';
           let notificationsEnabled = false;
+
+          // 1. Get preference (Online or Offline)
           if (connectionStatus === 'online') {
-              const { data: profile } = await withTimeout(
-                supabase.from('profiles').select('notifications_enabled').eq('id', _user.id).single(),
-                8000, 'getNotifPref');
+              const { data: profile } = await supabase
+                .from('profiles')
+                .select('notifications_enabled')
+                .eq('id', user.id)
+                .single();
+              
               notificationsEnabled = profile?.notifications_enabled ?? false;
+              // Cache it
               await AsyncStorage.setItem(NOTIF_PREF_KEY, JSON.stringify(notificationsEnabled));
           } else {
+              // Load from cache
               const cachedPref = await AsyncStorage.getItem(NOTIF_PREF_KEY);
               notificationsEnabled = cachedPref ? JSON.parse(cachedPref) : false;
           }
+
           if (notificationsEnabled) {
+             // 2. Cancel only CLASS reminders (preserve event reminders)
              await NotificationService.cancelClassReminders();
-             if (_holidayInfo && _holidayInfo.type === 'holiday') return;
+             
+             // Skip scheduling if today is a holiday
+             if (holidayInfo && holidayInfo.type === 'holiday') {
+
+                return;
+             }
+             
+             // 3. Get existing scheduled notifications for dedup
              const scheduled = await NotificationService.getAllScheduled();
              const scheduledSubjects = new Set(
-                 scheduled.filter(n => n.content.data?.type === 'CLASS_REMINDER').map(n => n.content.data?.subjectName)
+                 scheduled
+                    .filter(n => n.content.data?.type === 'CLASS_REMINDER')
+                    .map(n => n.content.data?.subjectName)
              );
-             for (const slot of _mergedClasses) {
-                 if ((slot.status === 'upcoming' || slot.status === 'live') && parseTime(slot.start_time).getTime() > Date.now()) {
-                     const subjectName = slot.subject?.name || 'Class';
-                     if (!scheduledSubjects.has(subjectName)) {
-                         await NotificationService.scheduleClassReminder(subjectName,
-                             `${slot.target_year}-${slot.target_section} (${slot.room || 'N/A'})`, parseTime(slot.start_time));
+             
+             for (const slot of mergedClasses) {
+                 if (slot.status === 'upcoming' || slot.status === 'live') {
+                     const classDate = parseTime(slot.start_time);
+                     if (classDate.getTime() > Date.now()) { // Only future classes
+                         const subjectName = slot.subject?.name || 'Class';
+                         
+                         // 4. Schedule if not duplicate
+                         if (!scheduledSubjects.has(subjectName)) {
+                             await NotificationService.scheduleClassReminder(
+                                 subjectName,
+                                 `${slot.target_year}-${slot.target_section} (${slot.room || 'N/A'})`,
+                                 classDate
+                             );
+                         }
                      }
                  }
              }
           }
-        } catch (err) { console.warn('[DIAG] notification bg task failed:', err); }
-      }, 0);
+      } catch (err) {
+
+      }
       
-      console.warn('[DIAG] step 9: caching');
-      const cachedData = mergedClasses.map(s => ({ ...s, room: s.room || undefined, originalFacultyId: s.originalFacultyId || undefined }));
+      // Cache for offline use
+      // Map to ensure types (convert nulls to undefined if needed for cache)
+      const cachedData = mergedClasses.map(s => ({
+          ...s,
+          room: s.room || undefined,
+          originalFacultyId: s.originalFacultyId || undefined
+      }));
       await cacheTodaySchedule(cachedData);
-      await AsyncStorage.setItem(SCHEDULE_CACHE_KEY, JSON.stringify({ data: mergedClasses, timestamp: Date.now() }));
+      await AsyncStorage.setItem(SCHEDULE_CACHE_KEY, JSON.stringify({
+        data: mergedClasses,
+        timestamp: Date.now(),
+      }));
       
     } catch (error) {
-      console.warn('[DIAG] loadSchedule ERROR:', error);
+      console.error('Error loading schedule:', error);
       setHeroState('NO_CLASSES');
-    } finally {
-      clearTimeout(escapeTimer);
-      console.warn('[DIAG] loadSchedule FINISHED, releasing lock');
-      loadingRef.current = false;
     }
-  }, [connectionStatus]);
+  }, [determineHeroState, connectionStatus]);
 
   useFocusEffect(
     useCallback(() => {
-      console.warn('[DIAG] HomeScreen FOCUSED — scheduling loadSchedule');
-      const cleanup = deferLoad(() => loadSchedule(true));
-      return () => {
-        console.warn('[DIAG] HomeScreen BLURRED — cleanup called');
-        cleanup();
-      };
+      return deferLoad(() => loadSchedule(true));
     }, [loadSchedule])
   );
 
-  // Keep schedule in a ref so the 60s interval always uses the latest value
-  const scheduleRef = useRef(schedule);
-  useEffect(() => { scheduleRef.current = schedule; }, [schedule]);
-
   useEffect(() => {
     const interval = setInterval(() => {
-      determineHeroStateRef.current(scheduleRef.current);
+      determineHeroState(schedule, holiday, leave);
     }, 60000);
     return () => clearInterval(interval);
-  }, []); // mount-only — refs always have latest values
+  }, [schedule, holiday, leave, determineHeroState]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

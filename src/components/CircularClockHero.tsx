@@ -23,6 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle, Defs, LinearGradient as SvgGradient, Stop } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
+import { useIsFocused } from '@react-navigation/native';
 import { useTheme } from '../contexts';
 import { scale, verticalScale, moderateScale, normalizeFont } from '../utils/responsive';
 
@@ -56,6 +57,7 @@ export const CircularClockHero = forwardRef<CircularClockHeroRef, CircularClockH
   onManualEntry,
 }, ref) => {
   const { isDark } = useTheme();
+  const isFocused = useIsFocused();
   const glowAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -75,51 +77,67 @@ export const CircularClockHero = forwardRef<CircularClockHeroRef, CircularClockH
     },
   }));
 
-  // Update time
+  // Update time (only when focused)
   useEffect(() => {
-    const interval = setInterval(() => setCurrentTime(new Date()), 60000); // Only HH:MM shown, no need for every 1s
+    if (!isFocused) return;
+    setCurrentTime(new Date()); // Update immediately on focus
+    const interval = setInterval(() => setCurrentTime(new Date()), 60000); 
     return () => clearInterval(interval);
-  }, []);
+  }, [isFocused]);
 
-  // Subtle glow pulse
+  // Subtle glow pulse (only when focused)
   useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(glowAnim, {
-          toValue: 1,
-          duration: 2000,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true, // opacity IS natively supported
-        }),
-        Animated.timing(glowAnim, {
-          toValue: 0,
-          duration: 2000,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true, // opacity IS natively supported
-        }),
-      ])
-    ).start();
-  }, [glowAnim]);
+    let anim: Animated.CompositeAnimation;
+    if (isFocused) {
+      anim = Animated.loop(
+        Animated.sequence([
+          Animated.timing(glowAnim, {
+            toValue: 1,
+            duration: 2000,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(glowAnim, {
+            toValue: 0,
+            duration: 2000,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      anim.start();
+    } else {
+      glowAnim.setValue(0); // Reset
+    }
+    return () => anim?.stop();
+  }, [glowAnim, isFocused]);
 
-  // Subtle pulse animation for clock ring
+  // Subtle pulse animation for clock ring (only when focused)
   useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1.03,
-          duration: 1500,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 1500,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
-  }, [pulseAnim]);
+    let anim: Animated.CompositeAnimation;
+    if (isFocused) {
+      anim = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.03,
+            duration: 1500,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 1500,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      anim.start();
+    } else {
+      pulseAnim.setValue(1); // Reset
+    }
+    return () => anim?.stop();
+  }, [pulseAnim, isFocused]);
 
   const strokeDashoffset = CIRCUMFERENCE - (progress / 100) * CIRCUMFERENCE;
 
