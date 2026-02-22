@@ -132,6 +132,14 @@ export class SQLiteStorageAdapter implements StorageAdapter {
             batch INTEGER,
             FOREIGN KEY(class_id) REFERENCES rosters(class_id) ON DELETE CASCADE
         );
+
+        CREATE TABLE IF NOT EXISTS pending_submissions (
+            id TEXT PRIMARY KEY NOT NULL,
+            data TEXT NOT NULL,
+            slot_id TEXT,
+            date TEXT,
+            created_at TEXT NOT NULL
+        );
       `);
       log.info('Database initialized successfully');
       return db;
@@ -216,11 +224,19 @@ export class SQLiteStorageAdapter implements StorageAdapter {
     if (keyValuePairs.length === 0) return;
     try {
       const db = await this.db;
+      // SQLite parameter limit is usually 999. Each pair takes 2 params.
+      // Safe batch size: 400 pairs (800 params).
+      const BATCH_SIZE = 400;
+
       await db.withTransactionAsync(async () => {
-        for (const [key, value] of keyValuePairs) {
+        for (let i = 0; i < keyValuePairs.length; i += BATCH_SIZE) {
+          const batch = keyValuePairs.slice(i, i + BATCH_SIZE);
+          const placeholders = batch.map(() => '(?, ?)').join(',');
+          const values = batch.flatMap(pair => pair);
+
           await db.runAsync(
-            'INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)',
-            [key, value]
+            `INSERT OR REPLACE INTO kv_store (key, value) VALUES ${placeholders}`,
+            values
           );
         }
       });
@@ -233,9 +249,16 @@ export class SQLiteStorageAdapter implements StorageAdapter {
     if (keys.length === 0) return;
     try {
       const db = await this.db;
+      const BATCH_SIZE = 900; // Safe limit for WHERE IN (?)
+
       await db.withTransactionAsync(async () => {
-        for (const key of keys) {
-          await db.runAsync('DELETE FROM kv_store WHERE key = ?', [key]);
+        for (let i = 0; i < keys.length; i += BATCH_SIZE) {
+          const batch = keys.slice(i, i + BATCH_SIZE);
+          const placeholders = batch.map(() => '?').join(',');
+          await db.runAsync(
+            `DELETE FROM kv_store WHERE key IN (${placeholders})`,
+            batch
+          );
         }
       });
     } catch (error) {
