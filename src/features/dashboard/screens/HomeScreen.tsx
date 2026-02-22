@@ -77,7 +77,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
   const navigation = useNavigation<any>();
   const { status: connectionStatus } = useConnectionStatus();
   const heroRef = useRef<CircularClockHeroRef>(null);
-  
+  const isLoadingRef = useRef(false);
+
   const [heroState, setHeroState] = useState<HeroState>('LOADING');
   const [schedule, setSchedule] = useState<ScheduleSlot[]>([]);
   const [currentClass, setCurrentClass] = useState<ScheduleSlot | null>(null);
@@ -193,15 +194,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
     return merged;
   };
 
-  const determineHeroState = useCallback((slots: ScheduleSlot[]) => {
+  const determineHeroState = useCallback((
+    slots: ScheduleSlot[],
+    currentHoliday: HolidayInfo | null,
+    currentLeave: LeaveInfo | null
+  ) => {
     const now = new Date();
     
-    if (leave) {
+    if (currentLeave) {
       setHeroState('LEAVE');
       return;
     }
     
-    if (holiday && holiday.type === 'holiday') {
+    if (currentHoliday && currentHoliday.type === 'holiday') {
       setHeroState('HOLIDAY');
       return;
     }
@@ -250,9 +255,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
     const mins = Math.ceil((nextStart.getTime() - now.getTime()) / 60000);
     setMinutesUntilNext(mins);
     setHeroState('BREAK');
-  }, [holiday, leave]);
+  }, []);
 
   const loadSchedule = useCallback(async (forceRefresh = false) => {
+    // Prevent concurrent executions
+    if (isLoadingRef.current) return;
+    isLoadingRef.current = true;
+
     try {
       if (!forceRefresh) {
         const cached = await AsyncStorage.getItem(SCHEDULE_CACHE_KEY);
@@ -260,21 +269,24 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
           const { data, timestamp } = JSON.parse(cached);
           if (Date.now() - timestamp < 5 * 60 * 1000) {
             setSchedule(data);
-            determineHeroState(data);
+            determineHeroState(data, holiday, leave);
+            // If cache is fresh, we can skip network if not forced
+            if (connectionStatus === 'online') {
+                // Background refresh? Maybe not needed for short cache life
+            }
           }
         }
       }
 
       // OFFLINE FALLBACK: If offline, use cached data
       if (connectionStatus !== 'online') {
-
         const cachedSchedule = await getCachedTodaySchedule();
         if (cachedSchedule && cachedSchedule.length > 0) {
           const age = await getCacheAge('todaySchedule');
           setCacheAge(age);
           setIsOfflineData(true);
           setSchedule(cachedSchedule as ScheduleSlot[]);
-          determineHeroState(cachedSchedule as ScheduleSlot[]);
+          determineHeroState(cachedSchedule as ScheduleSlot[], holiday, leave);
           return;
         } else {
           setHeroState('NO_CLASSES');
@@ -303,7 +315,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
       
       // Create sets for quick lookup
       const swappedSlots = new Set(swaps.flatMap(s => [s.slot_a_id, s.slot_b_id]));
-      const substituteSlots = substitutions.map(s => s.slot_id);
 
       // Fetch today's completed sessions from backend (Source of Truth)
       const today = new Date();
@@ -382,68 +393,72 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
       const mergedClasses = mergeConsecutiveClasses(allClasses);
       
       setSchedule(mergedClasses);
-      determineHeroState(mergedClasses);
+      determineHeroState(mergedClasses, holidayInfo, leaveInfo);
       
-      // Schedule Reminders (Professional Feature)
-      try {
-          const NOTIF_PREF_KEY = '@attend_me/notifications_enabled';
-          let notificationsEnabled = false;
+      // Schedule Reminders (Professional Feature) - OPTIMIZED: only run once per session or significantly throttled
+      const NOTIF_THROTTLE_KEY = '@attend_me/last_notif_schedule';
+      const lastRun = await AsyncStorage.getItem(NOTIF_THROTTLE_KEY);
+      const shouldRunNotif = !lastRun || (Date.now() - Number(lastRun) > 30 * 60 * 1000); // Run every 30 mins max
 
-          // 1. Get preference (Online or Offline)
-          if (connectionStatus === 'online') {
-              const { data: profile } = await supabase
-                .from('profiles')
-                .select('notifications_enabled')
-                .eq('id', user.id)
-                .single();
-              
-              notificationsEnabled = profile?.notifications_enabled ?? false;
-              // Cache it
-              await AsyncStorage.setItem(NOTIF_PREF_KEY, JSON.stringify(notificationsEnabled));
-          } else {
-              // Load from cache
-              const cachedPref = await AsyncStorage.getItem(NOTIF_PREF_KEY);
-              notificationsEnabled = cachedPref ? JSON.parse(cachedPref) : false;
-          }
+      if (shouldRunNotif) {
+        try {
+            const NOTIF_PREF_KEY = '@attend_me/notifications_enabled';
+            let notificationsEnabled = false;
 
-          if (notificationsEnabled) {
-             // 2. Cancel only CLASS reminders (preserve event reminders)
-             await NotificationService.cancelClassReminders();
-             
-             // Skip scheduling if today is a holiday
-             if (holidayInfo && holidayInfo.type === 'holiday') {
+            // 1. Get preference (Online or Offline)
+            if (connectionStatus === 'online') {
+                const { data: profile } = await supabase
+                  .from('profiles')
+                  .select('notifications_enabled')
+                  .eq('id', user.id)
+                  .single();
 
-                return;
-             }
-             
-             // 3. Get existing scheduled notifications for dedup
-             const scheduled = await NotificationService.getAllScheduled();
-             const scheduledSubjects = new Set(
-                 scheduled
-                    .filter(n => n.content.data?.type === 'CLASS_REMINDER')
-                    .map(n => n.content.data?.subjectName)
-             );
-             
-             for (const slot of mergedClasses) {
-                 if (slot.status === 'upcoming' || slot.status === 'live') {
-                     const classDate = parseTime(slot.start_time);
-                     if (classDate.getTime() > Date.now()) { // Only future classes
-                         const subjectName = slot.subject?.name || 'Class';
-                         
-                         // 4. Schedule if not duplicate
-                         if (!scheduledSubjects.has(subjectName)) {
-                             await NotificationService.scheduleClassReminder(
-                                 subjectName,
-                                 `${slot.target_year}-${slot.target_section} (${slot.room || 'N/A'})`,
-                                 classDate
-                             );
-                         }
-                     }
-                 }
-             }
-          }
-      } catch (err) {
+                notificationsEnabled = profile?.notifications_enabled ?? false;
+                // Cache it
+                await AsyncStorage.setItem(NOTIF_PREF_KEY, JSON.stringify(notificationsEnabled));
+            } else {
+                // Load from cache
+                const cachedPref = await AsyncStorage.getItem(NOTIF_PREF_KEY);
+                notificationsEnabled = cachedPref ? JSON.parse(cachedPref) : false;
+            }
 
+            if (notificationsEnabled) {
+               // 2. Cancel only CLASS reminders (preserve event reminders)
+               await NotificationService.cancelClassReminders();
+
+               // Skip scheduling if today is a holiday
+               if (!(holidayInfo && holidayInfo.type === 'holiday')) {
+                   // 3. Get existing scheduled notifications for dedup
+                   const scheduled = await NotificationService.getAllScheduled();
+                   const scheduledSubjects = new Set(
+                       scheduled
+                          .filter(n => n.content.data?.type === 'CLASS_REMINDER')
+                          .map(n => n.content.data?.subjectName)
+                   );
+
+                   for (const slot of mergedClasses) {
+                       if (slot.status === 'upcoming' || slot.status === 'live') {
+                           const classDate = parseTime(slot.start_time);
+                           if (classDate.getTime() > Date.now()) { // Only future classes
+                               const subjectName = slot.subject?.name || 'Class';
+
+                               // 4. Schedule if not duplicate
+                               if (!scheduledSubjects.has(subjectName)) {
+                                   await NotificationService.scheduleClassReminder(
+                                       subjectName,
+                                       `${slot.target_year}-${slot.target_section} (${slot.room || 'N/A'})`,
+                                       classDate
+                                   );
+                               }
+                           }
+                       }
+                   }
+               }
+            }
+            await AsyncStorage.setItem(NOTIF_THROTTLE_KEY, Date.now().toString());
+        } catch (err) {
+            console.error('Notification scheduling error:', err);
+        }
       }
       
       // Cache for offline use
@@ -462,8 +477,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
     } catch (error) {
       console.error('Error loading schedule:', error);
       setHeroState('NO_CLASSES');
+    } finally {
+      isLoadingRef.current = false;
     }
-  }, [determineHeroState]);
+  }, [determineHeroState, connectionStatus]);
 
   useFocusEffect(
     useCallback(() => {
@@ -473,10 +490,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      determineHeroState(schedule);
+      determineHeroState(schedule, holiday, leave);
     }, 60000);
     return () => clearInterval(interval);
-  }, [schedule, determineHeroState]);
+  }, [schedule, holiday, leave, determineHeroState]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
