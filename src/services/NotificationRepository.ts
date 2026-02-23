@@ -4,15 +4,12 @@ import { supabase } from '../config/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import createLogger from '../utils/logger';
 
+import { dbPool } from '../config/database';
+
 const log = createLogger('NotificationRepo');
 
-let db: SQLite.SQLiteDatabase | null = null;
-
 const getDB = async () => {
-  if (!db) {
-    db = await SQLite.openDatabaseAsync('offline.db');
-  }
-  return db;
+  return await dbPool.getDb();
 };
 
 export const NotificationRepository = {

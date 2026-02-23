@@ -53,6 +53,7 @@ export const AsyncStorageAdapter: StorageAdapter = {
  * In the future, this can switch to SQLite based on configuration/availability.
  */
 import * as SQLite from 'expo-sqlite';
+import { dbPool } from '../../config/database';
 
 let sqliteDbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -60,83 +61,12 @@ export async function getSqliteDb(): Promise<SQLite.SQLiteDatabase> {
   if (!sqliteDbPromise) {
     sqliteDbPromise = (async () => {
       try {
-        const db = await SQLite.openDatabaseAsync('offline.db');
-        await db.execAsync(`
-        PRAGMA journal_mode = WAL;
-        CREATE TABLE IF NOT EXISTS kv_store (key TEXT PRIMARY KEY NOT NULL, value TEXT);
-        
-        CREATE TABLE IF NOT EXISTS local_notifications (
-          id TEXT PRIMARY KEY,
-          user_id TEXT NOT NULL,
-          type TEXT NOT NULL,
-          title TEXT NOT NULL,
-          body TEXT NOT NULL,
-          data TEXT, -- JSON
-          priority TEXT,
-          is_read INTEGER DEFAULT 0,
-          created_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS local_substitutions (
-           id TEXT PRIMARY KEY,
-           original_faculty_id TEXT NOT NULL,
-           substitute_faculty_id TEXT,
-           subject_name TEXT,
-           subject_code TEXT,
-           original_faculty_name TEXT,
-           target_dept TEXT,
-           target_year INTEGER,
-           target_section TEXT,
-           slot_id TEXT,
-           date TEXT,
-           status TEXT,
-           requested_at TEXT,
-           is_hidden INTEGER DEFAULT 0
-        );
-
-        CREATE TABLE IF NOT EXISTS local_class_swaps (
-           id TEXT PRIMARY KEY,
-           faculty_a_id TEXT NOT NULL,
-           faculty_b_id TEXT NOT NULL,
-           faculty_a_name TEXT,
-           faculty_b_name TEXT,
-           slot_a_id TEXT,
-           slot_b_id TEXT,
-           date TEXT,
-           status TEXT,
-           requested_at TEXT,
-           is_hidden INTEGER DEFAULT 0
-        );
-        
-        CREATE TABLE IF NOT EXISTS rosters (
-           class_id TEXT PRIMARY KEY,
-           subject_name TEXT,
-           subject_id TEXT,
-           section TEXT,
-           cached_at TEXT
-        );
-        
-        CREATE TABLE IF NOT EXISTS students (
-           id TEXT PRIMARY KEY,
-           class_id TEXT,
-           name TEXT,
-           roll_no TEXT,
-           bluetooth_uuid TEXT,
-           batch INTEGER
-        );
-        
-        CREATE TABLE IF NOT EXISTS pending_submissions (
-           id TEXT PRIMARY KEY,
-           data TEXT,
-           slot_id TEXT,
-           date TEXT,
-           created_at TEXT
-        );
-      `);
-        log.info('Database initialized successfully');
+        const db = await dbPool.getDb();
+        log.info('SQLite Database Connection Ready from Pool');
         return db;
       } catch (error) {
-        log.error('Failed to initialize database:', error);
+        log.error('SQLite Retrieval Error:', error);
+        sqliteDbPromise = null; 
         throw error;
       }
     })();

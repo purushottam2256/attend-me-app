@@ -28,9 +28,10 @@ import createLogger from '../../utils/logger';
 const storage = getStorage();
 const log = createLogger('OfflineSync');
 
-/** Yield to the JS event loop so touch events can process — zero delay, maximum responsiveness */
+/** Yield to the JS event loop so touch events can process */
 function yieldToUI(): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, 0));
+  // Use a 20ms macroscopic timeout to reliably break the JS microtask queue on Hermes
+  return new Promise(resolve => setTimeout(resolve, 20));
 }
 
 // ============================================================================

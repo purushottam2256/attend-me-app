@@ -8,27 +8,34 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-nati
 import { useColors } from '../../../hooks';
 import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive';
 
-// Filter options
-const YEARS = ['all', '1', '2', '3', '4'];
-const SECTIONS = ['all', 'A', 'B', 'C', 'D', 'E', 'F'];
-const PERIODS = ['all', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
-
 interface FilterBarProps {
   filterYear: string;
   filterSection: string;
   filterPeriod: string;
+  filterBatch: string;
+  availableYears: string[];
+  availableSections: string[];
+  availablePeriods: string[];
+  availableBatches: string[];
   onYearChange: (year: string) => void;
   onSectionChange: (section: string) => void;
   onPeriodChange: (period: string) => void;
+  onBatchChange: (batch: string) => void;
 }
 
 export const FilterBar: React.FC<FilterBarProps> = ({
   filterYear,
   filterSection,
   filterPeriod,
+  filterBatch,
+  availableYears,
+  availableSections,
+  availablePeriods,
+  availableBatches,
   onYearChange,
   onSectionChange,
   onPeriodChange,
+  onBatchChange,
 }) => {
   const colors = useColors();
 
@@ -74,9 +81,10 @@ export const FilterBar: React.FC<FilterBarProps> = ({
 
   return (
     <View style={styles.container}>
-      {renderFilterBox('Year', YEARS, filterYear, onYearChange)}
-      {renderFilterBox('Section', SECTIONS, filterSection, onSectionChange)}
-      {renderFilterBox('Period', PERIODS, filterPeriod, onPeriodChange)}
+      {availableYears.length > 1 && renderFilterBox('Year', availableYears, filterYear, onYearChange)}
+      {availableSections.length > 1 && renderFilterBox('Section', availableSections, filterSection, onSectionChange)}
+      {availablePeriods.length > 1 && renderFilterBox('Period', availablePeriods, filterPeriod, onPeriodChange)}
+      {availableBatches.length > 1 && renderFilterBox('Batch', availableBatches, filterBatch, onBatchChange, (val) => val === 'all' ? 'All Batches' : `Batch ${val}`)}
     </View>
   );
 };

@@ -62,10 +62,11 @@ export const HistoryScreen: React.FC = () => {
   const [editSession, setEditSession] = useState<AttendanceSession | null>(null);
   const [editStudents, setEditStudents] = useState<any[]>([]);
 
-  // Filter state for year, section, and period
+  // Filter state for year, section, period, and batch
   const [filterYear, setFilterYear] = useState<string>('all');
   const [filterSection, setFilterSection] = useState<string>('all');
   const [filterPeriod, setFilterPeriod] = useState<string>('all');
+  const [filterBatch, setFilterBatch] = useState<string>('all');
   const [showFilters, setShowFilters] = useState(false);
   const [isOfflineData, setIsOfflineData] = useState(false);
 
@@ -812,6 +813,27 @@ export const HistoryScreen: React.FC = () => {
     </Modal>
   );
 
+  // Dynamically extract available filter options from current sessions
+  const availableYears = React.useMemo(() => {
+    const years = Array.from(new Set(sessions.map(s => String(s.target_year)))).filter(y => y !== 'undefined' && y !== 'null' && y !== '0');
+    return ['all', ...years.sort()];
+  }, [sessions]);
+
+  const availableSections = React.useMemo(() => {
+    const sections = Array.from(new Set(sessions.map(s => s.target_section))).filter(Boolean);
+    return ['all', ...sections.sort()];
+  }, [sessions]);
+
+  const availablePeriods = React.useMemo(() => {
+    const periods = Array.from(new Set(sessions.map(s => s.slot_id?.toUpperCase()))).filter(Boolean);
+    return ['all', ...periods.sort()];
+  }, [sessions]);
+
+  const availableBatches = React.useMemo(() => {
+    const batches = Array.from(new Set(sessions.map(s => s.batch ? String(s.batch) : null))).filter(Boolean) as string[];
+    return batches.length > 0 ? ['all', ...batches.sort()] : ['all'];
+  }, [sessions]);
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header Gradient */}
@@ -857,9 +879,15 @@ export const HistoryScreen: React.FC = () => {
           filterYear={filterYear}
           filterSection={filterSection}
           filterPeriod={filterPeriod}
+          filterBatch={filterBatch}
+          availableYears={availableYears}
+          availableSections={availableSections}
+          availablePeriods={availablePeriods}
+          availableBatches={availableBatches}
           onYearChange={setFilterYear}
           onSectionChange={setFilterSection}
           onPeriodChange={setFilterPeriod}
+          onBatchChange={setFilterBatch}
         />
       )}
       <ScrollView
@@ -885,7 +913,11 @@ export const HistoryScreen: React.FC = () => {
               const sectionMatch = filterSection === 'all' || session.target_section === filterSection;
               // Match period like P1, P2 etc (slot_id format: p1, p2...)
               const periodMatch = filterPeriod === 'all' || session.slot_id?.toUpperCase() === filterPeriod;
-              return yearMatch && sectionMatch && periodMatch;
+              // Match batch filter
+              const sessionBatch = session.batch ? String(session.batch) : 'all';
+              const batchMatch = filterBatch === 'all' || sessionBatch === filterBatch;
+
+              return yearMatch && sectionMatch && periodMatch && batchMatch;
             })
             .map((session, index) => renderSessionCard(session, index))
         ) : (

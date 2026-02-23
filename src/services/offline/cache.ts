@@ -24,7 +24,8 @@ const log = createLogger('OfflineCache');
  * of the JS event queue, letting any pending UI work run first.
  */
 function yieldToUI(): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, 0));
+  // Use a 20ms macroscopic timeout to reliably break the JS microtask queue on Hermes
+  return new Promise(resolve => setTimeout(resolve, 20));
 }
 
 // ============================================================================
