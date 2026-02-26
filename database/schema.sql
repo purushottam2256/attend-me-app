@@ -164,7 +164,6 @@ CREATE TABLE public.students (
     section TEXT NOT NULL,
     batch INTEGER CHECK (batch IN (1, 2)), -- For lab sessions
     bluetooth_uuid TEXT UNIQUE, -- Beacon UUID
-    face_id_data TEXT, -- Encrypted face recognition data
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),

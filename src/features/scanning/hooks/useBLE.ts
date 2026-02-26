@@ -7,6 +7,11 @@
  * - Student device detection with auto-marking
  * - Scan timeout protection
  * - Proper cleanup on unmount/blur
+ * 
+ * FIX LOG:
+ * - Stabilized startBLEScan reference to prevent scan restart loops
+ * - Fixed stale closure in enabled effect using refs
+ * - Moved useEffect order so functions are defined before usage
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -69,9 +74,19 @@ export const useBLE = ({
   
   const stopScanRef = useRef<(() => void) | null>(null);
   const detectedUUIDsRef = useRef<Set<string>>(new Set());
-  const isStartingRef = useRef(false); // Prevent concurrent start attempts
+  const isStartingRef = useRef(false);
   
-  // Create UUID to student ID map
+  // === FIX: Use refs to hold latest values for stable callbacks ===
+  const studentsRef = useRef(students);
+  const onStudentDetectedRef = useRef(onStudentDetected);
+  const scanTimeoutRef = useRef(scanTimeout);
+  
+  // Keep refs in sync
+  useEffect(() => { studentsRef.current = students; }, [students]);
+  useEffect(() => { onStudentDetectedRef.current = onStudentDetected; }, [onStudentDetected]);
+  useEffect(() => { scanTimeoutRef.current = scanTimeout; }, [scanTimeout]);
+  
+  // UUID to student mapping (ref-based, no re-render on change)
   const uuidToStudentMap = useRef<Map<string, string>>(new Map());
   const studentsWithUUIDRef = useRef(0);
   
@@ -86,7 +101,6 @@ export const useBLE = ({
         map.set(normalizedUUID, student.id);
         countWithUUID++;
         
-        // Log first 5 mappings for debugging
         if (countWithUUID <= 5) {
           console.log('[useBLE] Mapping UUID:', normalizedUUID.substring(0, 12) + '...', '→ Student:', student.name);
         }
@@ -103,50 +117,6 @@ export const useBLE = ({
     }
     console.log('[useBLE] ==========================================');
   }, [students]);
-  
-  // Initialize BLE and listen for state changes with auto-resume
-  useEffect(() => {
-    if (!enabled) return;
-    
-    initBLE();
-    let previousState: BLEState = 'unknown';
-    
-    // Get initial state
-    getBLEState().then(state => {
-      console.log('[useBLE] Initial BLE state:', state);
-      setBLEState(state);
-      previousState = state;
-    });
-    
-    // Subscribe to state changes with auto-resume
-    const unsubscribe = onBLEStateChange((state) => {
-      console.log('[useBLE] BLE state changed:', previousState, '→', state);
-      setBLEState(state);
-      
-      // Auto-resume: if Bluetooth was off and is now on, restart scan
-      if (previousState === 'off' && state === 'on') {
-        console.log('[useBLE] 🔄 Bluetooth enabled! Auto-resuming scan...');
-        setError(null); // Clear any previous errors
-        
-        // Small delay to let BLE fully initialize
-        setTimeout(() => {
-          if (!isScanningActive()) {
-            console.log('[useBLE] Starting scan after BLE enabled...');
-            startBLEScan().catch(err => {
-              console.error('[useBLE] Auto-resume failed:', err);
-            });
-          }
-        }, 500);
-      }
-      
-      previousState = state;
-    });
-    
-    return () => {
-      unsubscribe();
-      stopScanning();
-    };
-  }, [enabled, startBLEScan]);
   
   // Request permissions
   const requestPermissions = useCallback(async (): Promise<boolean> => {
@@ -168,7 +138,7 @@ export const useBLE = ({
     }
   }, []);
   
-  // Handle detected device
+  // === FIX: Stable handleDeviceDetected that reads from refs ===
   const handleDeviceDetected = useCallback((device: DetectedStudent) => {
     const uuid = normalizeUUID(device.uuid);
     
@@ -201,19 +171,18 @@ export const useBLE = ({
       // Haptic feedback
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       
-      // Notify parent
-      onStudentDetected(studentId);
+      // Notify parent (use ref for latest callback)
+      onStudentDetectedRef.current(studentId);
     } else {
       console.log('[useBLE] ❌ No match for UUID:', uuid.substring(0, 12) + '...');
-      // Show first few available UUIDs for debugging
       const availableUUIDs = Array.from(uuidToStudentMap.current.keys()).slice(0, 3);
       if (availableUUIDs.length > 0) {
         console.log('[useBLE] Available UUIDs (first 3):', availableUUIDs.map(u => u.substring(0, 12) + '...'));
       }
     }
-  }, [onStudentDetected]);
+  }, []); // === FIX: Empty deps — uses refs internally, never gets stale ===
   
-  // Start scanning
+  // === FIX: Stable startBLEScan that reads students from ref ===
   const startBLEScan = useCallback(async () => {
     // Guard: prevent concurrent starts
     if (isStartingRef.current) {
@@ -243,8 +212,9 @@ export const useBLE = ({
       setDetectedCount(0);
       setError(null);
       
-      // Get student UUIDs for filtering
-      const studentUUIDs = students
+      // === FIX: Read students from ref — no dependency on students array ===
+      const currentStudents = studentsRef.current;
+      const studentUUIDs = currentStudents
         .filter(s => s.bluetooth_uuid)
         .map(s => s.bluetooth_uuid!);
       
@@ -258,7 +228,7 @@ export const useBLE = ({
       
       // Start scanning with timeout
       const stop = startScanning(handleDeviceDetected, studentUUIDs, {
-        timeout: scanTimeout,
+        timeout: scanTimeoutRef.current,
         onTimeout: () => {
           console.log('[useBLE] ⏰ Scan timed out');
           setIsScanning(false);
@@ -276,7 +246,7 @@ export const useBLE = ({
     } finally {
       isStartingRef.current = false;
     }
-  }, [students, handleDeviceDetected, scanTimeout]);
+  }, [handleDeviceDetected]); // === FIX: Only depends on stable handleDeviceDetected ===
   
   // Stop scanning
   const stopBLEScan = useCallback(() => {
@@ -294,6 +264,49 @@ export const useBLE = ({
     console.log('[useBLE] Scan stopped');
   }, []);
   
+  // Initialize BLE and listen for state changes with auto-resume
+  useEffect(() => {
+    if (!enabled) return;
+    
+    initBLE();
+    let previousState: BLEState = 'unknown';
+    
+    // Get initial state
+    getBLEState().then(state => {
+      console.log('[useBLE] Initial BLE state:', state);
+      setBLEState(state);
+      previousState = state;
+    });
+    
+    // Subscribe to state changes with auto-resume
+    const unsubscribe = onBLEStateChange((state) => {
+      console.log('[useBLE] BLE state changed:', previousState, '→', state);
+      setBLEState(state);
+      
+      // Auto-resume: if Bluetooth was off and is now on, restart scan
+      if (previousState === 'off' && state === 'on') {
+        console.log('[useBLE] 🔄 Bluetooth enabled! Auto-resuming scan...');
+        setError(null);
+        
+        setTimeout(() => {
+          if (!isScanningActive()) {
+            console.log('[useBLE] Starting scan after BLE enabled...');
+            startBLEScan().catch(err => {
+              console.error('[useBLE] Auto-resume failed:', err);
+            });
+          }
+        }, 500);
+      }
+      
+      previousState = state;
+    });
+    
+    return () => {
+      unsubscribe();
+      stopScanning();
+    };
+  }, [enabled, startBLEScan]); // Safe now because startBLEScan is stable
+  
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -302,10 +315,9 @@ export const useBLE = ({
     };
   }, [stopBLEScan]);
   
-  // React to enabled changes (play/pause toggle)
+  // === FIX: React to enabled changes with stable refs ===
   useEffect(() => {
     if (enabled) {
-      // When enabled (play), request permissions then start scanning
       console.log('[useBLE] Enabled=true - requesting permissions then scan');
       requestBLEPermissions().then((granted) => {
         setPermissionsGranted(granted);
@@ -318,11 +330,10 @@ export const useBLE = ({
         }
       });
     } else {
-      // When disabled (pause), stop scanning immediately
       console.log('[useBLE] Enabled=false - stopping scan');
       stopBLEScan();
     }
-  }, [enabled]); // Intentionally not including other deps to avoid loops
+  }, [enabled, startBLEScan, stopBLEScan]); // === FIX: Safe deps — all stable ===
   
   return {
     bleState,
