@@ -219,7 +219,14 @@ export const startScanning = (
         // Log ALL devices for debugging (first time only)
         if (!detectedDeviceIds.has(deviceId)) {
           detectedDeviceIds.add(deviceId);
-          // Removed verbose logging for performance
+          if (BLE_CONFIG.VERBOSE_LOGGING) {
+            log.debug('📱 Device found:', {
+              id: deviceId,
+              name: deviceName || 'No Name',
+              rssi,
+              serviceUUIDs: serviceUUIDs.length > 0 ? serviceUUIDs : 'none',
+            });
+          }
         }
         
         // Check if any of the device's Service UUIDs match our student list

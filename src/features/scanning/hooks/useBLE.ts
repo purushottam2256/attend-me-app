@@ -104,7 +104,49 @@ export const useBLE = ({
     console.log('[useBLE] ==========================================');
   }, [students]);
   
-
+  // Initialize BLE and listen for state changes with auto-resume
+  useEffect(() => {
+    if (!enabled) return;
+    
+    initBLE();
+    let previousState: BLEState = 'unknown';
+    
+    // Get initial state
+    getBLEState().then(state => {
+      console.log('[useBLE] Initial BLE state:', state);
+      setBLEState(state);
+      previousState = state;
+    });
+    
+    // Subscribe to state changes with auto-resume
+    const unsubscribe = onBLEStateChange((state) => {
+      console.log('[useBLE] BLE state changed:', previousState, '→', state);
+      setBLEState(state);
+      
+      // Auto-resume: if Bluetooth was off and is now on, restart scan
+      if (previousState === 'off' && state === 'on') {
+        console.log('[useBLE] 🔄 Bluetooth enabled! Auto-resuming scan...');
+        setError(null); // Clear any previous errors
+        
+        // Small delay to let BLE fully initialize
+        setTimeout(() => {
+          if (!isScanningActive()) {
+            console.log('[useBLE] Starting scan after BLE enabled...');
+            startBLEScan().catch(err => {
+              console.error('[useBLE] Auto-resume failed:', err);
+            });
+          }
+        }, 500);
+      }
+      
+      previousState = state;
+    });
+    
+    return () => {
+      unsubscribe();
+      stopScanning();
+    };
+  }, [enabled, startBLEScan]);
   
   // Request permissions
   const requestPermissions = useCallback(async (): Promise<boolean> => {
@@ -130,7 +172,11 @@ export const useBLE = ({
   const handleDeviceDetected = useCallback((device: DetectedStudent) => {
     const uuid = normalizeUUID(device.uuid);
     
-    // Removed verbose logging
+    console.log('[useBLE] Device callback:', { 
+      uuid: uuid.substring(0, 12) + '...', 
+      name: device.deviceName, 
+      rssi: device.rssi 
+    });
     
     // Check if already detected
     if (detectedUUIDsRef.current.has(uuid)) {
@@ -248,50 +294,6 @@ export const useBLE = ({
     console.log('[useBLE] Scan stopped');
   }, []);
   
-  // Initialize BLE and listen for state changes with auto-resume
-  useEffect(() => {
-    if (!enabled) return;
-    
-    initBLE();
-    let previousState: BLEState = 'unknown';
-    
-    // Get initial state
-    getBLEState().then(state => {
-      console.log('[useBLE] Initial BLE state:', state);
-      setBLEState(state);
-      previousState = state;
-    });
-    
-    // Subscribe to state changes with auto-resume
-    const unsubscribe = onBLEStateChange((state) => {
-      console.log('[useBLE] BLE state changed:', previousState, '→', state);
-      setBLEState(state);
-      
-      // Auto-resume: if Bluetooth was off and is now on, restart scan
-      if (previousState === 'off' && state === 'on') {
-        console.log('[useBLE] 🔄 Bluetooth enabled! Auto-resuming scan...');
-        setError(null); // Clear any previous errors
-        
-        // Small delay to let BLE fully initialize
-        setTimeout(() => {
-          if (!isScanningActive()) {
-            console.log('[useBLE] Starting scan after BLE enabled...');
-            startBLEScan().catch(err => {
-              console.error('[useBLE] Auto-resume failed:', err);
-            });
-          }
-        }, 500);
-      }
-      
-      previousState = state;
-    });
-    
-    return () => {
-      unsubscribe();
-      stopScanning();
-    };
-  }, [enabled, startBLEScan]);
-
   // Cleanup on unmount
   useEffect(() => {
     return () => {
