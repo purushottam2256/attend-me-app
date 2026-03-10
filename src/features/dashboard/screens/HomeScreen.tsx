@@ -8,7 +8,17 @@ import {
   RefreshControl,
   ActivityIndicator,
   Image,
+  LayoutAnimation,
+  Platform,
+  UIManager,
 } from 'react-native';
+
+if (
+  Platform.OS === 'android' &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,7 +27,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../../contexts';
-import { Colors } from '../../../constants';
+import { Colors, Fonts } from '../../../constants';
 import { 
   getTodaySchedule, 
   TimetableSlot, 
@@ -169,9 +179,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
         const sameTarget = current.target_dept === next.target_dept &&
                           current.target_year === next.target_year &&
                           current.target_section === next.target_section;
-        const consecutive = current.end_time === next.start_time;
+        // Normalize to HH:mm for comparison (handles HH:mm vs HH:mm:ss)
+        const consecutiveCheck = current.end_time?.slice(0, 5) === next.start_time?.slice(0, 5);
         
-        if (sameSubject && sameTarget && consecutive) {
+        if (sameSubject && sameTarget && consecutiveCheck) {
           periodCount++;
           current.end_time = next.end_time; // Extend end time
           originalSlotIds.push(next.slot_id);
@@ -200,7 +211,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
       return;
     }
     
-    if (holiday && holiday.type === 'holiday') {
+    if (holiday && ['holiday', 'event', 'exam'].includes(holiday.type)) {
       setHeroState('HOLIDAY');
       return;
     }
@@ -258,6 +269,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
         if (cached) {
           const { data, timestamp } = JSON.parse(cached);
           if (Date.now() - timestamp < 5 * 60 * 1000) {
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
             setSchedule(data);
             determineHeroState(data);
           }
@@ -272,10 +284,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
           const age = await getCacheAge('todaySchedule');
           setCacheAge(age);
           setIsOfflineData(true);
+          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
           setSchedule(cachedSchedule as ScheduleSlot[]);
           determineHeroState(cachedSchedule as ScheduleSlot[]);
           return;
         } else {
+          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
           setHeroState('NO_CLASSES');
           setIsOfflineData(true);
           return;
@@ -380,15 +394,18 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
       // Merge consecutive same-subject classes
       const mergedClasses = mergeConsecutiveClasses(allClasses);
       
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setSchedule(mergedClasses);
       determineHeroState(mergedClasses);
       
       // Schedule Reminders (Professional Feature)
       try {
           const NOTIF_PREF_KEY = '@attend_me/notifications_enabled';
-          let notificationsEnabled = false;
-
+          
           // 1. Get preference (Online or Offline)
+          let notificationsEnabled = true;
+          let remindersPaused = false;
+          
           if (connectionStatus === 'online') {
               const { data: profile } = await supabase
                 .from('profiles')
@@ -396,16 +413,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
                 .eq('id', user.id)
                 .single();
               
-              notificationsEnabled = profile?.notifications_enabled ?? false;
-              // Cache it
+              notificationsEnabled = profile?.notifications_enabled ?? true;
               await AsyncStorage.setItem(NOTIF_PREF_KEY, JSON.stringify(notificationsEnabled));
           } else {
-              // Load from cache
               const cachedPref = await AsyncStorage.getItem(NOTIF_PREF_KEY);
-              notificationsEnabled = cachedPref ? JSON.parse(cachedPref) : false;
+              notificationsEnabled = cachedPref ? JSON.parse(cachedPref) : true;
           }
 
-          if (notificationsEnabled) {
+          const pausedStr = await AsyncStorage.getItem('@attend_me/reminders_paused');
+          remindersPaused = pausedStr === 'true';
+
+          if (notificationsEnabled && !remindersPaused) {
              // 2. Cancel only CLASS reminders (preserve event reminders)
              await NotificationService.cancelClassReminders();
              
@@ -813,26 +831,44 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
           </View>
         );
 
-      case 'HOLIDAY':
+      case 'HOLIDAY': {
+        let iconName: any = "calendar";
+        let colorKey = "#F59E0B"; // Amber
+        let bgKey = isDark ? "rgba(245, 158, 11, 0.1)" : "#FEF3C7";
+        let defaultTitle = "Holiday";
+
+        if (holiday?.type === "event") {
+          iconName = "star";
+          colorKey = "#8B5CF6"; // Purple
+          bgKey = isDark ? "rgba(139, 92, 246, 0.1)" : "#EDE9FE";
+          defaultTitle = "Event Today";
+        } else if (holiday?.type === "exam") {
+          iconName = "document-text";
+          colorKey = "#EF4444"; // Red
+          bgKey = isDark ? "rgba(239, 68, 68, 0.1)" : "#FEE2E2";
+          defaultTitle = "Exam Schedule";
+        }
+
         return (
           <View style={[styles.heroCard, { backgroundColor: isDark ? '#082020' : '#FFFFFF' }]}>
              <View style={{ alignItems: 'center', justifyContent: 'center', padding: 20 }}>
                 <View style={{ 
                   width: 80, height: 80, borderRadius: 40, 
-                  backgroundColor: isDark ? 'rgba(245, 158, 11, 0.1)' : '#FEF3C7',
+                  backgroundColor: bgKey,
                   alignItems: 'center', justifyContent: 'center', marginBottom: 16
                 }}>
-                  <Ionicons name="calendar" size={40} color="#F59E0B" />
+                  <Ionicons name={iconName} size={40} color={colorKey} />
                 </View>
                 <Text style={[styles.doneTitle, { color: isDark ? '#FFFFFF' : '#0F172A', textAlign: 'center' }]}>
-                  {holiday?.title || 'Holiday'}
+                  {holiday?.title || defaultTitle}
                 </Text>
                 <Text style={[styles.doneSubtitle, { color: isDark ? 'rgba(255,255,255,0.7)' : '#64748B', textAlign: 'center', marginTop: 8, maxWidth: '80%' }]}>
-                  {holiday?.description || 'No classes scheduled for today.'}
+                  {holiday?.description || 'No regular classes scheduled for today.'}
                 </Text>
              </View>
           </View>
         );
+      }
     }
   };
 
@@ -899,7 +935,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
             
             <View style={styles.scheduleMetaRow}>
               <Text style={[styles.scheduleSectionText, { color: isDark ? 'rgba(255,255,255,0.6)' : '#64748B' }]}>
-                {slot.target_dept} • Year {slot.target_year} • {slot.target_section}{slot.batch ? ` • B${slot.batch}` : ''}
+                {slot.target_dept} • Year {slot.target_year} • {slot.target_section}{slot.batch ? ` • B${slot.batch}` : ''}{slot.room ? ` • ${slot.room}` : ''}
               </Text>
             </View>
             
@@ -1104,16 +1140,16 @@ const styles = StyleSheet.create({
   avatarText: {
     color: '#FFFFFF',
     fontSize: normalizeFont(17),
-    fontWeight: '700',
+    fontFamily: Fonts.family.bold,
   },
   greeting: {
     fontSize: normalizeFont(13),
-    fontWeight: '500',
+    fontFamily: Fonts.family.medium,
     color: 'rgba(255, 255, 255, 0.6)',
   },
   userName: {
     fontSize: normalizeFont(22),
-    fontWeight: '700',
+    fontFamily: Fonts.family.bold,
     color: '#FFFFFF',
     letterSpacing: -0.5,
   },
@@ -1135,7 +1171,7 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: normalizeFont(12),
-    fontWeight: '600',
+    fontFamily: Fonts.family.semiBold,
     color: 'rgba(255, 255, 255, 0.8)',
   },
   iconButton: {
@@ -1175,7 +1211,7 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: normalizeFont(20),
-    fontWeight: '700',
+    fontFamily: Fonts.family.bold,
   },
   emptySubtitle: {
     fontSize: normalizeFont(14),
@@ -1229,7 +1265,7 @@ const styles = StyleSheet.create({
   liveText: {
     color: '#10B981',
     fontSize: normalizeFont(12),
-    fontWeight: '700',
+    fontFamily: Fonts.family.bold,
     letterSpacing: 0.8,
   },
   heroContent: {
@@ -1237,7 +1273,7 @@ const styles = StyleSheet.create({
   },
   heroSubject: {
     fontSize: normalizeFont(24),
-    fontWeight: '700',
+    fontFamily: Fonts.family.bold,
     color: '#FFFFFF',
     letterSpacing: -0.3,
     marginBottom: verticalScale(4),
@@ -1254,7 +1290,7 @@ const styles = StyleSheet.create({
   },
   timeText: {
     fontSize: normalizeFont(12),
-    fontWeight: '600',
+    fontFamily: Fonts.family.semiBold,
     color: 'rgba(255,255,255,0.6)',
   },
   progressBar: {
@@ -1312,7 +1348,7 @@ const styles = StyleSheet.create({
   },
   breakBadgeText: {
     fontSize: normalizeFont(13),
-    fontWeight: '600',
+    fontFamily: Fonts.family.semiBold,
     color: '#F59E0B',
   },
   countdown: {
@@ -1324,7 +1360,7 @@ const styles = StyleSheet.create({
   },
   countdownValue: {
     fontSize: normalizeFont(24),
-    fontWeight: '700',
+    fontFamily: Fonts.family.bold,
     color: '#FFFFFF',
   },
   countdownUnit: {
@@ -1335,12 +1371,12 @@ const styles = StyleSheet.create({
   breakContent: {},
   breakLabel: {
     fontSize: normalizeFont(12),
-    fontWeight: '500',
+    fontFamily: Fonts.family.medium,
     marginBottom: verticalScale(4),
   },
   breakSubject: {
     fontSize: normalizeFont(22),
-    fontWeight: '700',
+    fontFamily: Fonts.family.bold,
     letterSpacing: -0.3,
     marginBottom: verticalScale(2),
   },
@@ -1358,7 +1394,7 @@ const styles = StyleSheet.create({
   },
   breakScanText: {
     fontSize: normalizeFont(14),
-    fontWeight: '600',
+    fontFamily: Fonts.family.semiBold,
   },
   liveInnerCard: {
     borderRadius: moderateScale(16),
@@ -1379,7 +1415,7 @@ const styles = StyleSheet.create({
   },
   doneTitle: {
     fontSize: normalizeFont(22),
-    fontWeight: '700',
+    fontFamily: Fonts.family.bold,
     color: '#FFFFFF',
     marginTop: verticalScale(12),
   },
@@ -1401,7 +1437,7 @@ const styles = StyleSheet.create({
   },
   doneScanText: {
     fontSize: normalizeFont(14),
-    fontWeight: '600',
+    fontFamily: Fonts.family.semiBold,
     color: '#FFFFFF',
   },
   scheduleSection: {
@@ -1415,13 +1451,13 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: normalizeFont(20),
-    fontWeight: '700',
+    fontFamily: Fonts.family.bold,
     color: '#FFFFFF',
     letterSpacing: -0.3,
   },
   scheduleCount: {
     fontSize: normalizeFont(14),
-    fontWeight: '500',
+    fontFamily: Fonts.family.medium,
     color: 'rgba(255, 255, 255, 0.5)',
   },
   scheduleContainer: {
@@ -1469,11 +1505,11 @@ const styles = StyleSheet.create({
   },
   timeStart: {
     fontSize: normalizeFont(16),
-    fontWeight: '700',
+    fontFamily: Fonts.family.bold,
   },
   timeEnd: {
     fontSize: normalizeFont(12),
-    fontWeight: '500',
+    fontFamily: Fonts.family.medium,
     marginTop: verticalScale(2),
   },
   scheduleInfo: {
@@ -1482,7 +1518,7 @@ const styles = StyleSheet.create({
   },
   scheduleSubject: {
     fontSize: normalizeFont(16),
-    fontWeight: '700',
+    fontFamily: Fonts.family.bold,
     marginBottom: verticalScale(4),
     letterSpacing: -0.2,
   },
@@ -1501,7 +1537,7 @@ const styles = StyleSheet.create({
   },
   statusBadgeText: {
     fontSize: normalizeFont(11),
-    fontWeight: '600',
+    fontFamily: Fonts.family.semiBold,
   },
   scheduleMetaRow: {
     flexDirection: 'row',
@@ -1510,7 +1546,7 @@ const styles = StyleSheet.create({
   },
   scheduleSectionText: {
     fontSize: normalizeFont(13),
-    fontWeight: '500',
+    fontFamily: Fonts.family.medium,
   },
   tagsRow: {
     flexDirection: 'row',
@@ -1535,7 +1571,7 @@ const styles = StyleSheet.create({
   },
   swapBadgeText: {
     fontSize: normalizeFont(10),
-    fontWeight: '700',
+    fontFamily: Fonts.family.bold,
     color: '#8B5CF6',
     letterSpacing: 0.5,
   },
@@ -1549,13 +1585,13 @@ const styles = StyleSheet.create({
   },
   subBadgeText: {
     fontSize: normalizeFont(10),
-    fontWeight: '700',
+    fontFamily: Fonts.family.bold,
     color: '#A78BFA',
     letterSpacing: 0.5,
   },
   batchTagText: {
     fontSize: normalizeFont(11),
-    fontWeight: '600',
+    fontFamily: Fonts.family.semiBold,
     color: '#8B5CF6',
   },
   periodBadge: {
@@ -1568,7 +1604,7 @@ const styles = StyleSheet.create({
   },
   periodBadgeText: {
     fontSize: normalizeFont(10),
-    fontWeight: '700',
+    fontFamily: Fonts.family.bold,
     color: '#0D4A4A',
     letterSpacing: 0.3,
   },
@@ -1577,7 +1613,7 @@ const styles = StyleSheet.create({
   },
   actionHint: {
     fontSize: normalizeFont(10),
-    fontWeight: '600',
+    fontFamily: Fonts.family.semiBold,
   },
 });
 

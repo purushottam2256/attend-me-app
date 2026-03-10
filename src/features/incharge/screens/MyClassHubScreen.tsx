@@ -46,7 +46,7 @@ import { useTheme } from '../../../contexts';
 import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive';
 import { supabase } from '../../../config/supabase';
 import { getClassStudents, getWatchlist, getKeyPeriodAttendance, getAllPeriodAttendance, getClassTrends, getAssignedClass, getCurrentSemester, type StudentAggregate, type PeriodAttendance } from '../services/inchargeService';
-import { Colors } from '../../../constants';
+import { Colors, Fonts } from '../../../constants';
 import { cacheWatchlist, getCachedWatchlist, getCacheAge } from '../../../services/offlineService';
 import { useConnectionStatus } from '../../../hooks';
 
@@ -192,8 +192,9 @@ export const MyClassHubScreen: React.FC = () => {
           }
       }
 
-      return result;
-  }, [watchlist, searchQuery, filterMin, filterMax]);
+      // Sort by roll number for consistent display
+      return result.sort((a, b) => a.roll_no.localeCompare(b.roll_no, undefined, { numeric: true }));
+  }, [allStudents, watchlist, searchQuery, filterMin, filterMax]);
   
   const { status: connectionStatus } = useConnectionStatus();
   const connectionStatusRef = useRef(connectionStatus);
@@ -316,7 +317,7 @@ export const MyClassHubScreen: React.FC = () => {
 
     setLoadingAll(true);
     try {
-        const students = await getWatchlist(classInfo.dept, classInfo.year, classInfo.section, 101);
+        const students = await getClassStudents(classInfo.dept, classInfo.year, classInfo.section);
         setAllStudents(students);
     } catch (err) {
         console.error("Failed to load all students", err);
@@ -393,7 +394,7 @@ export const MyClassHubScreen: React.FC = () => {
     return (
       <View style={{ flex: 1, backgroundColor: isDark ? '#000' : '#F2F2F7', justifyContent: 'center', alignItems: 'center' }}>
           <PulsingDots size="large" color={colors.accent} />
-          <Text style={{ marginTop: verticalScale(20), color: colors.textSecondary, fontSize: normalizeFont(16), fontWeight: '500' }}>Loading Class Data...</Text>
+          <Text style={{ marginTop: verticalScale(20), color: colors.textSecondary, fontSize: normalizeFont(16), fontFamily: Fonts.family.medium }}>Loading Class Data...</Text>
       </View>
     );
   }
@@ -411,7 +412,7 @@ export const MyClassHubScreen: React.FC = () => {
             loadData();
           }}
         >
-          <Text style={{ color: '#fff', fontWeight: '600' }}>Retry</Text>
+          <Text style={{ color: '#fff', fontFamily: Fonts.family.semiBold }}>Retry</Text>
         </TouchableOpacity>
       </View>
     );
@@ -525,7 +526,7 @@ export const MyClassHubScreen: React.FC = () => {
                 onPress={handleViewPeriodStats}
             >
                 <Ionicons name="stats-chart" size={normalizeFont(16)} color={colors.accent} />
-                <Text style={{ fontSize: normalizeFont(13), fontWeight: '600', color: colors.textPrimary }}>View All Periods Attendance</Text>
+                <Text style={{ fontSize: normalizeFont(13), fontFamily: Fonts.family.semiBold, color: colors.textPrimary }}>View All Periods Attendance</Text>
             </TouchableOpacity>
         </View>
 
@@ -611,7 +612,7 @@ export const MyClassHubScreen: React.FC = () => {
                     </View>
                 </View>
                 <TouchableOpacity onPress={handleViewAll}>
-                  <Text style={{ color: colors.accent, fontSize: normalizeFont(15), fontWeight: '500' }}>See All</Text>
+                  <Text style={{ color: colors.accent, fontSize: normalizeFont(15), fontFamily: Fonts.family.medium }}>See All</Text>
                 </TouchableOpacity>
               </View>
 
@@ -649,7 +650,7 @@ export const MyClassHubScreen: React.FC = () => {
                    borderBottomColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' 
                }}>
                     <View>
-                        <Text style={{ fontSize: 22, fontWeight: '700', color: colors.textPrimary }}>Class Attendance</Text>
+                        <Text style={{ fontSize: 22, fontFamily: Fonts.family.bold, color: colors.textPrimary }}>Class Attendance</Text>
                         <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2 }}>
                             {semester ? `Semester ${semester}` : 'Current Semester'} • {filteredAllStudents.length} Students
                         </Text>
@@ -682,12 +683,12 @@ export const MyClassHubScreen: React.FC = () => {
 
                     {/* Percentage Range Filter */}
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: scale(12) }}>
-                         <Text style={{ color: colors.textSecondary, fontWeight: '600', fontSize: 13 }}>ATTENDANCE %</Text>
+                         <Text style={{ color: colors.textSecondary, fontFamily: Fonts.family.semiBold, fontSize: 13 }}>ATTENDANCE %</Text>
                          <View style={{ flex: 1, flexDirection: 'row', gap: 8 }}>
                              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', borderRadius: 8, paddingHorizontal: 10, height: 40 }}>
                                  <Text style={{ color: colors.textSecondary, marginRight: 4 }}>Min</Text>
                                  <TextInput 
-                                     style={{ flex: 1, color: colors.textPrimary, fontWeight: '600' }}
+                                     style={{ flex: 1, color: colors.textPrimary, fontFamily: Fonts.family.semiBold }}
                                      placeholder="0"
                                      placeholderTextColor={colors.textSecondary}
                                      keyboardType="numeric"
@@ -700,7 +701,7 @@ export const MyClassHubScreen: React.FC = () => {
                              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', borderRadius: 8, paddingHorizontal: 10, height: 40 }}>
                                  <Text style={{ color: colors.textSecondary, marginRight: 4 }}>Max</Text>
                                  <TextInput 
-                                     style={{ flex: 1, color: colors.textPrimary, fontWeight: '600' }}
+                                     style={{ flex: 1, color: colors.textPrimary, fontFamily: Fonts.family.semiBold }}
                                      placeholder="100"
                                      placeholderTextColor={colors.textSecondary}
                                      keyboardType="numeric"
@@ -759,11 +760,11 @@ export const MyClassHubScreen: React.FC = () => {
                                         backgroundColor: avatarBg, 
                                         alignItems: 'center', justifyContent: 'center', marginRight: 14 
                                     }}>
-                                        <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFF' }}>{initials}</Text>
+                                        <Text style={{ fontSize: 15, fontFamily: Fonts.family.bold, color: '#FFF' }}>{initials}</Text>
                                     </View>
 
                                     <View style={{ flex: 1 }}>
-                                        <Text style={{ fontWeight: '700', fontSize: 16, color: colors.textPrimary, marginBottom: 2 }}>
+                                        <Text style={{ fontFamily: Fonts.family.bold, fontSize: 16, color: colors.textPrimary, marginBottom: 2 }}>
                                             {item.full_name}
                                         </Text>
                                         <Text style={{ fontSize: 13, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', color: colors.textSecondary }}>
@@ -773,7 +774,7 @@ export const MyClassHubScreen: React.FC = () => {
 
                                     <View style={{ alignItems: 'flex-end', gap: 6 }}>
                                          <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: `${badgeColor}20` }}>
-                                             <Text style={{ fontSize: 11, fontWeight: '700', color: badgeColor }}>
+                                             <Text style={{ fontSize: 11, fontFamily: Fonts.family.bold, color: badgeColor }}>
                                                  {Math.round(item.attendance_percentage)}%
                                              </Text>
                                          </View>
@@ -809,7 +810,7 @@ export const MyClassHubScreen: React.FC = () => {
                     style={{ padding: 0 }}
                 >
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }}>
-                        <Text style={{ fontSize: 18, fontWeight: '700', color: isDark ? '#FFF' : '#000' }}>Period Attendance</Text>
+                        <Text style={{ fontSize: 18, fontFamily: Fonts.family.bold, color: isDark ? '#FFF' : '#000' }}>Period Attendance</Text>
                         <TouchableOpacity onPress={() => setShowPeriodModal(false)}>
                             <Ionicons name="close-circle" size={28} color={isDark ? 'rgba(255,255,255,0.7)' : '#666'} />
                         </TouchableOpacity>
@@ -840,7 +841,7 @@ export const MyClassHubScreen: React.FC = () => {
                                             borderRadius: 8,
                                             alignItems: 'center'
                                         }}>
-                                            <Text style={{ fontWeight: '700', color: isDark ? '#FFF' : '#333', fontSize: 13 }}>
+                                            <Text style={{ fontFamily: Fonts.family.bold, color: isDark ? '#FFF' : '#333', fontSize: 13 }}>
                                                 {item.slot_id.replace(/^p/i, 'P')}
                                             </Text>
                                         </View>
@@ -849,17 +850,17 @@ export const MyClassHubScreen: React.FC = () => {
                                     <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'center', gap: 16 }}>
                                         <View style={{ alignItems: 'center' }}>
                                             <Text style={{ fontSize: 11, color: isDark ? 'rgba(255,255,255,0.5)' : '#666', marginBottom: 2 }}>Present</Text>
-                                            <Text style={{ fontSize: 15, fontWeight: '700', color: Colors.premium.accent }}>{item.present_count}</Text>
+                                            <Text style={{ fontSize: 15, fontFamily: Fonts.family.bold, color: Colors.premium.accent }}>{item.present_count}</Text>
                                         </View>
                                         <View style={{ width: 1, height: 24, backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' }} />
                                         <View style={{ alignItems: 'center' }}>
                                             <Text style={{ fontSize: 11, color: isDark ? 'rgba(255,255,255,0.5)' : '#666', marginBottom: 2 }}>Total</Text>
-                                            <Text style={{ fontSize: 15, fontWeight: '700', color: isDark ? '#FFF' : '#333' }}>{item.total_count}</Text>
+                                            <Text style={{ fontSize: 15, fontFamily: Fonts.family.bold, color: isDark ? '#FFF' : '#333' }}>{item.total_count}</Text>
                                         </View>
                                     </View>
 
                                     <View style={{ width: 60, alignItems: 'flex-end' }}>
-                                        <Text style={{ fontSize: 16, fontWeight: '700', color: item.percentage < 75 ? Colors.premium.danger : Colors.premium.accent }}>
+                                        <Text style={{ fontSize: 16, fontFamily: Fonts.family.bold, color: item.percentage < 75 ? Colors.premium.danger : Colors.premium.accent }}>
                                             {item.percentage}%
                                         </Text>
                                     </View>
@@ -890,7 +891,7 @@ export const MyClassHubScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  loadingText: { marginTop: verticalScale(10), fontSize: normalizeFont(16), fontWeight: '500' },
+  loadingText: { marginTop: verticalScale(10), fontSize: normalizeFont(16), fontFamily: Fonts.family.medium },
   studentItem: {
       shadowColor: "#000", 
       shadowOffset: { width: 0, height: verticalScale(2) }, 
@@ -929,47 +930,47 @@ const styles = StyleSheet.create({
 
   // Header
   header: { paddingHorizontal: scale(20), marginBottom: verticalScale(10), flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  superTitle: { fontSize: normalizeFont(13), fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: verticalScale(4) },
+  superTitle: { fontSize: normalizeFont(13), fontFamily: Fonts.family.semiBold, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: verticalScale(4) },
   mainTitle: { fontSize: normalizeFont(34), fontWeight: '800', letterSpacing: -0.5 },
   profileBtn: { width: scale(40), height: scale(40), borderRadius: moderateScale(20), alignItems: 'center', justifyContent: 'center', shadowColor: "#000", shadowOffset: {width: 0, height: verticalScale(2)}, shadowOpacity: 0.1, shadowRadius: moderateScale(8), elevation: 2 },
 
   // Sections
   sectionContainer: { marginTop: verticalScale(24), paddingHorizontal: scale(20) },
   sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: verticalScale(16) },
-  sectionTitle: { fontSize: normalizeFont(20), fontWeight: '700', letterSpacing: -0.5 },
+  sectionTitle: { fontSize: normalizeFont(20), fontFamily: Fonts.family.bold, letterSpacing: -0.5 },
   
   // Filters
   filterRow: { flexDirection: 'row', gap: scale(8) },
   filterPill: { paddingHorizontal: scale(12), paddingVertical: verticalScale(6), borderRadius: moderateScale(20) },
-  filterText: { fontSize: normalizeFont(13), fontWeight: '600', textTransform: 'capitalize' },
+  filterText: { fontSize: normalizeFont(13), fontFamily: Fonts.family.semiBold, textTransform: 'capitalize' },
 
   // Action Cards
   actionGrid: { flexDirection: 'row', gap: scale(12) },
   actionCard: { flex: 1, padding: scale(20), borderRadius: moderateScale(20), shadowColor: "#000", shadowOffset: {width: 0, height: verticalScale(4)}, shadowOpacity: 0.05, shadowRadius: moderateScale(12), elevation: 2 },
   iconCircle: { width: scale(44), height: scale(44), borderRadius: moderateScale(22), alignItems: 'center', justifyContent: 'center', marginBottom: verticalScale(12) },
-  actionTitle: { fontSize: normalizeFont(16), fontWeight: '600', marginBottom: verticalScale(2) },
+  actionTitle: { fontSize: normalizeFont(16), fontFamily: Fonts.family.semiBold, marginBottom: verticalScale(2) },
   actionSubtitle: { fontSize: normalizeFont(13) },
 
   // Badge
   badge: { paddingHorizontal: scale(8), paddingVertical: verticalScale(2), borderRadius: moderateScale(8) },
-  badgeText: { fontSize: normalizeFont(12), fontWeight: '700' },
+  badgeText: { fontSize: normalizeFont(12), fontFamily: Fonts.family.bold },
 
   // Empty State
   emptyState: { padding: scale(40), borderRadius: moderateScale(20), alignItems: 'center', justifyContent: 'center', gap: scale(12) },
-  emptyText: { fontSize: normalizeFont(16), fontWeight: '500' },
+  emptyText: { fontSize: normalizeFont(16), fontFamily: Fonts.family.medium },
 
   // Modal
   modalContainer: { flex: 1 },
   modalHeader: { padding: scale(20), paddingTop: verticalScale(20), flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  modalTitle: { fontSize: normalizeFont(24), fontWeight: '700' },
+  modalTitle: { fontSize: normalizeFont(24), fontFamily: Fonts.family.bold },
   closeButton: { padding: scale(4) },
   searchContainer: { paddingHorizontal: scale(20), paddingBottom: verticalScale(16) },
   searchField: { flexDirection: 'row', alignItems: 'center', height: verticalScale(44), borderRadius: moderateScale(12), paddingHorizontal: scale(12), gap: scale(10) },
   input: { flex: 1, fontSize: normalizeFont(16) },
   studentRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: scale(16), marginBottom: verticalScale(8), borderRadius: moderateScale(12), marginHorizontal: scale(20) },
-  studentName: { fontSize: normalizeFont(16), fontWeight: '600' },
+  studentName: { fontSize: normalizeFont(16), fontFamily: Fonts.family.semiBold },
   studentRoll: { fontSize: normalizeFont(13), marginTop: verticalScale(2) },
-  studentPercent: { fontSize: normalizeFont(18), fontWeight: '700' },
+  studentPercent: { fontSize: normalizeFont(18), fontFamily: Fonts.family.bold },
   glassCard: {
     padding: scale(20),
     borderRadius: moderateScale(24),

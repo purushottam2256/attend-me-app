@@ -68,6 +68,7 @@ async function getAccessToken(serviceAccount: ServiceAccount): Promise<string> {
 // --- Main ---
 
 serve(async (req: Request) => {
+  try {
     // 1. Setup
     // @ts-ignore
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -77,8 +78,18 @@ serve(async (req: Request) => {
 
     // @ts-ignore
     const serviceAccountJson = Deno.env.get("FIREBASE_SERVICE_ACCOUNT");
-    if (!serviceAccountJson) return new Response("Missing FIREBASE_SERVICE_ACCOUNT", { status: 500 });
-    const serviceAccount = JSON.parse(serviceAccountJson);
+    if (!serviceAccountJson) {
+        console.error("Missing FIREBASE_SERVICE_ACCOUNT variable");
+        return new Response(JSON.stringify({ error: "Missing FIREBASE_SERVICE_ACCOUNT" }), { status: 500 });
+    }
+    
+    let serviceAccount;
+    try {
+        serviceAccount = JSON.parse(serviceAccountJson);
+    } catch (e) {
+        console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT JSON. Check if it is a valid JSON.", e);
+        return new Response(JSON.stringify({ error: "Invalid FIREBASE_SERVICE_ACCOUNT JSON format" }), { status: 500 });
+    }
 
     // 2. Determine Time Check
     // We want classes starting in 10 minutes. 
@@ -103,8 +114,8 @@ serve(async (req: Request) => {
     // Assuming DB stores 'HH:mm:ss' or 'HH:mm'
     // Let's broaden search slightly? or strict?
     // User asked for "10 min reminders". 
-    // Let's format target time strictly HH:mm (e.g., 09:30)
-    const timeStr = `${pad(targetTime.getHours())}:${pad(targetTime.getMinutes())}`; // '09:30' partial match
+    // Let's format target time strictly HH:mm:00 for strict match against TIME type
+    const timeStr = `${pad(targetTime.getHours())}:${pad(targetTime.getMinutes())}:00`; // '09:30:00' exact match
     
     // 3. Query Master Timetable
     // Need profiles joined for push_token
@@ -117,7 +128,7 @@ serve(async (req: Request) => {
         `)
         .eq('day', dayName)
         .eq('is_active', true)
-        .like('end_time', `${timeStr}%`); // Partial match for '09:30:00' (Checking END TIME now)
+        .eq('end_time', timeStr); // Must be strict eq() because 'like' (~~) fails on TIME types
 
     if (error) {
         return new Response(JSON.stringify({ error: error.message }), { status: 500 });
@@ -176,4 +187,8 @@ serve(async (req: Request) => {
         JSON.stringify({ success: true, processed: classes.length, results }),
         { status: 200, headers: { "Content-Type": "application/json" } }
     );
+  } catch (error) {
+    console.error("Fatal Error entirely crashing isolate:", error.message);
+    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { "Content-Type": "application/json" } });
+  }
 });

@@ -56,7 +56,12 @@ CREATE TYPE notification_type AS ENUM (
     'management_update',
     'exam_duty_reminder',
     'swap_request',
-    'swap_accepted'
+    'swap_accepted',
+    'broadcast',
+    'system',
+    'holiday',
+    'exam',
+    'event'
 );
 
 -- Notification priority
@@ -121,6 +126,16 @@ CREATE TABLE public.admins (
     dept TEXT, -- NULL for super admins
     password_hash TEXT, -- Managed by Supabase Auth, but we track here
     is_active BOOLEAN DEFAULT TRUE,
+    avatar_url TEXT,
+    phone TEXT,
+    designation TEXT,
+    joining_date DATE,
+    gender TEXT,
+    qualification TEXT,
+    experience_years INTEGER,
+    address TEXT,
+    date_of_birth DATE,
+    blood_group TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT valid_role CHECK (role IN ('hod', 'management', 'developer', 'principal'))
@@ -164,6 +179,7 @@ CREATE TABLE public.students (
     section TEXT NOT NULL,
     batch INTEGER CHECK (batch IN (1, 2)), -- For lab sessions
     bluetooth_uuid TEXT UNIQUE, -- Beacon UUID
+    face_id_data TEXT, -- Encrypted face recognition data
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
@@ -188,6 +204,11 @@ CREATE TABLE public.subjects (
     dept TEXT,
     year INTEGER,
     credits INTEGER,
+    acronym TEXT,                              -- Short keyword: SNA, COT, CAI
+    semester INTEGER,                          -- 1-8
+    regulation TEXT DEFAULT 'R22',             -- R22, R20 etc
+    is_lab BOOLEAN DEFAULT FALSE,
+    batch TEXT,                                -- NULL=all, B1, B2
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -195,6 +216,7 @@ CREATE TABLE public.subjects (
 -- Indexes
 CREATE INDEX idx_subjects_code ON public.subjects(code);
 CREATE INDEX idx_subjects_dept_year ON public.subjects(dept, year);
+CREATE INDEX idx_subjects_class_lookup ON public.subjects(dept, year, semester);
 
 -- ----------------------------------------------------------------------------
 -- 6. MASTER TIMETABLES
@@ -203,15 +225,24 @@ CREATE TABLE public.master_timetables (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     faculty_id UUID NOT NULL REFERENCES public.profiles(id),
     day TEXT NOT NULL CHECK (day IN ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday')),
+    day_of_week INTEGER,                      -- 1=Mon, 2=Tue ... 6=Sat
     slot_id TEXT NOT NULL, -- p1, p2, p3, p4, p5, p6, p7
+    period INTEGER,                           -- 1-7 (numeric period)
     start_time TIME NOT NULL,
     end_time TIME NOT NULL,
-    subject_id UUID NOT NULL REFERENCES public.subjects(id),
+    subject_id UUID NOT NULL REFERENCES public.subjects(id) ON DELETE CASCADE,
     target_dept TEXT NOT NULL,
+    dept TEXT,                                -- Alias for class-centric queries
     target_year INTEGER NOT NULL,
+    year INTEGER,                             -- Alias for class-centric queries
     target_section TEXT NOT NULL,
+    section TEXT,                             -- Alias for class-centric queries
     batch INTEGER, -- NULL for full class, 1 or 2 for lab batches
     room TEXT,
+    semester INTEGER,
+    regulation TEXT,
+    academic_year TEXT,                       -- 2025-2026
+    effect_date DATE,                         -- With effect from
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
@@ -222,25 +253,34 @@ CREATE TABLE public.master_timetables (
 CREATE INDEX idx_timetables_faculty ON public.master_timetables(faculty_id);
 CREATE INDEX idx_timetables_day_slot ON public.master_timetables(day, slot_id);
 CREATE INDEX idx_timetables_target ON public.master_timetables(target_dept, target_year, target_section);
+CREATE INDEX idx_timetables_class ON public.master_timetables(dept, year, section);
+CREATE INDEX idx_timetables_faculty_schedule ON public.master_timetables(faculty_id, day_of_week, period);
+
 
 -- ----------------------------------------------------------------------------
--- 7. ACADEMIC CALENDAR (Holidays & Exams)
+-- 7. HOLIDAYS
 -- ----------------------------------------------------------------------------
-CREATE TABLE public.academic_calendar (
+CREATE TABLE public.holidays (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     date DATE NOT NULL,
-    type TEXT NOT NULL CHECK (type IN ('holiday', 'exam', 'event')),
-    title TEXT NOT NULL,
+    name TEXT NOT NULL,
     description TEXT,
-    affects_periods TEXT[], -- NULL means all periods, or ['p1', 'p2'] for specific
-    created_by UUID REFERENCES public.admins(id),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    CONSTRAINT unique_date_type UNIQUE (date, type)
+    is_national BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Indexes
-CREATE INDEX idx_calendar_date ON public.academic_calendar(date);
-CREATE INDEX idx_calendar_type ON public.academic_calendar(type);
+CREATE INDEX idx_holidays_date ON public.holidays(date);
+
+ALTER TABLE public.holidays ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "holidays_read" ON public.holidays FOR SELECT USING (true);
+
+CREATE POLICY "holidays_manage" ON public.holidays FOR ALL USING (
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('hod', 'management', 'principal','developer'))
+);
+
+-- Note: Indian public holidays are auto-fetched from date.nager.at API.
+-- This table is for institution-specific custom holidays (e.g. college foundation day).
 
 -- ----------------------------------------------------------------------------
 -- 8. SUBSTITUTIONS
@@ -368,8 +408,12 @@ CREATE TABLE IF NOT EXISTS public.leaves (
     start_date TIMESTAMPTZ NOT NULL,
     end_date TIMESTAMPTZ NOT NULL,
     leave_type TEXT NOT NULL, -- 'full_day' | 'half_day'
-    status request_status DEFAULT 'pending',
+    status TEXT DEFAULT 'pending_hod' CHECK (status IN ('pending', 'pending_hod', 'pending_principal', 'approved', 'rejected', 'accepted', 'declined')),
     admin_comment TEXT,
+    approved_by_hod UUID REFERENCES public.profiles(id),
+    hod_approved_at TIMESTAMPTZ,
+    approved_by_principal UUID REFERENCES public.profiles(id),
+    principal_approved_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -502,6 +546,7 @@ CREATE INDEX idx_notifications_user ON public.notifications(user_id);
 CREATE INDEX idx_notifications_read ON public.notifications(is_read);
 CREATE INDEX idx_notifications_type ON public.notifications(type);
 CREATE INDEX idx_notifications_created ON public.notifications(created_at);
+CREATE INDEX idx_notifications_data_gin ON public.notifications USING gin(data);
 
 -- ----------------------------------------------------------------------------
 -- 15. APP CONFIG
@@ -533,7 +578,7 @@ CREATE TABLE public.class_incharges (
     section TEXT NOT NULL,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    CONSTRAINT unique_class_incharge UNIQUE (dept, year, section),
+    -- NOTE: unique_class_incharge removed to allow up to 2 incharges per class
     CONSTRAINT unique_faculty_assignment UNIQUE (faculty_id, dept, year, section)
 );
 
@@ -541,46 +586,70 @@ CREATE TABLE public.class_incharges (
 CREATE INDEX idx_class_incharges_faculty ON public.class_incharges(faculty_id);
 CREATE INDEX idx_class_incharges_class ON public.class_incharges(dept, year, section);
 
+-- ----------------------------------------------------------------------------
+-- 17. ISSUES / SUPPORT
+-- ----------------------------------------------------------------------------
+CREATE TABLE public.issues (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES public.profiles(id),
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    type TEXT CHECK (type IN ('bug', 'feature', 'support', 'other')) DEFAULT 'bug',
+    status TEXT CHECK (status IN ('open', 'in_progress', 'resolved', 'closed')) DEFAULT 'open',
+    priority TEXT CHECK (priority IN ('low', 'medium', 'high', 'critical')) DEFAULT 'medium',
+    resolution_note TEXT,
+    resolved_by UUID REFERENCES public.admins(id),
+    resolved_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes
+CREATE INDEX idx_issues_user ON public.issues(user_id);
+CREATE INDEX idx_issues_status ON public.issues(status);
+CREATE INDEX idx_issues_created ON public.issues(created_at);
+
+ALTER TABLE public.issues ENABLE ROW LEVEL SECURITY;
+
 -- ============================================================================
--- MATERIALIZED VIEWS (For Performance - Free Tier Compatible)
+-- VIEWS (For Performance - Free Tier Compatible)
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
--- Student Attendance Aggregates (Updates hourly 9 AM - 5 PM)
+-- Student Attendance Aggregates
 -- ----------------------------------------------------------------------------
-CREATE MATERIALIZED VIEW public.view_student_aggregates AS
-SELECT 
+CREATE OR REPLACE VIEW public.view_student_aggregates AS
+SELECT
     s.id AS student_id,
     s.roll_no,
     s.full_name,
     s.dept,
     s.section,
     s.year,
-    COUNT(DISTINCT als.id) FILTER (WHERE als.status = 'present' OR als.status = 'od') AS present_sessions,
-    COUNT(DISTINCT als.id) FILTER (WHERE als.status = 'absent') AS absent_sessions,
-    COUNT(DISTINCT als.id) FILTER (WHERE als.status = 'od') AS od_sessions,
-    COUNT(DISTINCT als.id) FILTER (WHERE als.status = 'leave') AS leave_sessions,
-    COUNT(DISTINCT als.id) AS total_sessions,
-    CASE 
-        WHEN COUNT(DISTINCT als.id) > 0 THEN
-            ROUND(
-                (COUNT(DISTINCT als.id) FILTER (WHERE als.status = 'present' OR als.status = 'od')::NUMERIC / 
-                 COUNT(DISTINCT als.id)::NUMERIC) * 100, 
-                2
-            )
-        ELSE 0
-    END AS attendance_percentage,
-    MAX(als.marked_at) AS last_attendance_date
-FROM public.students s
-LEFT JOIN public.attendance_logs als ON s.id = als.student_id
-LEFT JOIN public.attendance_sessions ass ON als.session_id = ass.id
-WHERE s.is_active = TRUE
-GROUP BY s.id, s.roll_no, s.full_name, s.dept, s.section, s.year;
+    COALESCE(agg.present_sessions, 0) AS present_sessions,
+    COALESCE(agg.absent_sessions, 0) AS absent_sessions,
+    COALESCE(agg.od_sessions, 0) AS od_sessions,
+    COALESCE(agg.total_sessions, 0) AS total_sessions,
+    CASE
+        WHEN COALESCE(agg.total_sessions, 0) = 0 THEN 0
+        ELSE ROUND(
+            (COALESCE(agg.present_sessions, 0)::NUMERIC / agg.total_sessions) * 100, 2
+        )
+    END AS attendance_percentage
+FROM students s
+LEFT JOIN (
+    SELECT
+        al.student_id,
+        COUNT(*) AS total_sessions,
+        COUNT(*) FILTER (WHERE al.status = 'present') AS present_sessions,
+        COUNT(*) FILTER (WHERE al.status = 'absent') AS absent_sessions,
+        COUNT(*) FILTER (WHERE al.status = 'od') AS od_sessions
+    FROM attendance_logs al
+    GROUP BY al.student_id
+) agg ON s.id = agg.student_id
+WHERE s.is_active = TRUE;
 
--- Indexes on materialized view
-CREATE UNIQUE INDEX idx_mv_student_aggregates_student_id ON public.view_student_aggregates(student_id);
-CREATE INDEX idx_mv_student_aggregates_dept_section ON public.view_student_aggregates(dept, section);
-CREATE INDEX idx_mv_student_aggregates_percentage ON public.view_student_aggregates(attendance_percentage);
+GRANT SELECT ON view_student_aggregates TO authenticated;
 
 -- ----------------------------------------------------------------------------
 -- Department Attendance Summary (Daily)
@@ -882,16 +951,151 @@ ALTER TABLE public.class_incharges ENABLE ROW LEVEL SECURITY;
 -- SECURITY DEFINER FUNCTIONS (Bypass RLS to avoid infinite recursion)
 -- ============================================================================
 
+-- Function to securely bypass RLS and create a profile on behalf of a new user
+-- Function to securely bypass RLS and create BOTH an auth.user and a profile instantly
+CREATE OR REPLACE FUNCTION public.admin_create_profile(
+    p_email TEXT,
+    p_password TEXT,
+    p_full_name TEXT,
+    p_role user_role,
+    p_dept TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    new_user_id UUID;
+    encrypted_pw TEXT;
+BEGIN
+    -- Only allow elevated roles or HODs to execute this
+    IF NOT public.is_elevated_role() AND NOT public.is_hod() THEN
+        RAISE EXCEPTION 'Unauthorized: only admins and HODs can provision profiles';
+    END IF;
+
+    -- If HOD, carefully ensure they aren't generating foreign department accounts
+    IF public.is_hod() AND p_dept != public.auth_user_dept() THEN
+        RAISE EXCEPTION 'Unauthorized: HODs can only provision faculty for their own department';
+    END IF;
+
+    -- Generate password hash
+    encrypted_pw := crypt(p_password, gen_salt('bf'));
+
+    -- Check if user already exists in auth.users (Orphan account from previous failed attempts)
+    SELECT id INTO new_user_id FROM auth.users WHERE email = p_email;
+
+    IF new_user_id IS NULL THEN
+        -- Generate ID
+        new_user_id := gen_random_uuid();
+
+        -- 1. Insert directly into auth.users to bypass email-confirmation delays
+        INSERT INTO auth.users (
+            instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, recovery_sent_at, last_sign_in_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at, confirmation_token, email_change, email_change_token_new, recovery_token
+        )
+        VALUES (
+            '00000000-0000-0000-0000-000000000000', new_user_id, 'authenticated', 'authenticated', p_email, encrypted_pw, NOW(), NOW(), NOW(), '{"provider":"email","providers":["email"]}', jsonb_build_object('full_name', p_full_name), NOW(), NOW(), '', '', '', ''
+        );
+        
+        -- 2. Insert into auth.identities
+        INSERT INTO auth.identities (
+            id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at, provider_id
+        )
+        VALUES (
+            gen_random_uuid(), new_user_id, format('{"sub":"%s","email":"%s"}', new_user_id::text, p_email)::jsonb, 'email', NOW(), NOW(), NOW(), new_user_id::text
+        );
+    ELSE
+        -- Update existing orphan user so the newly generated temporary password works
+        UPDATE auth.users 
+        SET encrypted_password = encrypted_pw,
+            raw_user_meta_data = jsonb_build_object('full_name', p_full_name),
+            email_confirmed_at = COALESCE(email_confirmed_at, NOW())
+        WHERE id = new_user_id;
+    END IF;
+
+    -- 3. Upsert into public.profiles
+    -- This guarantees that if the auth row was dangling, we finally create their profile
+    INSERT INTO public.profiles (id, email, full_name, role, dept)
+    VALUES (new_user_id, p_email, p_full_name, p_role, p_dept)
+    ON CONFLICT (id) DO UPDATE 
+    SET full_name = EXCLUDED.full_name,
+        role = EXCLUDED.role,
+        dept = EXCLUDED.dept;
+
+    RETURN jsonb_build_object('id', new_user_id, 'email', p_email);
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_create_profile(TEXT, TEXT, TEXT, user_role, TEXT) TO authenticated;
+
+-- Function to securely reset a faculty member's password
+CREATE OR REPLACE FUNCTION public.admin_update_faculty_password(
+    p_user_id UUID,
+    p_new_password TEXT
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    target_role TEXT;
+    target_dept TEXT;
+    encrypted_pw TEXT;
+BEGIN
+    -- Only allow elevated roles or HODs to execute this
+    IF NOT public.is_elevated_role() AND NOT public.is_hod() THEN
+        RAISE EXCEPTION 'Unauthorized: only admins and HODs can reset passwords';
+    END IF;
+
+    -- Fetch target user's role and dept from profiles
+    SELECT role::text, dept INTO target_role, target_dept
+    FROM public.profiles
+    WHERE id = p_user_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Target user profile not found';
+    END IF;
+
+    -- If HOD, carefully ensure they aren't modifying foreign department accounts
+    IF public.is_hod() THEN
+        IF target_dept != public.auth_user_dept() THEN
+            RAISE EXCEPTION 'Unauthorized: HODs can only modify faculty in their own department';
+        END IF;
+        IF target_role IN ('hod', 'principal', 'admin', 'management', 'developer') THEN
+            RAISE EXCEPTION 'Unauthorized: HODs cannot reset passwords for elevated roles';
+        END IF;
+    END IF;
+
+    -- Generate password hash
+    encrypted_pw := crypt(p_new_password, gen_salt('bf'));
+
+    -- Update the password in auth.users
+    UPDATE auth.users 
+    SET encrypted_password = encrypted_pw,
+        updated_at = NOW()
+    WHERE id = p_user_id;
+
+    RETURN TRUE;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_update_faculty_password(UUID, TEXT) TO authenticated;
+
+
+
 -- Function to get user's role (bypasses RLS)
 CREATE OR REPLACE FUNCTION public.auth_user_role()
 RETURNS TEXT AS $$
-  SELECT role::TEXT FROM public.profiles WHERE id = auth.uid()
+  SELECT COALESCE(
+    (SELECT role FROM public.admins WHERE id = auth.uid()),
+    (SELECT role::TEXT FROM public.profiles WHERE id = auth.uid())
+  );
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
 -- Function to get user's department (bypasses RLS)
 CREATE OR REPLACE FUNCTION public.auth_user_dept()
 RETURNS TEXT AS $$
-  SELECT dept FROM public.profiles WHERE id = auth.uid()
+  SELECT COALESCE(
+    (SELECT dept FROM public.admins WHERE id = auth.uid()),
+    (SELECT dept FROM public.profiles WHERE id = auth.uid())
+  );
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
 -- Function to get current user's email (bypasses auth.users access issues)
@@ -904,10 +1108,82 @@ AS $$
     SELECT email FROM auth.users WHERE id = auth.uid()
 $$;
 
+-- Is the current user an elevated role? (full access)
+CREATE OR REPLACE FUNCTION public.is_elevated_role()
+RETURNS BOOLEAN AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles WHERE id = auth.uid()
+    AND role::TEXT IN ('principal', 'management', 'developer')
+  )
+  OR EXISTS (
+    SELECT 1 FROM public.admins WHERE id = auth.uid()
+  )
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+-- Is the current user an HOD?
+CREATE OR REPLACE FUNCTION public.is_hod()
+RETURNS BOOLEAN AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role::TEXT = 'hod'
+  )
+  OR EXISTS (
+    SELECT 1 FROM public.admins WHERE id = auth.uid() AND role = 'hod'
+  )
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+-- Is the current user HOD of a specific dept?
+CREATE OR REPLACE FUNCTION public.is_hod_of(target_dept TEXT)
+RETURNS BOOLEAN AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND role::TEXT = 'hod' AND dept = target_dept
+  )
+  OR EXISTS (
+    SELECT 1 FROM public.admins
+    WHERE id = auth.uid() AND role = 'hod' AND dept = target_dept
+  )
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+-- Securely get admin role by email (Case Insensitive)
+CREATE OR REPLACE FUNCTION public.get_user_admin_role(check_email TEXT)
+RETURNS TEXT
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    found_role TEXT;
+BEGIN
+    SELECT role INTO found_role
+    FROM public.admins
+    WHERE email ILIKE check_email;
+    RETURN found_role;
+END;
+$$;
+
+-- Legacy helper (used by supabase_migration_v2 RBAC policies)
+CREATE OR REPLACE FUNCTION is_admin() RETURNS BOOLEAN AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM profiles
+    WHERE id = auth.uid()
+    AND role IN ('principal', 'management', 'developer')
+  );
+$$ LANGUAGE sql SECURITY DEFINER;
+
 -- Grant execute to all authenticated users
 GRANT EXECUTE ON FUNCTION public.get_my_email() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.auth_user_role() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.auth_user_dept() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_elevated_role() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_hod() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_hod_of(TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_user_admin_role(TEXT) TO authenticated;
+
+-- ============================================================================
+-- ADMINS RLS Policy
+-- ============================================================================
+CREATE POLICY "admins_read_own" ON public.admins
+    FOR SELECT TO authenticated
+    USING (email = auth.jwt() ->> 'email');
 
 -- ============================================================================
 -- PROFILES Policies
@@ -917,9 +1193,23 @@ CREATE POLICY "profiles_read_all" ON public.profiles
     FOR SELECT TO authenticated 
     USING (true);
 
--- Users can update their own profile
-CREATE POLICY "profiles_update" ON public.profiles 
-    FOR UPDATE USING (id = auth.uid());
+-- Users can update own profile; elevated can update any; HOD can update own dept
+CREATE POLICY "profiles_update" ON public.profiles
+  FOR UPDATE USING (
+    id = auth.uid()
+    OR public.is_elevated_role()
+    OR (public.is_hod() AND dept = public.auth_user_dept())
+  );
+
+-- Elevated can INSERT/DELETE profiles
+CREATE POLICY "profiles_insert_elevated" ON public.profiles
+  FOR INSERT WITH CHECK (public.is_elevated_role());
+CREATE POLICY "profiles_delete_elevated" ON public.profiles
+  FOR DELETE USING (public.is_elevated_role());
+
+-- Users can insert their own profile (used during initial welcome setup)
+CREATE POLICY "profiles_insert_own" ON public.profiles
+  FOR INSERT WITH CHECK (id = auth.uid());
 
 -- ============================================================================
 -- DEPARTMENTS Policies
@@ -932,45 +1222,60 @@ CREATE POLICY "departments_all" ON public.departments
 -- SUBJECTS Policies
 -- ============================================================================
 -- All authenticated can read
-CREATE POLICY "subjects_all" ON public.subjects 
+CREATE POLICY "subjects_all" ON public.subjects
+    FOR SELECT USING (auth.uid() IS NOT NULL);
+-- Elevated can manage all subjects
+CREATE POLICY "subjects_elevated_manage" ON public.subjects
+  FOR ALL USING (public.is_elevated_role());
+-- HOD can manage own dept subjects
+CREATE POLICY "subjects_hod_manage" ON public.subjects
+  FOR ALL USING (public.is_hod() AND dept = public.auth_user_dept());
+
+-- Indexes
+CREATE INDEX idx_subjects_code ON public.subjects(code);
+CREATE INDEX idx_subjects_dept ON public.subjects(dept);
+CREATE INDEX idx_subjects_semester ON public.subjects(semester);
+
+
+-- ============================================================================
+-- ACADEMIC_CALENDAR Policies
+-- ============================================================================
+-- All authenticated can read
+CREATE POLICY "calendar_all_read" ON public.academic_calendar 
     FOR SELECT USING (auth.uid() IS NOT NULL);
 
+-- HOD, Principal, Management, Admin, Developer can manage
+CREATE POLICY "calendar_manage" ON public.academic_calendar 
+    FOR ALL USING (public.auth_user_role() IN ('hod', 'principal', 'management', 'admin', 'developer'));
+
 -- ============================================================================
--- MASTER_TIMETABLES Policies
+-- MASTER_TIMETABLES Policies (class-centric, role-based)
 -- ============================================================================
--- Faculty can read their own
-CREATE POLICY "timetables_own" ON public.master_timetables 
-    FOR SELECT USING (faculty_id = auth.uid());
+-- SELECT: everyone authenticated can read all (needed for swap, schedule views)
+CREATE POLICY "timetables_select_all" ON public.master_timetables
+  FOR SELECT TO authenticated USING (true);
 
--- HOD can read their dept (using function)
-CREATE POLICY "timetables_hod_read" ON public.master_timetables 
-    FOR SELECT USING (
-        public.auth_user_role() = 'hod' 
-        AND target_dept = public.auth_user_dept()
-    );
+-- Elevated = full CRUD on all
+CREATE POLICY "timetables_elevated_manage" ON public.master_timetables
+  FOR ALL USING (public.is_elevated_role());
 
--- Superadmin can read all
-CREATE POLICY "timetables_admin" ON public.master_timetables 
-    FOR SELECT USING (public.auth_user_role() IN ('management', 'developer'));
+-- HOD = full CRUD on own dept
+CREATE POLICY "timetables_hod_manage" ON public.master_timetables
+  FOR ALL USING (public.is_hod() AND dept = public.auth_user_dept());
 
--- Principal can read all
-CREATE POLICY "timetables_principal_read" ON public.master_timetables 
-    FOR SELECT USING (public.auth_user_role() = 'principal');
-
--- Admins can manage all timetables
-CREATE POLICY "timetables_admin_manage" ON public.master_timetables 
-    FOR ALL USING (
-        EXISTS (
-            SELECT 1 FROM public.admins
-            WHERE email = public.get_my_email()
-        )
-    );
+-- Faculty = own rows only
+CREATE POLICY "timetables_faculty_own_insert" ON public.master_timetables
+  FOR INSERT WITH CHECK (faculty_id = auth.uid());
+CREATE POLICY "timetables_faculty_own_update" ON public.master_timetables
+  FOR UPDATE USING (faculty_id = auth.uid());
+CREATE POLICY "timetables_faculty_own_delete" ON public.master_timetables
+  FOR DELETE USING (faculty_id = auth.uid());
 
 -- ============================================================================
 -- STUDENTS Policies
 -- ============================================================================
--- Faculty can read students they teach
-CREATE POLICY "students_faculty" ON public.students 
+-- Faculty can read students in their assigned classes
+CREATE POLICY "students_faculty" ON public.students
     FOR SELECT USING (
         EXISTS (
             SELECT 1 FROM public.master_timetables mt
@@ -981,8 +1286,8 @@ CREATE POLICY "students_faculty" ON public.students
         )
     );
 
--- Faculty can read students for substituted classes
-CREATE POLICY "students_substitute" ON public.students 
+-- Substitute faculty can read students
+CREATE POLICY "students_substitute" ON public.students
     FOR SELECT USING (
         EXISTS (
             SELECT 1 FROM public.substitutions s
@@ -996,7 +1301,7 @@ CREATE POLICY "students_substitute" ON public.students
     );
 
 -- Class incharge can see their class
-CREATE POLICY "students_class_incharge" ON public.students 
+CREATE POLICY "students_class_incharge" ON public.students
     FOR SELECT USING (
         EXISTS (
             SELECT 1 FROM public.profiles p
@@ -1006,29 +1311,17 @@ CREATE POLICY "students_class_incharge" ON public.students
         )
     );
 
--- HOD can read their dept
-CREATE POLICY "students_hod_read" ON public.students 
-    FOR SELECT USING (
-        public.auth_user_role() = 'hod' 
-        AND dept = public.auth_user_dept()
-    );
+-- HOD = full CRUD on own dept
+CREATE POLICY "students_hod_manage" ON public.students
+  FOR ALL USING (public.is_hod() AND dept = public.auth_user_dept());
 
--- Superadmin can manage all
-CREATE POLICY "students_admin" ON public.students 
-    FOR ALL USING (public.auth_user_role() IN ('management', 'developer'));
+-- Elevated = full CRUD on all
+CREATE POLICY "students_admin" ON public.students
+    FOR ALL USING (public.is_elevated_role());
 
--- Principal can read all
-CREATE POLICY "students_principal_read" ON public.students 
-    FOR SELECT USING (public.auth_user_role() = 'principal');
-
--- Admins can manage students
-CREATE POLICY "students_admin_manage" ON public.students 
-    FOR ALL USING (
-        EXISTS (
-            SELECT 1 FROM public.admins
-            WHERE email = public.get_my_email()
-        )
-    );
+-- Principal = full CRUD on all
+CREATE POLICY "students_principal_manage" ON public.students
+  FOR ALL USING (public.auth_user_role() = 'principal');
 
 -- ============================================================================
 -- ATTENDANCE SESSIONS Policies
@@ -1069,20 +1362,24 @@ CREATE POLICY "sessions_faculty_update" ON public.attendance_sessions
         AND created_at > NOW() - INTERVAL '24 hours'
     );
 
--- HOD can read sessions in their dept
-CREATE POLICY "sessions_hod_read" ON public.attendance_sessions 
-    FOR SELECT USING (
-        public.auth_user_role() = 'hod' 
-        AND target_dept = public.auth_user_dept()
-    );
+-- HOD = full CRUD on dept sessions
+CREATE POLICY "sessions_hod_manage" ON public.attendance_sessions
+  FOR ALL USING (
+    public.is_hod()
+    AND EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = attendance_sessions.faculty_id
+        AND p.dept = public.auth_user_dept()
+    )
+  );
 
 -- Superadmin can manage all
-CREATE POLICY "sessions_admin" ON public.attendance_sessions 
+CREATE POLICY "sessions_admin" ON public.attendance_sessions
     FOR ALL USING (public.auth_user_role() IN ('management', 'developer'));
 
--- Principal can read all
-CREATE POLICY "sessions_principal_read" ON public.attendance_sessions 
-    FOR SELECT USING (public.auth_user_role() = 'principal');
+-- Principal = full CRUD
+CREATE POLICY "sessions_principal_manage" ON public.attendance_sessions
+  FOR ALL USING (public.auth_user_role() = 'principal');
 
 -- Admins can read all sessions
 CREATE POLICY "sessions_admin_read" ON public.attendance_sessions 
@@ -1116,27 +1413,28 @@ CREATE POLICY "logs_faculty_manage" ON public.attendance_logs
         )
     );
 
--- HOD can read logs in their dept
-CREATE POLICY "logs_hod_read" ON public.attendance_logs 
-    FOR SELECT USING (
-        EXISTS (
-            SELECT 1 FROM public.attendance_sessions sess
-            WHERE sess.id = session_id
-                AND public.auth_user_role() = 'hod'
-                AND sess.target_dept = public.auth_user_dept()
-        )
-    );
+-- HOD = full CRUD on dept logs
+CREATE POLICY "logs_hod_manage" ON public.attendance_logs
+  FOR ALL USING (
+    public.is_hod()
+    AND EXISTS (
+      SELECT 1 FROM public.attendance_sessions s
+      JOIN public.profiles p ON p.id = s.faculty_id
+      WHERE s.id = attendance_logs.session_id
+        AND p.dept = public.auth_user_dept()
+    )
+  );
 
 -- Superadmin can manage all
-CREATE POLICY "logs_admin" ON public.attendance_logs 
+CREATE POLICY "logs_admin" ON public.attendance_logs
     FOR ALL USING (public.auth_user_role() IN ('management', 'developer'));
 
--- Principal can read all
-CREATE POLICY "logs_principal_read" ON public.attendance_logs 
-    FOR SELECT USING (public.auth_user_role() = 'principal');
+-- Principal = full CRUD
+CREATE POLICY "logs_principal_manage" ON public.attendance_logs
+  FOR ALL USING (public.auth_user_role() = 'principal');
 
 -- Admins can read all logs
-CREATE POLICY "logs_admin_read" ON public.attendance_logs 
+CREATE POLICY "logs_admin_read" ON public.attendance_logs
     FOR SELECT USING (
         EXISTS (
             SELECT 1 FROM public.admins
@@ -1186,6 +1484,21 @@ CREATE POLICY "notifications_insert" ON public.notifications
     FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
 
 -- ============================================================================
+-- ISSUES Policies
+-- ============================================================================
+-- Users can see their own issues
+CREATE POLICY "issues_own_read" ON public.issues
+    FOR SELECT USING (user_id = auth.uid());
+
+-- Users can create issues
+CREATE POLICY "issues_insert" ON public.issues
+    FOR INSERT WITH CHECK (user_id = auth.uid());
+
+-- Admins/Developers can manage all issues
+CREATE POLICY "issues_admin_manage" ON public.issues
+    FOR ALL USING (public.is_elevated_role());
+
+-- ============================================================================
 -- SUBSTITUTIONS Policies
 -- ============================================================================
 -- Faculty can read substitutions where they are original or substitute
@@ -1217,12 +1530,12 @@ CREATE POLICY "substitutions_hod" ON public.substitutions
     );
 
 -- Superadmin can manage all substitutions
-CREATE POLICY "substitutions_admin" ON public.substitutions 
+CREATE POLICY "substitutions_admin" ON public.substitutions
     FOR ALL USING (public.auth_user_role() IN ('management', 'developer'));
 
--- Principal can read all substitutions
-CREATE POLICY "substitutions_principal" ON public.substitutions 
-    FOR SELECT USING (public.auth_user_role() = 'principal');
+-- Principal = full CRUD
+CREATE POLICY "substitutions_principal_manage" ON public.substitutions
+  FOR ALL USING (public.auth_user_role() = 'principal');
 
 -- ============================================================================
 -- CLASS SWAPS Policies
@@ -1257,12 +1570,12 @@ CREATE POLICY "swaps_hod" ON public.class_swaps
     );
 
 -- Superadmin can manage all swaps
-CREATE POLICY "swaps_admin" ON public.class_swaps 
+CREATE POLICY "swaps_admin" ON public.class_swaps
     FOR ALL USING (public.auth_user_role() IN ('management', 'developer'));
 
--- Principal can read all swaps
-CREATE POLICY "swaps_principal" ON public.class_swaps 
-    FOR SELECT USING (public.auth_user_role() = 'principal');
+-- Principal = full CRUD
+CREATE POLICY "swaps_principal_manage" ON public.class_swaps
+  FOR ALL USING (public.auth_user_role() = 'principal');
 
 -- ============================================================================
 -- OFFLINE QUEUE Policies
@@ -1275,93 +1588,75 @@ CREATE POLICY "queue_faculty_own" ON public.offline_queue
 -- APP CONFIG Policies
 -- ============================================================================
 -- Everyone can read config (public)
-CREATE POLICY "config_read_all" ON public.app_config 
+CREATE POLICY "config_read_all" ON public.app_config
     FOR SELECT USING (TRUE);
 
--- Only admins can update config
-CREATE POLICY "config_admin_update" ON public.app_config 
-    FOR UPDATE USING (public.auth_user_role() IN ('management', 'developer'));
+-- Elevated roles can manage config
+CREATE POLICY "config_elevated_manage" ON public.app_config
+  FOR ALL USING (public.is_elevated_role());
 
 -- ============================================================================
--- EDGE FUNCTION CONTRACTS (Documentation)
+-- ADDITIONAL ELEVATED POLICIES
 -- ============================================================================
+-- Attendance Permissions: elevated can manage all
+CREATE POLICY "permissions_elevated_manage" ON public.attendance_permissions
+  FOR ALL USING (public.is_elevated_role());
 
-/*
-EDGE FUNCTIONS (Supabase Edge Functions - Deno Runtime)
+-- Notifications: elevated can manage all
+CREATE POLICY "notifications_elevated_manage" ON public.notifications
+  FOR ALL USING (public.is_elevated_role());
 
-1. send-notification
-   Purpose: Send FCM push notifications
-   Input: { user_id, type, title, body, data, priority }
-   Output: { success: boolean, message_id?: string }
-   Notes: Uses FCM Admin SDK, requires service role key
+-- Class Incharges: all can read, elevated + HOD can manage
+CREATE POLICY "incharges_select_all" ON public.class_incharges
+  FOR SELECT TO authenticated USING (true);
+CREATE POLICY "incharges_elevated_manage" ON public.class_incharges
+  FOR ALL USING (public.is_elevated_role());
+CREATE POLICY "incharges_hod_manage" ON public.class_incharges
+  FOR ALL USING (public.is_hod() AND dept = public.auth_user_dept());
 
-2. process-offline-queue
-   Purpose: Process pending offline queue items
-   Input: { faculty_id?: UUID } (optional, processes all if not provided)
-   Output: { processed: number, failed: number }
-   Notes: Calls process_offline_queue_item() function for each item
+-- ============================================================================
+-- FOREIGN KEY CASCADES (safe re-runs)
+-- ============================================================================
+-- Ensure subject deletion cascades
+ALTER TABLE substitutions DROP CONSTRAINT IF EXISTS substitutions_subject_id_fkey;
+ALTER TABLE substitutions ADD CONSTRAINT substitutions_subject_id_fkey
+  FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE CASCADE;
 
-3. refresh-materialized-views
-   Purpose: Refresh attendance aggregate views
-   Input: None (or { force: boolean })
-   Output: { success: boolean, refreshed_at: timestamp }
-   Notes: Should be called hourly (9 AM - 5 PM) via cron or scheduled job
+ALTER TABLE attendance_sessions DROP CONSTRAINT IF EXISTS attendance_sessions_subject_id_fkey;
+ALTER TABLE attendance_sessions ADD CONSTRAINT attendance_sessions_subject_id_fkey
+  FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE CASCADE;
 
-4. validate-substitute-request
-   Purpose: Check if substitute request is still valid
-   Input: { substitution_id: UUID }
-   Output: { valid: boolean, status: string, message?: string }
-   Notes: Prevents race conditions (Ghost Request scenario)
+-- ============================================================================
+-- COMPLAINTS & SUGGESTIONS TABLE
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS complaints_suggestions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id UUID REFERENCES students(id) ON DELETE CASCADE,
+    student_name TEXT NOT NULL,
+    student_roll_no TEXT,
+    dept TEXT,
+    year INTEGER,
+    section TEXT,
+    category TEXT NOT NULL DEFAULT 'general',
+    subject TEXT NOT NULL,
+    description TEXT NOT NULL,
+    priority TEXT DEFAULT 'medium' CHECK (priority IN ('low','medium','high','critical')),
+    status TEXT DEFAULT 'open' CHECK (status IN ('open','in_progress','resolved','closed','rejected')),
+    response TEXT,
+    responded_by UUID REFERENCES profiles(id),
+    responded_at TIMESTAMPTZ,
+    is_anonymous BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
 
-5. generate-attendance-report
-   Purpose: Generate PDF/CSV reports
-   Input: { session_ids: UUID[], format: 'pdf' | 'csv' | 'json' | 'text' }
-   Output: { url: string, expires_at: timestamp }
-   Notes: Uses server-side generation, stores in Supabase Storage temporarily
-
-REALTIME VS FCM DELIVERY LOGIC:
-
-1. REALTIME (Supabase Realtime - WebSocket):
-   - Use for: In-app notifications, live updates, instant sync
-   - Channels:
-     * notifications:{user_id} - Personal notifications
-     * substitutions:{faculty_id} - Substitute requests
-     * attendance:{session_id} - Live attendance updates
-   - Advantages: Instant, no external service, works in app
-   - Limitations: Only works when app is open
-
-2. FCM (Firebase Cloud Messaging):
-   - Use for: Lock screen notifications, background alerts, critical updates
-   - Triggers:
-     * Substitute requests (high priority)
-     * Class reminders (scheduled)
-     * Management updates (high priority)
-     * Exam duty reminders (scheduled)
-   - Advantages: Works when app is closed, lock screen display
-   - Implementation: Edge Function sends to FCM, FCM delivers to device
-
-3. HYBRID APPROACH (Recommended):
-   - Critical/Urgent: FCM + Realtime (dual delivery)
-   - Normal: Realtime only (if app open), FCM (if app closed)
-   - Scheduled: FCM only (local scheduling on device for reminders)
-
-4. NOTIFICATION FLOW:
-   a. Event occurs (e.g., substitute request)
-   b. Insert into notifications table
-   c. Edge Function triggered (via database trigger or webhook)
-   d. Edge Function:
-      - Sends FCM notification (if device_token exists)
-      - Broadcasts Realtime event (if user online)
-   e. Mobile app receives both:
-      - FCM: Shows lock screen notification
-      - Realtime: Updates in-app notification center
-
-5. FALLBACK STRATEGY:
-   - If FCM fails: Retry 3 times, then mark as failed
-   - If Realtime fails: Notification still in DB, user sees on next app open
-   - Offline Queue: All notifications queued, processed when online
-*/
-
+ALTER TABLE complaints_suggestions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "complaints_read_all" ON complaints_suggestions
+  FOR SELECT TO authenticated USING (true);
+CREATE POLICY "complaints_elevated_manage" ON complaints_suggestions
+  FOR ALL USING (public.is_elevated_role());
+CREATE POLICY "complaints_hod_manage" ON complaints_suggestions
+  FOR ALL USING (public.is_hod() AND dept = public.auth_user_dept());
 -- ============================================================================
 -- INDEXES FOR PERFORMANCE (Free Tier Safe)
 -- ============================================================================
@@ -1404,33 +1699,28 @@ create table if not exists public.holidays (
 -- Enable RLS
 alter table public.holidays enable row level security;
 
--- Create Policy (Read Only for everyone)
+-- Read for everyone
 create policy "Enable read access for all users" on public.holidays
   for select using (true);
 
+-- Elevated roles can manage holidays
+create policy "holidays_elevated_manage" on public.holidays
+  for all using (public.is_elevated_role());
+
+-- HOD can manage holidays
+create policy "holidays_hod_manage" on public.holidays
+  for all using (public.is_hod());
+
 -- Seed Data
-insert into public.holidays (title, date, type, description) values 
-  ('Republic Day', '2026-01-26', 'holiday', 'National Holiday'), 
-  ('Annual Tech Fest', '2026-03-15', 'event', 'College wide technical symposium'), 
-  ('Mid Semester Exams', '2026-02-10', 'exam', 'Phase 1 internal assessments');
+insert into public.holidays (title, date, type, description) values
+  ('Republic Day', '2026-01-26', 'holiday', 'National Holiday'),
+  ('Annual Tech Fest', '2026-03-15', 'event', 'College wide technical symposium'),
+  ('Mid Semester Exams', '2026-02-10', 'exam', 'Phase 1 internal assessments')
+ON CONFLICT DO NOTHING;
 
 -- ============================================================================
--- 18. LEAVES AND ISSUES (from migration)
+-- 18. ISSUES/REPORTS TABLE
 -- ============================================================================
-
--- LEAVES TABLE
-create table if not exists public.leaves (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid references auth.users(id) not null,
-  reason text not null,
-  start_date timestamptz not null,
-  end_date timestamptz not null,
-  leave_type text check (leave_type in ('full_day', 'half_day')) default 'full_day',
-  status text check (status in ('pending', 'approved', 'rejected')) default 'pending',
-  created_at timestamptz default now()
-);
-
--- ISSUES/REPORTS TABLE
 create table if not exists public.issues (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references auth.users(id) not null,
@@ -1440,22 +1730,67 @@ create table if not exists public.issues (
   created_at timestamptz default now()
 );
 
--- Enable RLS
-alter table public.leaves enable row level security;
 alter table public.issues enable row level security;
-
--- Policies (Users can create and see their own leaves/issues)
-create policy "Users can insert their own leaves" on public.leaves
-  for insert with check (auth.uid() = user_id);
-
-create policy "Users can view their own leaves" on public.leaves
-  for select using (auth.uid() = user_id);
 
 create policy "Users can insert their own issues" on public.issues
   for insert with check (auth.uid() = user_id);
 
 create policy "Users can view their own issues" on public.issues
   for select using (auth.uid() = user_id);
+
+create policy "issues_elevated_manage" on public.issues
+  for all using (public.is_elevated_role());
+
+-- ============================================================================
+-- LEAVES POLICIES (two-stage approval: HOD → Principal)
+-- ============================================================================
+-- NOTE: The leaves table is defined in section 11b above.
+
+-- Users can create and see their own leaves
+create policy "Users can insert their own leaves" on public.leaves
+  for insert with check (auth.uid() = user_id);
+
+create policy "Users can view their own leaves" on public.leaves
+  for select using (auth.uid() = user_id);
+
+-- HOD can view, update, and insert leaves for their department
+create policy "HOD can view department leaves" on public.leaves
+  for select using (
+      public.auth_user_role() = 'hod' AND
+      exists (select 1 from public.profiles where id = leaves.user_id and dept = public.auth_user_dept())
+  );
+
+create policy "HOD can update department leaves" on public.leaves
+  for update using (
+      public.auth_user_role() = 'hod' AND
+      exists (select 1 from public.profiles where id = leaves.user_id and dept = public.auth_user_dept())
+  );
+
+create policy "HOD can insert department leaves" on public.leaves
+  for insert with check (
+      public.auth_user_role() = 'hod' AND
+      exists (select 1 from public.profiles where id = user_id and dept = public.auth_user_dept())
+  );
+
+-- Principal can view, update, and insert all leaves
+create policy "Principal can view all leaves" on public.leaves
+  for select using (public.auth_user_role() = 'principal');
+
+create policy "Principal can update all leaves" on public.leaves
+  for update using (public.auth_user_role() = 'principal');
+
+create policy "Principal can insert all leaves" on public.leaves
+  for insert with check (public.auth_user_role() = 'principal');
+
+-- Developer/Management can view, update, and insert all leaves
+create policy "Admins can view all leaves" on public.leaves
+  for select using (public.auth_user_role() in ('developer', 'management'));
+
+create policy "Admins can update all leaves" on public.leaves
+  for update using (public.auth_user_role() in ('developer', 'management'));
+
+create policy "Admins can insert all leaves" on public.leaves
+  for insert with check (public.auth_user_role() in ('developer', 'management'));
 
 /*
 FREE TIER LIMITATIONS & WORKAROUNDS:
@@ -1522,29 +1857,6 @@ CREATE POLICY "Users can manage their own hidden items" ON public.hidden_items
 -- Grant permissions
 GRANT ALL ON public.hidden_items TO authenticated;
 GRANT ALL ON public.hidden_items TO service_role;
-
--- ============================================================================
--- TIMETABLE RLS POLICIES (Fixed for Swap Feature)
--- ============================================================================
-
--- Drop the restrictive policy
-DROP POLICY IF EXISTS "timetables_own" ON public.master_timetables;
-
--- Create a new policy that allows ALL authenticated users to READ all timetables
--- This is necessary for the 'Swap' feature to find other faculty schedules.
-CREATE POLICY "timetables_read_all" ON public.master_timetables 
-    FOR SELECT TO authenticated 
-    USING (true);
-
--- Ensure modification is still restricted to owner
-CREATE POLICY "timetables_update_own" ON public.master_timetables 
-    FOR UPDATE USING (faculty_id = auth.uid());
-
-CREATE POLICY "timetables_insert_own" ON public.master_timetables 
-    FOR INSERT WITH CHECK (faculty_id = auth.uid());
-
-CREATE POLICY "timetables_delete_own" ON public.master_timetables 
-    FOR DELETE USING (faculty_id = auth.uid());
 
 -- ============================================================================
 -- AUTOMATED NOTIFICATION TRIGGERS
@@ -1759,6 +2071,594 @@ SELECT cron.schedule(
 );
 
 -- ============================================================================
--- END OF SCHEMA
+-- RPC: get_class_attendance_aggregates
+-- ============================================================================
+-- Replaces the client-side getAggregatedClassData() function that was
+-- downloading 6000+ attendance_log rows to the phone and processing them in JS.
+-- The phone receives only ~60 pre-aggregated rows instead of 6000+ raw logs.
 -- ============================================================================
 
+CREATE OR REPLACE FUNCTION get_class_attendance_aggregates(
+  p_dept TEXT,
+  p_year INT,
+  p_section TEXT,
+  p_threshold FLOAT DEFAULT NULL
+)
+RETURNS TABLE (
+  student_id UUID,
+  roll_no TEXT,
+  full_name TEXT,
+  dept TEXT,
+  section TEXT,
+  year INT,
+  present_sessions BIGINT,
+  absent_sessions BIGINT,
+  od_sessions BIGINT,
+  leave_sessions BIGINT,
+  total_sessions BIGINT,
+  attendance_percentage INT,
+  student_mobile TEXT,
+  parent_mobile TEXT
+)
+LANGUAGE sql
+STABLE
+AS $$
+  WITH session_count AS (
+    SELECT COUNT(*) AS total
+    FROM attendance_sessions
+    WHERE target_dept = p_dept
+      AND target_year = p_year
+      AND target_section = p_section
+  ),
+  student_stats AS (
+    SELECT
+      s.id AS student_id,
+      s.roll_no,
+      s.full_name,
+      s.dept,
+      s.section,
+      s.year,
+      COALESCE(SUM(CASE WHEN al.status = 'present' THEN 1 ELSE 0 END), 0) AS present_sessions,
+      COALESCE(SUM(CASE WHEN al.status = 'absent'  THEN 1 ELSE 0 END), 0) AS absent_sessions,
+      COALESCE(SUM(CASE WHEN al.status = 'od'      THEN 1 ELSE 0 END), 0) AS od_sessions,
+      COALESCE(SUM(CASE WHEN al.status = 'leave'   THEN 1 ELSE 0 END), 0) AS leave_sessions,
+      s.mobile AS student_mobile,
+      s.parent_mobile
+    FROM students s
+    LEFT JOIN attendance_logs al ON al.student_id = s.id
+    LEFT JOIN attendance_sessions asess 
+      ON asess.id = al.session_id
+      AND asess.target_dept = p_dept
+      AND asess.target_year = p_year
+      AND asess.target_section = p_section
+    WHERE s.dept = p_dept
+      AND s.year = p_year
+      AND s.section = p_section
+      AND s.is_active = true
+    GROUP BY s.id, s.roll_no, s.full_name, s.dept, s.section, s.year, s.mobile, s.parent_mobile
+  )
+  SELECT
+    ss.student_id,
+    ss.roll_no,
+    ss.full_name,
+    ss.dept,
+    ss.section,
+    ss.year,
+    ss.present_sessions,
+    ss.absent_sessions,
+    ss.od_sessions,
+    ss.leave_sessions,
+    sc.total AS total_sessions,
+    CASE 
+      WHEN (ss.present_sessions + ss.absent_sessions + ss.od_sessions) > 0 
+      THEN ROUND(((ss.present_sessions + ss.od_sessions)::FLOAT / (ss.present_sessions + ss.absent_sessions + ss.od_sessions)::FLOAT) * 100)::INT
+      ELSE 0
+    END AS attendance_percentage,
+    ss.student_mobile,
+    ss.parent_mobile
+  FROM student_stats ss
+  CROSS JOIN session_count sc
+  WHERE (p_threshold IS NULL OR 
+    CASE 
+      WHEN (ss.present_sessions + ss.absent_sessions + ss.od_sessions) > 0 
+      THEN ROUND(((ss.present_sessions + ss.od_sessions)::FLOAT / (ss.present_sessions + ss.absent_sessions + ss.od_sessions)::FLOAT) * 100)
+      ELSE 0
+    END < p_threshold)
+  ORDER BY ss.roll_no;
+$$;
+
+-- ============================================================================
+-- RPC: get_dashboard_stats
+-- ============================================================================
+-- Replaces the client-side getDashboardStats() that did N+1 queries
+-- (one COUNT per unique class). Single call returns all stats.
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION get_dashboard_stats(
+  p_faculty_id UUID,
+  p_day TEXT,
+  p_date TEXT
+)
+RETURNS TABLE (
+  classes_today INT,
+  pending_count INT,
+  total_students BIGINT
+)
+LANGUAGE sql
+STABLE
+AS $$
+  WITH today_slots AS (
+    SELECT slot_id
+    FROM master_timetables
+    WHERE faculty_id = p_faculty_id
+      AND day = p_day
+      AND is_active = true
+  ),
+  completed_slots AS (
+    SELECT slot_id
+    FROM attendance_sessions
+    WHERE faculty_id = p_faculty_id
+      AND date = p_date::DATE
+  ),
+  unique_classes AS (
+    SELECT DISTINCT target_dept, target_year, target_section
+    FROM master_timetables
+    WHERE faculty_id = p_faculty_id
+      AND is_active = true
+  ),
+  student_counts AS (
+    SELECT COUNT(*) AS cnt
+    FROM students s
+    INNER JOIN unique_classes uc
+      ON s.dept = uc.target_dept
+      AND s.year = uc.target_year
+      AND s.section = uc.target_section
+    WHERE s.is_active = true
+  )
+  SELECT
+    (SELECT COUNT(*)::INT FROM today_slots) AS classes_today,
+    (SELECT COUNT(*)::INT FROM today_slots ts WHERE ts.slot_id NOT IN (SELECT slot_id FROM completed_slots)) AS pending_count,
+    (SELECT cnt FROM student_counts) AS total_students;
+$$;
+
+-- ============================================================================
+-- RPC: get_faculty_schedule
+-- ============================================================================
+-- Replaces the client-side getTodaySchedule() that did N+1 queries for swaps.
+-- Returns the fully resolved schedule = base timetable - swapped out + swapped in.
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION get_faculty_schedule(
+  p_faculty_id UUID,
+  p_day TEXT,
+  p_date TEXT
+)
+RETURNS TABLE (
+  id UUID,
+  day TEXT,
+  slot_id TEXT,
+  start_time TIME,
+  end_time TIME,
+  room TEXT,
+  target_dept TEXT,
+  target_year INT,
+  target_section TEXT,
+  batch INT,
+  subject_id UUID,
+  subject_name TEXT,
+  subject_code TEXT,
+  is_swap BOOLEAN
+)
+LANGUAGE sql
+STABLE
+AS $$
+  -- Base schedule (own classes, excluding swapped-out slots)
+  WITH accepted_swaps AS (
+    SELECT id, faculty_a_id, faculty_b_id, slot_a_id, slot_b_id
+    FROM class_swaps
+    WHERE date = p_date::DATE
+      AND status = 'accepted'
+      AND (faculty_a_id = p_faculty_id OR faculty_b_id = p_faculty_id)
+  ),
+  swapped_out_slots AS (
+    -- Slots I gave away
+    SELECT slot_a_id AS slot_id FROM accepted_swaps WHERE faculty_a_id = p_faculty_id
+    UNION ALL
+    SELECT slot_b_id AS slot_id FROM accepted_swaps WHERE faculty_b_id = p_faculty_id
+  ),
+  base_schedule AS (
+    SELECT mt.id, mt.day, mt.slot_id, mt.start_time, mt.end_time, mt.room,
+           mt.target_dept, mt.target_year, mt.target_section, mt.batch,
+           mt.subject_id, sub.name AS subject_name, sub.code AS subject_code,
+           false AS is_swap
+    FROM master_timetables mt
+    JOIN subjects sub ON sub.id = mt.subject_id
+    WHERE mt.faculty_id = p_faculty_id
+      AND mt.day = p_day
+      AND mt.is_active = true
+      AND mt.slot_id NOT IN (SELECT slot_id FROM swapped_out_slots)
+  ),
+  acquired_schedule AS (
+    -- Slots I acquired from swap partners
+    SELECT mt.id, mt.day, mt.slot_id, mt.start_time, mt.end_time, mt.room,
+           mt.target_dept, mt.target_year, mt.target_section, mt.batch,
+           mt.subject_id, sub.name AS subject_name, sub.code AS subject_code,
+           true AS is_swap
+    FROM accepted_swaps sw
+    JOIN master_timetables mt ON (
+      -- If I'm Faculty A, I acquire B's slot
+      (sw.faculty_a_id = p_faculty_id AND mt.faculty_id = sw.faculty_b_id AND mt.slot_id = sw.slot_b_id)
+      OR
+      -- If I'm Faculty B, I acquire A's slot
+      (sw.faculty_b_id = p_faculty_id AND mt.faculty_id = sw.faculty_a_id AND mt.slot_id = sw.slot_a_id)
+    )
+    JOIN subjects sub ON sub.id = mt.subject_id
+    WHERE mt.day = p_day
+      AND mt.is_active = true
+  )
+  SELECT * FROM base_schedule
+  UNION ALL
+  SELECT * FROM acquired_schedule
+  ORDER BY start_time;
+$$;
+
+-- ============================================================================
+-- DB TRIGGERS: AUTOMATED PROFILE HYDRATION
+-- ============================================================================
+-- This function runs automatically whenever a new row is inserted into auth.users.
+-- It checks the newly created auth.users email against the public.faculty_invitations table.
+-- If a pending invitation is found, it automatically creates the public.profiles record
+-- and marks the invitation as accepted.
+
+CREATE OR REPLACE FUNCTION public.handle_new_user_from_invite()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER 
+SET search_path = public
+AS $$
+DECLARE
+    invitation_record RECORD;
+BEGIN
+    -- Check if there is a pending invitation for the new user's email
+    SELECT * INTO invitation_record
+    FROM public.faculty_invitations
+    WHERE LOWER(email) = LOWER(NEW.email) AND status = 'pending'
+    LIMIT 1;
+
+    -- If a pending invitation exists, auto-create the profile
+    IF FOUND THEN
+        -- Safely insert the profile
+        INSERT INTO public.profiles (id, email, full_name, role, dept)
+        VALUES (
+            NEW.id, 
+            LOWER(invitation_record.email), 
+            invitation_record.full_name, 
+            invitation_record.role, 
+            invitation_record.dept
+        );
+
+        -- If they are a class incharge, also map them
+        IF invitation_record.role = 'class_incharge' AND invitation_record.year IS NOT NULL AND invitation_record.section IS NOT NULL THEN
+            INSERT INTO public.class_incharges (faculty_id, dept, year, section)
+            VALUES (NEW.id, invitation_record.dept, invitation_record.year, invitation_record.section)
+            ON CONFLICT DO NOTHING;
+        END IF;
+
+        -- Mark the invitation as accepted
+        UPDATE public.faculty_invitations
+        SET status = 'accepted', updated_at = NOW()
+        WHERE id = invitation_record.id;
+        
+    END IF;
+
+    RETURN NEW;
+EXCEPTION
+    WHEN unique_violation THEN
+        -- Profile already exists, do nothing
+        RETURN NEW;
+    WHEN OTHERS THEN
+        RAISE WARNING 'handle_new_user_from_invite failed: %', SQLERRM;
+        RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created_invite_check ON auth.users;
+
+CREATE TRIGGER on_auth_user_created_invite_check
+    AFTER INSERT ON auth.users
+    FOR EACH ROW
+    EXECUTE FUNCTION public.handle_new_user_from_invite();
+
+-- ============================================================================
+-- STUDENT LEAVES
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.student_leaves (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id UUID NOT NULL REFERENCES public.students(id) ON DELETE CASCADE,
+    reason_category TEXT NOT NULL DEFAULT 'personal' CHECK (reason_category IN ('medical', 'personal', 'family', 'academic', 'event', 'other')),
+    reason_text TEXT,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    total_days INTEGER GENERATED ALWAYS AS (end_date - start_date + 1) STORED,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+    submitted_by UUID REFERENCES public.profiles(id),
+    approved_by UUID REFERENCES public.profiles(id),
+    approved_at TIMESTAMPTZ,
+    remarks TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_student_leaves_student ON public.student_leaves(student_id);
+CREATE INDEX idx_student_leaves_status ON public.student_leaves(status);
+CREATE INDEX idx_student_leaves_dates ON public.student_leaves(start_date, end_date);
+
+ALTER TABLE public.student_leaves ENABLE ROW LEVEL SECURITY;
+
+-- HOD/elevated can manage student leaves in their dept
+CREATE POLICY "student_leaves_read" ON public.student_leaves
+    FOR SELECT USING (
+        public.is_elevated_role() OR public.is_hod()
+    );
+
+CREATE POLICY "student_leaves_insert" ON public.student_leaves
+    FOR INSERT WITH CHECK (
+        public.is_elevated_role() OR public.is_hod()
+    );
+
+CREATE POLICY "student_leaves_update" ON public.student_leaves
+    FOR UPDATE USING (
+        public.is_elevated_role() OR public.is_hod()
+    );
+
+CREATE POLICY "student_leaves_delete" ON public.student_leaves
+    FOR DELETE USING (
+        public.is_elevated_role()
+    );
+
+-- ============================================================================
+-- VIEW: Student Attendance Aggregates
+-- ============================================================================
+-- Used by StudentOverviewPage, CompliancePage, and BenchmarkingPage
+-- Aggregates attendance_logs per student into summary stats.
+
+CREATE OR REPLACE VIEW public.view_student_aggregates AS
+SELECT
+    al.student_id,
+    s.full_name,
+    s.roll_no,
+    s.dept,
+    s.year,
+    s.section,
+    COUNT(DISTINCT al.session_id) AS total_sessions,
+    COUNT(DISTINCT al.session_id) FILTER (WHERE al.status = 'present') AS present_sessions,
+    COUNT(DISTINCT al.session_id) FILTER (WHERE al.status = 'absent') AS absent_sessions,
+    COUNT(DISTINCT al.session_id) FILTER (WHERE al.status = 'od') AS od_sessions,
+    COUNT(DISTINCT al.session_id) FILTER (WHERE al.status = 'leave') AS leave_sessions,
+    CASE
+        WHEN COUNT(DISTINCT al.session_id) > 0 THEN
+            ROUND(
+                (
+                    COUNT(DISTINCT al.session_id) FILTER (WHERE al.status IN ('present', 'od'))::NUMERIC
+                    / COUNT(DISTINCT al.session_id)::NUMERIC
+                ) * 100, 2
+            )
+        ELSE 0
+    END AS attendance_percentage
+FROM public.attendance_logs al
+JOIN public.students s ON s.id = al.student_id
+GROUP BY al.student_id, s.full_name, s.roll_no, s.dept, s.year, s.section;
+
+-- ============================================================================
+-- DB FUNCTIONS: SYSTEM ADMIN MANAGEMENT
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.admin_create_system_admin(
+    p_email TEXT,
+    p_password TEXT,
+    p_full_name TEXT,
+    p_role TEXT,
+    p_username TEXT,
+    p_dept TEXT DEFAULT NULL,
+    p_avatar_url TEXT DEFAULT NULL,
+    p_phone TEXT DEFAULT NULL,
+    p_designation TEXT DEFAULT NULL,
+    p_joining_date DATE DEFAULT NULL,
+    p_gender TEXT DEFAULT NULL,
+    p_qualification TEXT DEFAULT NULL,
+    p_experience_years INTEGER DEFAULT NULL,
+    p_address TEXT DEFAULT NULL,
+    p_date_of_birth DATE DEFAULT NULL,
+    p_blood_group TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+DECLARE
+    v_user_id UUID;
+BEGIN
+    IF public.auth_user_role() NOT IN ('developer', 'management', 'principal') THEN
+        RAISE EXCEPTION 'Unauthorized to create system admins';
+    END IF;
+
+    IF p_role = 'developer' AND public.auth_user_role() != 'developer' THEN
+        RAISE EXCEPTION 'Only developers can create other developers';
+    END IF;
+
+    -- 1. Check if user already exists in auth.users
+    SELECT id INTO v_user_id FROM auth.users WHERE email = LOWER(p_email);
+
+    IF v_user_id IS NOT NULL THEN
+        -- User exists, update them
+        UPDATE auth.users SET 
+            encrypted_password = crypt(p_password, extensions.gen_salt('bf')),
+            raw_user_meta_data = jsonb_build_object('full_name', p_full_name, 'avatar_url', p_avatar_url),
+            updated_at = NOW()
+        WHERE id = v_user_id;
+    ELSE
+        -- User does not exist, insert them
+        INSERT INTO auth.users (
+            instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+            confirmation_token, recovery_token, email_change_token_new, email_change
+        ) VALUES (
+            '00000000-0000-0000-0000-000000000000', gen_random_uuid(), 'authenticated', 'authenticated', LOWER(p_email), crypt(p_password, extensions.gen_salt('bf')), NOW(), '{"provider":"email","providers":["email"]}', jsonb_build_object('full_name', p_full_name, 'avatar_url', p_avatar_url), NOW(), NOW(),
+            '', '', '', ''
+        ) RETURNING id INTO v_user_id;
+    END IF;
+
+    -- 2. Check if user exists in public.admins
+    IF EXISTS (SELECT 1 FROM public.admins WHERE email = LOWER(p_email)) THEN
+        -- Update existing admin record
+        UPDATE public.admins SET 
+            role = p_role,
+            full_name = p_full_name,
+            username = p_username,
+            dept = p_dept,
+            avatar_url = p_avatar_url,
+            phone = p_phone,
+            designation = p_designation,
+            joining_date = p_joining_date,
+            gender = p_gender,
+            qualification = p_qualification,
+            experience_years = p_experience_years,
+            address = p_address,
+            date_of_birth = p_date_of_birth,
+            blood_group = p_blood_group,
+            is_active = true,
+            updated_at = NOW()
+        WHERE email = LOWER(p_email);
+    ELSE
+        -- Insert new admin record
+        INSERT INTO public.admins (
+            id, username, email, full_name, role, dept, avatar_url, phone, designation, joining_date, gender, qualification, experience_years, address, date_of_birth, blood_group
+        ) VALUES (
+            v_user_id, p_username, LOWER(p_email), p_full_name, p_role, p_dept, p_avatar_url, p_phone, p_designation, p_joining_date, p_gender, p_qualification, p_experience_years, p_address, p_date_of_birth, p_blood_group
+        );
+    END IF;
+
+    RETURN jsonb_build_object('id', v_user_id, 'status', 'success');
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.admin_update_system_admin(
+    p_user_id UUID,
+    p_full_name TEXT,
+    p_role TEXT,
+    p_username TEXT,
+    p_dept TEXT DEFAULT NULL,
+    p_password TEXT DEFAULT NULL,
+    p_avatar_url TEXT DEFAULT NULL,
+    p_phone TEXT DEFAULT NULL,
+    p_designation TEXT DEFAULT NULL,
+    p_joining_date DATE DEFAULT NULL,
+    p_gender TEXT DEFAULT NULL,
+    p_qualification TEXT DEFAULT NULL,
+    p_experience_years INTEGER DEFAULT NULL,
+    p_address TEXT DEFAULT NULL,
+    p_date_of_birth DATE DEFAULT NULL,
+    p_blood_group TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+DECLARE
+    v_target_role TEXT;
+BEGIN
+    IF public.auth_user_role() NOT IN ('developer', 'management', 'principal') THEN
+        RAISE EXCEPTION 'Unauthorized to update system admins';
+    END IF;
+
+    SELECT role INTO v_target_role FROM public.admins WHERE id = p_user_id;
+    
+    IF v_target_role = 'developer' AND public.auth_user_role() != 'developer' THEN
+        RAISE EXCEPTION 'Only developers can modify other developers';
+    END IF;
+    IF p_role = 'developer' AND public.auth_user_role() != 'developer' THEN
+        RAISE EXCEPTION 'Only developers can grant the developer role';
+    END IF;
+
+    UPDATE public.admins
+    SET full_name = p_full_name, role = p_role, username = p_username, dept = p_dept,
+        avatar_url = p_avatar_url, phone = p_phone, designation = p_designation,
+        joining_date = p_joining_date, gender = p_gender, qualification = p_qualification,
+        experience_years = p_experience_years, address = p_address, date_of_birth = p_date_of_birth,
+        blood_group = p_blood_group, updated_at = NOW()
+    WHERE id = p_user_id;
+
+    IF p_password IS NOT NULL AND p_password != '' THEN
+        UPDATE auth.users
+        SET encrypted_password = crypt(p_password, extensions.gen_salt('bf')), updated_at = NOW()
+        WHERE id = p_user_id;
+    END IF;
+
+    UPDATE auth.users
+    SET raw_user_meta_data = jsonb_set(
+        jsonb_set(COALESCE(raw_user_meta_data, '{}'::jsonb), '{full_name}', to_jsonb(p_full_name)),
+        '{avatar_url}', to_jsonb(p_avatar_url)
+    ), updated_at = NOW()
+    WHERE id = p_user_id;
+
+    RETURN jsonb_build_object('id', p_user_id, 'status', 'success');
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.admin_delete_system_admin(
+    p_user_id UUID
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+DECLARE
+    v_target_role TEXT;
+BEGIN
+    IF public.auth_user_role() NOT IN ('developer', 'management', 'principal') THEN
+        RAISE EXCEPTION 'Unauthorized to delete system admins';
+    END IF;
+
+    SELECT role INTO v_target_role FROM public.admins WHERE id = p_user_id;
+    IF v_target_role = 'developer' AND public.auth_user_role() != 'developer' THEN
+        RAISE EXCEPTION 'Only developers can delete other developers';
+    END IF;
+
+    DELETE FROM public.admins WHERE id = p_user_id;
+    DELETE FROM auth.users WHERE id = p_user_id;
+
+    RETURN jsonb_build_object('id', p_user_id, 'status', 'deleted');
+END;
+$$;
+
+-- ============================================================================
+-- STORAGE CONFIGURATION
+-- ============================================================================
+
+-- Create avatars bucket if it doesn't exist
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('avatars', 'avatars', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Avatars Bucket Policies
+CREATE POLICY "Avatar images are publicly accessible."
+  ON storage.objects FOR SELECT
+  USING ( bucket_id = 'avatars' );
+
+CREATE POLICY "Anyone can upload an avatar."
+  ON storage.objects FOR INSERT
+  WITH CHECK ( bucket_id = 'avatars' );
+
+CREATE POLICY "Anyone can update their own avatar."
+  ON storage.objects FOR UPDATE
+  USING ( bucket_id = 'avatars' );
+
+CREATE POLICY "Anyone can delete their own avatar."
+  ON storage.objects FOR DELETE
+  USING ( bucket_id = 'avatars' );
+
+-- ============================================================================
+-- END OF SCHEMA
+-- ============================================================================

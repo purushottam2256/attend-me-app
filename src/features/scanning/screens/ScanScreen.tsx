@@ -1,3 +1,4 @@
+import { Fonts } from '../../../constants';
 /**
  * ScanScreen - Premium BLE Attendance Scanning Interface
  *
@@ -620,6 +621,7 @@ export const ScanScreen: React.FC = () => {
     stopBLEScan,
     requestPermissions,
     studentsWithUUID,
+    resetDetectedUUIDs,
   } = useBLE({
     students: students.map((s) => ({
       id: s.id,
@@ -756,11 +758,18 @@ export const ScanScreen: React.FC = () => {
   ]);
 
   const handleRescan = useCallback(() => {
+    // Stop current scan and clear all detected beacons
+    stopBLEScan();
+    resetDetectedUUIDs();
+    // Re-fetch student roster (resets statuses to pending/od/leave)
     refreshStudents();
     setTimeRemaining(TIMER_PRESETS[timerPresetIndex]);
-    setIsScanning(true);
+    // Small delay to let BLE clean up, then restart
+    setTimeout(() => {
+      setIsScanning(true);
+    }, 300);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  }, [timerPresetIndex, refreshStudents]);
+  }, [timerPresetIndex, refreshStudents, stopBLEScan, resetDetectedUUIDs]);
 
   const handleTimerPress = useCallback(() => {
     const nextIndex = (timerPresetIndex + 1) % TIMER_PRESETS.length;
@@ -927,7 +936,7 @@ export const ScanScreen: React.FC = () => {
             })
           }
         >
-          <Text style={{ color: COLORS.accent, fontWeight: "600" }}>
+          <Text style={{ color: COLORS.accent, fontFamily: Fonts.family.semiBold }}>
             Switch to Manual Entry
           </Text>
         </TouchableOpacity>
@@ -1002,7 +1011,7 @@ export const ScanScreen: React.FC = () => {
                 opacity: 0.9
             }}>
                 <Ionicons name="cloud-offline" size={normalizeFont(16)} color="#FF9F0A" />
-                <Text style={{ color: '#FF9F0A', fontSize: normalizeFont(12), fontWeight: '600', letterSpacing: 0.5 }}>OFFLINE</Text>
+                <Text style={{ color: '#FF9F0A', fontSize: normalizeFont(12), fontFamily: Fonts.family.semiBold, letterSpacing: 0.5 }}>OFFLINE</Text>
             </View>
           )}
 
@@ -1354,14 +1363,14 @@ const styles = StyleSheet.create({
   },
   handshakeTitle: {
     fontSize: normalizeFont(28),
-    fontWeight: "700",
+    fontFamily: Fonts.family.bold,
     color: COLORS.textPrimary,
     marginBottom: verticalScale(8),
     letterSpacing: -0.5,
   },
   handshakeSubtitle: {
     fontSize: normalizeFont(16),
-    fontWeight: "500",
+    fontFamily: Fonts.family.medium,
     color: COLORS.textSecondary,
     marginBottom: verticalScale(32),
   },
@@ -1380,7 +1389,7 @@ const styles = StyleSheet.create({
   },
   handshakeStatus: {
     fontSize: normalizeFont(13),
-    fontWeight: "500",
+    fontFamily: Fonts.family.medium,
     color: COLORS.textMuted,
   },
 
@@ -1407,7 +1416,7 @@ const styles = StyleSheet.create({
   },
   successTitle: {
     fontSize: normalizeFont(28),
-    fontWeight: "700",
+    fontFamily: Fonts.family.bold,
     color: COLORS.textPrimary,
     marginBottom: verticalScale(24),
     letterSpacing: -0.5,
@@ -1428,7 +1437,7 @@ const styles = StyleSheet.create({
   },
   successStatLabel: {
     fontSize: normalizeFont(14),
-    fontWeight: "500",
+    fontFamily: Fonts.family.medium,
     color: COLORS.textSecondary,
     marginTop: verticalScale(4),
   },
@@ -1439,7 +1448,7 @@ const styles = StyleSheet.create({
   },
   successSubtext: {
     fontSize: normalizeFont(14),
-    fontWeight: "500",
+    fontFamily: Fonts.family.medium,
     color: COLORS.textMuted,
   },
   submittingSpinner: {
@@ -1476,13 +1485,13 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: normalizeFont(22),
-    fontWeight: "700",
+    fontFamily: Fonts.family.bold,
     color: COLORS.textPrimary,
     letterSpacing: -0.5,
   },
   headerSubtitle: {
     fontSize: normalizeFont(15),
-    fontWeight: "600",
+    fontFamily: Fonts.family.semiBold,
     color: COLORS.textSecondary,
     marginTop: verticalScale(4),
   },
@@ -1534,7 +1543,7 @@ const styles = StyleSheet.create({
   },
   bottomStatLabel: {
     fontSize: normalizeFont(10),
-    fontWeight: "600",
+    fontFamily: Fonts.family.semiBold,
     color: "#6B7280",
     marginTop: verticalScale(2),
   },
@@ -1554,7 +1563,7 @@ const styles = StyleSheet.create({
   },
   submitButtonText: {
     fontSize: normalizeFont(16),
-    fontWeight: "700",
+    fontFamily: Fonts.family.bold,
     color: "#FFFFFF",
   },
 
@@ -1586,7 +1595,7 @@ const styles = StyleSheet.create({
   modalName: {
     color: "#FFF",
     fontSize: normalizeFont(20),
-    fontWeight: "bold",
+    fontFamily: Fonts.family.bold,
     marginBottom: verticalScale(4),
     textAlign: "center",
   },
@@ -1601,7 +1610,7 @@ const styles = StyleSheet.create({
     borderRadius: moderateScale(12),
     borderWidth: 1,
   },
-  bulkText: { fontWeight: "600", fontSize: normalizeFont(14) },
+  bulkText: { fontFamily: Fonts.family.semiBold, fontSize: normalizeFont(14) },
 });
 
 export default ScanScreen;

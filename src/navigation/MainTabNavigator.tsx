@@ -1,3 +1,4 @@
+import { Fonts } from '../constants';
 /**
  * Main Tab Navigator with Floating Dock
  * 
@@ -107,6 +108,55 @@ const DelegateScreen: React.FC = () => {
 
 // MyClassScreen is imported from features/incharge
 
+// Custom animated tab item for standard tabs
+const AnimatedTabItem = ({ isFocused, onPress, iconName, color, label }: any) => {
+  const scaleValue = React.useRef(new Animated.Value(isFocused ? 1.15 : 1)).current;
+
+  React.useEffect(() => {
+    Animated.spring(scaleValue, {
+      toValue: isFocused ? 1.15 : 1,
+      friction: 5,
+      tension: 200,
+      useNativeDriver: true,
+    }).start();
+  }, [isFocused]);
+
+  const handlePressIn = () => {
+    Animated.spring(scaleValue, {
+      toValue: 0.9,
+      useNativeDriver: true,
+    }).start();
+  };
+  
+  const handlePressOut = () => {
+    Animated.spring(scaleValue, {
+      toValue: isFocused ? 1.15 : 1,
+      friction: 4,
+      tension: 150,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  return (
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityState={isFocused ? { selected: true } : {}}
+      onPress={onPress}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      style={styles.tabItem}
+      activeOpacity={0.8}
+    >
+      <Animated.View style={{ transform: [{ scale: scaleValue }], alignItems: 'center' }}>
+        <Ionicons name={iconName} size={23} color={color} />
+        <Text style={[styles.tabLabel, { color }]}>
+          {label}
+        </Text>
+      </Animated.View>
+    </TouchableOpacity>
+  );
+};
+
 // Custom Tab Bar for precise layout control
 const CustomTabBar = ({ state, descriptors, navigation, insets }: any) => {
   const { isDark } = useTheme();
@@ -188,19 +238,14 @@ const CustomTabBar = ({ state, descriptors, navigation, insets }: any) => {
             : (isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)');
 
           return (
-            <TouchableOpacity
+            <AnimatedTabItem
               key={route.key}
-              accessibilityRole="button"
-              accessibilityState={isFocused ? { selected: true } : {}}
+              isFocused={isFocused}
               onPress={onPress}
-              style={styles.tabItem}
-              activeOpacity={0.7}
-            >
-              <Ionicons name={iconName} size={23} color={color} />
-              <Text style={[styles.tabLabel, { color }]}>
-                {options.tabBarLabel || route.name}
-              </Text>
-            </TouchableOpacity>
+              iconName={iconName}
+              color={color}
+              label={options.tabBarLabel || route.name}
+            />
           );
         })}
       </View>
@@ -297,7 +342,7 @@ const styles = StyleSheet.create({
   },
   tabLabel: {
     fontSize: 9,
-    fontWeight: '600',
+    fontFamily: Fonts.family.semiBold,
     marginTop: 4, // Small gap between icon and label
     letterSpacing: 0.2,
   },
@@ -346,7 +391,7 @@ const styles = StyleSheet.create({
   },
   scanLabel: {
     fontSize: 10,
-    fontWeight: '600',
+    fontFamily: Fonts.family.semiBold,
     color: '#0D4A4A',
     marginTop: 4,
   },
@@ -366,13 +411,13 @@ const styles = StyleSheet.create({
   },
   placeholderTitle: {
     fontSize: 24,
-    fontWeight: '700',
+    fontFamily: Fonts.family.bold,
     letterSpacing: -0.5,
     marginBottom: 8,
   },
   placeholderDesc: {
     fontSize: 15,
-    fontWeight: '500',
+    fontFamily: Fonts.family.medium,
     textAlign: 'center',
     lineHeight: 22,
   },

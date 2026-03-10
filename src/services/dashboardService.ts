@@ -357,11 +357,15 @@ export async function getHolidayInfo(
       .from('academic_calendar')
       .select('*')
       .eq('date', date)
-      .eq('type', 'holiday')
-      .single();
+      .in('type', ['holiday', 'event', 'exam']);
 
-    if (error || !data) return null;
-    return data;
+    if (error || !data || data.length === 0) return null;
+    
+    // Priorities: holiday (1) > exam (2) > event (3)
+    const typePriority: Record<string, number> = { holiday: 1, exam: 2, event: 3 };
+    const sorted = [...data].sort((a, b) => (typePriority[a.type] || 99) - (typePriority[b.type] || 99));
+
+    return sorted[0];
   } catch {
     return null;
   }

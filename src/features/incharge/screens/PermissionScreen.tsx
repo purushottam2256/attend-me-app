@@ -66,6 +66,7 @@ export const PermissionScreen: React.FC = () => {
   const [startTime, setStartTime] = useState(new Date()); // Default 9:30 AM
   const [endTime, setEndTime] = useState(new Date()); // Default 4:00 PM
   const [category, setCategory] = useState<ODCategory>("dept_work");
+  const [leaveSession, setLeaveSession] = useState<'Full Day' | 'AM' | 'PM'>('Full Day');
   const [reason, setReason] = useState("");
 
   // Date Picker Visibility
@@ -152,7 +153,7 @@ export const PermissionScreen: React.FC = () => {
               type === "od" ? startTime.toTimeString().split(" ")[0] : undefined,
             end_time:
               type === "od" ? endTime.toTimeString().split(" ")[0] : undefined,
-            category: type === "od" ? category : undefined,
+            category: type === "od" ? category : (leaveSession !== 'Full Day' ? leaveSession : undefined),
             reason: reason.trim(),
             granted_by: user.id,
           });
@@ -532,6 +533,45 @@ export const PermissionScreen: React.FC = () => {
                       {cat
                         .replace("_", " ")
                         .replace(/\b\w/g, (l) => l.toUpperCase())}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
+
+          {/* Half Day Option for Leave */}
+          {type === "leave" && (
+            <>
+              <Text style={[styles.label, { color: colors.textSec }]}>
+                Duration
+              </Text>
+              <View style={styles.chipsContainer}>
+                {(['Full Day', 'AM', 'PM'] as const).map((session) => (
+                  <TouchableOpacity
+                    key={session}
+                    style={[
+                      styles.chip,
+                      {
+                        borderColor:
+                          leaveSession === session ? colors.leave.primary : colors.border,
+                        backgroundColor:
+                          leaveSession === session
+                            ? colors.leave.bg
+                            : "transparent",
+                      },
+                    ]}
+                    onPress={() => setLeaveSession(session)}
+                  >
+                    <Text
+                      style={[
+                        styles.chipText,
+                        {
+                          color: leaveSession === session ? colors.leave.dark : colors.textSec,
+                        },
+                      ]}
+                    >
+                      {session} {session === 'AM' ? '(Morning)' : session === 'PM' ? '(Afternoon)' : ''}
                     </Text>
                   </TouchableOpacity>
                 ))}

@@ -57,6 +57,7 @@ interface UseBLEReturn {
   startBLEScan: () => Promise<void>;
   stopBLEScan: () => void;
   requestPermissions: () => Promise<boolean>;
+  resetDetectedUUIDs: () => void;
 }
 
 export const useBLE = ({
@@ -263,6 +264,14 @@ export const useBLE = ({
     setIsScanning(false);
     console.log('[useBLE] Scan stopped');
   }, []);
+
+  // Reset detected UUIDs (used by rescan to re-detect all beacons)
+  const resetDetectedUUIDs = useCallback(() => {
+    console.log('[useBLE] Resetting detected UUIDs');
+    detectedUUIDsRef.current.clear();
+    setDetectedCount(0);
+    setLastDetected(null);
+  }, []);
   
   // Initialize BLE and listen for state changes with auto-resume
   useEffect(() => {
@@ -346,6 +355,7 @@ export const useBLE = ({
     startBLEScan,
     stopBLEScan,
     requestPermissions,
+    resetDetectedUUIDs,
   };
 };
 

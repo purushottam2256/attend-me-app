@@ -1,3 +1,4 @@
+import { Fonts } from '../../../constants';
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { 
   View, Text, StyleSheet, SectionList, RefreshControl, TouchableOpacity, 
@@ -149,7 +150,7 @@ const ListItem = React.memo(({
 import { getSlotLabel } from '../../../utils/timeUtils';
 
 
-type FilterType = 'all' | 'requests' | 'accepted' | 'events' | 'management' | 'leaves';
+type FilterType = 'all' | 'requests' | 'leaves';
 
 export const NotificationScreen = ({ navigation }: any) => {
   const { isDark } = useTheme();
@@ -368,7 +369,8 @@ export const NotificationScreen = ({ navigation }: any) => {
       if (pageNum === 0) await refreshNotifications();
 
     } catch (e: any) {
-      console.log(e);
+      console.log('Notification fetch error:', e);
+      showToast('Failed to load notifications. Please check your network connection.', 'error');
     } finally {
       setInitialLoading(false);
       setLoadingMore(false);
@@ -806,19 +808,12 @@ export const NotificationScreen = ({ navigation }: any) => {
 
     // Apply filters
     if (activeFilter === 'all') {
-      // User request: Leaves should be seen in leaves option ONLY.
-      // So we filter OUT leaves from the 'all' view.
-      allItems = [...subItems, ...swapItems, ...notifItems];
+      // Show everything
+      allItems = [...subItems, ...swapItems, ...notifItems, ...leaveItems];
     } else if (activeFilter === 'requests') {
       allItems = allItems.filter(i => i.type === 'request' || i.type === 'swap');
-    } else if (activeFilter === 'accepted') {
-      allItems = allItems.filter(i => i.status === 'accepted');
-    } else if (activeFilter === 'events') {
-      allItems = allItems.filter(i => i.type === 'alert');
-    } else if (activeFilter === 'management') {
-      allItems = allItems.filter(i => i.type === 'info' || i.type === 'management_update');
     } else if (activeFilter === 'leaves') {
-      allItems = allItems.filter(i => i.type === 'leave');
+      allItems = allItems.filter(i => i.type === 'leave' || i.type === 'leave_proxy');
     }
 
     // Sort by timestamp
@@ -870,17 +865,13 @@ export const NotificationScreen = ({ navigation }: any) => {
     return result;
   }, [notifications, requests, swaps, activeFilter]);
 
-  // Counts
   const counts = useMemo(() => {
     const unreadNotifs = notifications.filter(n => !n.is_read).length;
     const pendingReqs = requests.filter(r => r.status === 'pending').length;
     const pendingSwaps = swaps.filter(s => s.status === 'pending').length;
     return {
-      all: unreadNotifs + pendingReqs + pendingSwaps,
+      all: unreadNotifs + pendingReqs + pendingSwaps + leaves.length,
       requests: pendingReqs + pendingSwaps,
-      accepted: requests.filter(r => r.status === 'accepted').length + swaps.filter(s => s.status === 'accepted').length + leaves.filter(l => l.status === 'approved').length,
-      events: notifications.filter(n => n.type === 'class_reminder' && !n.is_read).length,
-      management: notifications.filter(n => n.type !== 'class_reminder' && n.type !== 'substitute_request' && n.type !== 'swap_request').length,
       leaves: leaves.length,
     };
   }, [notifications, requests, swaps, leaves]);
@@ -1017,10 +1008,7 @@ export const NotificationScreen = ({ navigation }: any) => {
         >
           <FilterPill id="all" label="All" count={counts.all} />
           <FilterPill id="requests" label="Requests" count={counts.requests} />
-          <FilterPill id="accepted" label="Accepted" count={counts.accepted} />
           <FilterPill id="leaves" label="Leaves" count={counts.leaves} />
-          <FilterPill id="events" label="Reminders" count={counts.events} />
-          <FilterPill id="management" label="Management" count={counts.management} />
         </ScrollView>
         <Text style={{ 
           textAlign: 'center', 
@@ -1154,7 +1142,7 @@ export const NotificationScreen = ({ navigation }: any) => {
             }}
           >
             <Ionicons name="trash-outline" size={normalizeFont(20)} color="#FFFFFF" />
-            <Text style={{ color: '#FFFFFF', fontSize: normalizeFont(16), fontWeight: '700' }}>
+            <Text style={{ color: '#FFFFFF', fontSize: normalizeFont(16), fontFamily: Fonts.family.bold }}>
               Delete ({selectedIds.size})
             </Text>
           </TouchableOpacity>
@@ -1193,13 +1181,13 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: normalizeFont(24),
-    fontWeight: '700',
+    fontFamily: Fonts.family.bold,
     color: '#FFFFFF',
     letterSpacing: -0.5,
   },
   headerSubtitle: {
     fontSize: normalizeFont(14),
-    fontWeight: '500',
+    fontFamily: Fonts.family.medium,
     color: 'rgba(255,255,255,0.7)',
     marginTop: verticalScale(2),
   },
@@ -1235,7 +1223,7 @@ const styles = StyleSheet.create({
   },
   filterText: {
     fontSize: normalizeFont(13),
-    fontWeight: '600',
+    fontFamily: Fonts.family.semiBold,
   },
   filterBadge: {
     minWidth: scale(18),
@@ -1247,7 +1235,7 @@ const styles = StyleSheet.create({
   },
   filterBadgeText: {
     fontSize: normalizeFont(11),
-    fontWeight: '700',
+    fontFamily: Fonts.family.bold,
   },
   listContent: {
     paddingTop: verticalScale(16),
@@ -1263,7 +1251,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: normalizeFont(13),
-    fontWeight: '600',
+    fontFamily: Fonts.family.semiBold,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
@@ -1304,7 +1292,7 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: normalizeFont(20),
-    fontWeight: '700',
+    fontFamily: Fonts.family.bold,
     marginBottom: verticalScale(8),
     letterSpacing: -0.3,
   },

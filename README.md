@@ -5,7 +5,7 @@
 <h1 align="center">Attend-Me</h1>
 
 <p align="center">
-  <b> Offline-First BLE Attendance System for Educational Institutions</b>
+  <b> BLE Attendance System for Educational Institutions</b>
 </p>
 
 <p align="center">
@@ -340,7 +340,7 @@ npx tsc --noEmit
 
 ## 📄 License
 
-This project is proprietary software developed for MRCE (Malla Reddy College of Engineering). All rights reserved.
+This project is proprietary software developed for MRCE (Malla Reddy College of Engineering).
 
 ---
 

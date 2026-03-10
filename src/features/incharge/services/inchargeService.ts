@@ -47,11 +47,13 @@ export interface WatchlistStudent extends StudentAggregate {
   parent_mobile?: string;
 }
 
+type ODCategory = 'dept_work' | 'club_work' | 'event' | 'drive' | 'other' | 'AM' | 'PM';
+
 export interface Permission {
   id: string;
   student_id: string;
   type: 'od' | 'leave';
-  category?: 'dept_work' | 'club_work' | 'event' | 'drive' | 'other';
+  category?: ODCategory;
   reason?: string;
   start_date: string;
   end_date: string;

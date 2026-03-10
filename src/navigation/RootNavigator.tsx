@@ -22,6 +22,7 @@ import { LoginScreen, ForgotPasswordScreen } from '@features/auth';
 import { Colors } from '@constants';
 import { signOut, getStoredProfile } from '@services/authService';
 import { MainTabNavigator } from './MainTabNavigator';
+import { AppPermissionsGate } from './AppPermissionsGate';
 import {
   MyClassHubScreen,
   PermissionScreen,
@@ -104,7 +105,7 @@ const AuthNavigator: React.FC<{ onLoginSuccess: (userName: string, role: string)
 };
 
 // App State Types
-type AppState = 'LOADING' | 'SPLASH' | 'AUTH' | 'MAIN';
+type AppState = 'LOADING' | 'SPLASH' | 'AUTH' | 'GATE' | 'MAIN';
 
 export const RootNavigator: React.FC = () => {
   const [appState, setAppState] = useState<AppState>('LOADING');
@@ -137,7 +138,7 @@ export const RootNavigator: React.FC = () => {
         setUserName(profile.full_name || 'User');
         setUserRole((profile.role as any) || 'faculty');
       }
-      setAppState('MAIN');
+      setAppState('GATE'); // Check permissions before MAIN
     } else {
       setAppState('AUTH');
     }
@@ -146,7 +147,7 @@ export const RootNavigator: React.FC = () => {
   const handleLoginSuccess = (name: string, role: string) => {
     setUserName(name);
     setUserRole((role as any) || 'faculty');
-    setAppState('MAIN'); // Go directly to main dashboard
+    setAppState('GATE'); // Go to gate to check permissions
   };
 
   const handleLogout = async () => {
@@ -164,6 +165,18 @@ export const RootNavigator: React.FC = () => {
     return (
       <View style={styles.container} onLayout={onLayoutRootView}>
         <SplashScreen onFinish={handleSplashFinish} />
+      </View>
+    );
+  }
+
+  // Permission Gate
+  if (appState === 'GATE') {
+    return (
+      <View style={styles.container} onLayout={onLayoutRootView}>
+        <AppPermissionsGate 
+          onPermissionsGranted={() => setAppState('MAIN')}
+          onLogout={handleLogout}
+        />
       </View>
     );
   }
