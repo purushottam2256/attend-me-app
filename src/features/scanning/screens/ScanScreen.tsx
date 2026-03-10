@@ -599,7 +599,12 @@ export const ScanScreen: React.FC = () => {
           setIsScanning(false);
           // Trigger submit after a small delay to ensure state updates
           setTimeout(() => {
-            handleSubmitPress();
+            try {
+              handleSubmitPress();
+            } catch (error) {
+              console.error("Error submitting attendance automatically:", error);
+              // Optionally, show a toast or log to a crash reporting service
+            }
           }, 100);
           return 0;
         }
@@ -804,20 +809,26 @@ export const ScanScreen: React.FC = () => {
     // Save attendance to Supabase and redirect
     const saveAndRedirect = async () => {
       try {
-        // Submit to Supabase
-        const { success, error } = await submitToSupabase();
+        // Senior Dev Fix: Timeout race to prevent infinite hanging on bad connections
+        const submitPromise = submitToSupabase();
+        const timeoutPromise = new Promise<{ success: boolean; error: any }>((_, reject) => {
+          setTimeout(() => reject(new Error('Network timeout: Submission took too long')), 10000);
+        });
+
+        const { success, error } = await Promise.race([submitPromise, timeoutPromise]).catch(err => ({ success: false, error: err }));
 
         if (!success) {
           console.error("Supabase submit failed:", error);
-          // Still save locally as backup
+          setToast({ visible: true, message: "Network unstable. Saved locally to sync later.", type: "warning" });
         }
 
-        // Also save locally for override check
+        // Always save locally for override check and offline queueing
         const now = new Date();
         const takenAt = now.toLocaleTimeString("en-US", {
           hour: "2-digit",
           minute: "2-digit",
         });
+        
         await AsyncStorage.setItem(
           `@attend_me/attendance_${classKey}`,
           JSON.stringify({
@@ -825,6 +836,7 @@ export const ScanScreen: React.FC = () => {
             presentCount,
             absentCount,
             date: now.toISOString(),
+            status: success ? 'synced' : 'pending_sync' // Track sync status
           }),
         );
 
@@ -838,7 +850,9 @@ export const ScanScreen: React.FC = () => {
           navigation.navigate("Home");
         }
       } catch (err) {
-        console.error("Failed to save attendance:", err);
+        console.error("Critical failure during attendance save:", err);
+        setToast({ visible: true, message: "A critical error occurred. Please try again or submit manually.", type: "error" });
+        setScanState("SUCCESS"); // Unblock UI
       }
     };
 

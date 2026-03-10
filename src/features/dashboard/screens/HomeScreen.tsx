@@ -476,9 +476,25 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
         timestamp: Date.now(),
       }));
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading schedule:', error);
+      
+      // Senior Dev: Graceful degradation fallback
+      try {
+         const cachedSchedule = await getCachedTodaySchedule();
+         if (cachedSchedule && cachedSchedule.length > 0) {
+             setIsOfflineData(true);
+             setSchedule(cachedSchedule as ScheduleSlot[]);
+             determineHeroState(cachedSchedule as ScheduleSlot[]);
+             setToast({ visible: true, message: 'Network error. Showing offline schedule.', type: 'warning' });
+             return;
+         }
+      } catch (cacheErr) {
+         console.error('Cache fallback failed', cacheErr);
+      }
+      
       setHeroState('NO_CLASSES');
+      setToast({ visible: true, message: 'Failed to load schedule. Please try again.', type: 'error' });
     }
   }, [determineHeroState]);
 

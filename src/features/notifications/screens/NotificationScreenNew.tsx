@@ -924,6 +924,207 @@ export const NotificationScreen = ({ navigation }: any) => {
     );
   };
 
+// Unified Notification List Item
+const ListItem = React.memo(({ item, isSelected, selectionMode, isDark, onToggle, onAction, onPressNotif }: any) => {
+  const swipeableRef = useRef<Swipeable>(null);
+
+  const getActionColors = (status: string | null) => {
+      if (status === 'accepted' || status === 'approved') return { bg: 'rgba(61, 220, 151, 0.15)', text: '#3DDC97' };
+      if (status === 'declined' || status === 'rejected') return { bg: 'rgba(239, 68, 68, 0.15)', text: '#EF4444' };
+      return { bg: isDark ? '#1A2333' : '#F1F5F9', text: isDark ? '#FFF' : '#000' };
+  };
+
+  const getStatusIcon = (status: string | null) => {
+      if (status === 'accepted' || status === 'approved') return 'checkmark-circle';
+      if (status === 'declined' || status === 'rejected') return 'close-circle';
+      return 'time';
+  };
+
+  const renderRightActions = () => {
+    // Only allow swipe delete for non-actionable items that are not pending requests
+    if (item.type === 'request' || item.type === 'swap') {
+        if (item.status === 'pending') return null;
+    }
+    
+    return (
+      <View style={{ justifyContent: 'center', alignItems: 'flex-end', width: scale(80) }}>
+        <TouchableOpacity 
+          style={{
+            backgroundColor: '#DC2626',
+            width: scale(70),
+            height: '80%',
+            justifyContent: 'center',
+            alignItems: 'center',
+            borderRadius: moderateScale(16),
+            marginRight: scale(16),
+          }}
+          onPress={() => {
+            swipeableRef.current?.close();
+            onAction(item.id, 'delete');
+          }}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="trash-outline" size={normalizeFont(24)} color="#FFF" />
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  const cardContent = (
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => onPressNotif(item)}
+        onLongPress={() => !selectionMode && onToggle(item.id)}
+        style={[
+            styles.selectionWrapper,
+            isSelected && styles.selectedCardWrapper
+        ]}
+      >
+        {selectionMode && (
+            <View style={[styles.requestSelectedBadge, { backgroundColor: isSelected ? '#3DDC97' : 'rgba(255,255,255,0.2)' }]}>
+                {isSelected && <Ionicons name="checkmark" size={normalizeFont(14)} color="#FFFFFF" />}
+            </View>
+        )}
+        
+        <View style={{
+            backgroundColor: isDark ? '#111827' : '#FFFFFF',
+            borderRadius: moderateScale(16),
+            padding: scale(16),
+            borderWidth: 1,
+            borderColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.05,
+            shadowRadius: 8,
+            elevation: 2,
+        }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: verticalScale(12) }}>
+               <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, paddingRight: scale(16) }}>
+                   <View style={{
+                       width: scale(40), height: scale(40),
+                       borderRadius: moderateScale(20),
+                       backgroundColor: isDark ? '#1F2937' : '#F8FAFC',
+                       justifyContent: 'center', alignItems: 'center',
+                       marginRight: scale(12)
+                   }}>
+                       <Ionicons 
+                           name={
+                               item.type === 'request' || item.type === 'swap' ? 'swap-horizontal' :
+                               item.type === 'leave' || item.type === 'leave_proxy' ? 'calendar' :
+                               item.type === 'alert' ? 'warning' : 'notifications'
+                           } 
+                           size={normalizeFont(20)} 
+                           color={isDark ? '#FFF' : '#0F172A'} 
+                       />
+                   </View>
+                   <View style={{ flex: 1 }}>
+                       <Text style={{
+                           fontSize: normalizeFont(16),
+                           fontFamily: Fonts.family.bold,
+                           color: isDark ? '#FFF' : '#0F172A',
+                           marginBottom: verticalScale(2)
+                       }} numberOfLines={1}>
+                           {item.title}
+                       </Text>
+                       <Text style={{
+                           fontSize: normalizeFont(12),
+                           fontFamily: Fonts.family.regular,
+                           color: isDark ? '#9CA3AF' : '#64748B'
+                       }}>
+                           {formatDistanceToNow(safeDate(item.timestamp), { addSuffix: true })}
+                       </Text>
+                   </View>
+               </View>
+               {!item.isRead && (
+                   <View style={{ width: scale(8), height: scale(8), borderRadius: scale(4), backgroundColor: '#3DDC97', marginTop: verticalScale(8) }} />
+               )}
+            </View>
+
+            {/* MESSAGE BODY */}
+            <Text style={{
+               fontSize: normalizeFont(14),
+               fontFamily: Fonts.family.regular,
+               color: isDark ? '#D1D5DB' : '#475569',
+               lineHeight: 20,
+               marginBottom: verticalScale(16)
+            }}>
+               {item.body}
+            </Text>
+
+            {/* ACTION BUTTONS / STATUS */}
+            {(item.type === 'request' || item.type === 'swap') && item.status === 'pending' ? (
+               <View style={{ flexDirection: 'row', gap: scale(12) }}>
+                   <TouchableOpacity
+                       onPress={() => onAction(item.id, 'decline')}
+                       style={{
+                           flex: 1,
+                           paddingVertical: verticalScale(10),
+                           borderRadius: moderateScale(8),
+                           backgroundColor: isDark ? '#1F2937' : '#F1F5F9',
+                           alignItems: 'center'
+                       }}
+                   >
+                       <Text style={{ color: isDark ? '#FFF' : '#475569', fontFamily: Fonts.family.semiBold, fontSize: normalizeFont(14) }}>
+                           Decline
+                       </Text>
+                   </TouchableOpacity>
+                   <TouchableOpacity
+                       onPress={() => onAction(item.id, 'accept')}
+                       style={{
+                           flex: 1,
+                           paddingVertical: verticalScale(10),
+                           borderRadius: moderateScale(8),
+                           backgroundColor: '#3DDC97',
+                           alignItems: 'center'
+                       }}
+                   >
+                       <Text style={{ color: '#0F172A', fontFamily: Fonts.family.bold, fontSize: normalizeFont(14) }}>
+                           Accept
+                       </Text>
+                   </TouchableOpacity>
+               </View>
+            ) : item.status && item.status !== 'pending' ? (
+               <View style={{
+                   alignSelf: 'flex-start',
+                   flexDirection: 'row',
+                   alignItems: 'center',
+                   backgroundColor: getActionColors(item.status).bg,
+                   paddingHorizontal: scale(12),
+                   paddingVertical: verticalScale(6),
+                   borderRadius: moderateScale(12),
+                   gap: scale(6)
+               }}>
+                   <Ionicons name={getStatusIcon(item.status)} size={normalizeFont(14)} color={getActionColors(item.status).text} />
+                   <Text style={{
+                       color: getActionColors(item.status).text,
+                       fontFamily: Fonts.family.semiBold,
+                       fontSize: normalizeFont(12),
+                       textTransform: 'capitalize'
+                   }}>
+                       {item.status}
+                   </Text>
+               </View>
+            ) : null}
+        </View>
+      </TouchableOpacity>
+  );
+
+  if (selectionMode || (item.type === 'request' && item.status === 'pending') || (item.type === 'swap' && item.status === 'pending')) {
+      return cardContent;
+  }
+
+  return (
+      <Swipeable
+        ref={swipeableRef}
+        renderRightActions={renderRightActions}
+        friction={2}
+        rightThreshold={40}
+      >
+          {cardContent}
+      </Swipeable>
+  );
+});
+
   // Empty State - Teal Theme
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>

@@ -190,10 +190,10 @@ export const PermissionScreen: React.FC = () => {
     
     // Professional Palettes
     leave: {
-        primary: "#F97316", // Orange-500
-        dark: "#C2410C",    // Orange-700
-        bg: isDark ? "rgba(249, 115, 22, 0.15)" : "#FFF7ED", // Orange-50
-        border: "#FB923C",
+        primary: "#3DDC97", // Primary Green
+        dark: "#2CB67A",    // Darker Green
+        bg: isDark ? "rgba(61, 220, 151, 0.15)" : "#E8FAF0", // Green-50
+        border: "#8CECBF",
     },
     od: {
         primary: "#6366F1", // Indigo-500
