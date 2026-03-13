@@ -107,9 +107,10 @@ export const EditAttendanceModal: React.FC<EditAttendanceModalProps> = ({
 
   // Extract short roll number
   const getShortRoll = (fullRoll: string): string => {
-    // 22Q91A6612 -> 12, LE-1 stays as LE-1
-    if (fullRoll.startsWith('LE') || fullRoll.startsWith('le')) {
-      return fullRoll.toUpperCase();
+    // 22Q91A6612 -> 12, LE2301CSM045 -> LE-45
+    if (fullRoll?.toUpperCase().startsWith('LE')) {
+      const lastTwo = fullRoll.slice(-2);
+      return `LE-${lastTwo}`;
     }
     return fullRoll.slice(-2);
   };

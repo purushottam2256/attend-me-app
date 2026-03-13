@@ -64,8 +64,8 @@ const WatchlistPager = ({ watchlist, colors, isDark, onMessage }: { watchlist: S
 
     const chunks = useMemo(() => {
         const result = [];
-        for (let i = 0; i < watchlist.length; i += 5) {
-            result.push(watchlist.slice(i, i + 5));
+        for (let i = 0; i < watchlist.length; i += 4) {
+            result.push(watchlist.slice(i, i + 4));
         }
         return result;
     }, [watchlist]);
@@ -579,7 +579,7 @@ export const MyClassHubScreen: React.FC = () => {
               onPress={handleAddPermission}
             >
               <View style={[styles.iconCircle, { backgroundColor: 'rgba(52, 199, 89, 0.1)' }]}>
-                <Ionicons name="add" size={normalizeFont(24)} color="#34C759" />
+                <Ionicons name="add" size={normalizeFont(28)} color="#34C759" />
               </View>
               <Text style={[styles.actionTitle, { color: colors.textPrimary }]}>Grant Leave</Text>
               <Text style={[styles.actionSubtitle, { color: colors.textSecondary }]}>Approve OD/Leave</Text>
@@ -591,9 +591,9 @@ export const MyClassHubScreen: React.FC = () => {
               onPress={() => navigation.navigate('ManagePermissions' as never)}
             >
               <View style={[styles.iconCircle, { backgroundColor: 'rgba(0, 122, 255, 0.1)' }]}>
-                <Ionicons name="list" size={normalizeFont(24)} color="#007AFF" />
+                <Ionicons name="list" size={normalizeFont(28)} color="#007AFF" />
               </View>
-              <Text style={[styles.actionTitle, { color: colors.textPrimary }]}> manage</Text>
+              <Text style={[styles.actionTitle, { color: colors.textPrimary }]}>Manage</Text>
               <Text style={[styles.actionSubtitle, { color: colors.textSecondary }]}>View History</Text>
             </TouchableOpacity>
 
@@ -603,9 +603,9 @@ export const MyClassHubScreen: React.FC = () => {
               onPress={() => navigation.navigate('ProjectFees' as never)}
             >
               <View style={[styles.iconCircle, { backgroundColor: 'rgba(13, 148, 136, 0.1)' }]}>
-                <Ionicons name="briefcase" size={normalizeFont(24)} color="#0D9488" />
+                <Ionicons name="briefcase" size={normalizeFont(28)} color="#0D9488" />
               </View>
-              <Text style={[styles.actionTitle, { color: colors.textPrimary }]}> Project Fees</Text>
+              <Text style={[styles.actionTitle, { color: colors.textPrimary }]}>Project Fees</Text>
               <Text style={[styles.actionSubtitle, { color: colors.textSecondary }]}>Manage Class Fees</Text>
             </TouchableOpacity>
 

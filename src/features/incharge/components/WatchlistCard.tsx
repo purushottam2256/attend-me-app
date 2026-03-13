@@ -69,12 +69,26 @@ export const WatchlistCard: React.FC<WatchlistCardProps> = ({
         {/* Student Info */}
         <View style={styles.infoSection}>
           <View style={styles.nameRow}>
+            {/* Avatar */}
+            <View style={{
+              width: scale(32),
+              height: scale(32),
+              borderRadius: scale(16),
+              backgroundColor: `${urgencyColor}25`,
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginRight: scale(8),
+            }}>
+              <Text style={{ fontSize: normalizeFont(11), fontWeight: '700', color: urgencyColor }}>
+                {studentName?.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
+              </Text>
+            </View>
             <Text style={[styles.studentName, { color: isDark ? '#FFFFFF' : '#0F172A' }]} numberOfLines={1}>
               {studentName}
             </Text>
             {/* Critical Tag Removed */}
           </View>
-          <Text style={[styles.rollNo, { color: isDark ? 'rgba(255,255,255,0.5)' : '#64748B' }]}>
+          <Text style={[styles.rollNo, { color: isDark ? 'rgba(255,255,255,0.5)' : '#64748B', marginLeft: scale(40) }]}>
             {rollNo}
           </Text>
         </View>

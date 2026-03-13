@@ -472,6 +472,44 @@ CREATE TRIGGER on_leave_status_change
     EXECUTE FUNCTION public.handle_leave_status_update();
 
 -- ----------------------------------------------------------------------------
+-- 11c. STUDENT LEAVES (For HOD Notification from Class Incharge)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.student_leaves (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id UUID NOT NULL REFERENCES public.students(id) ON DELETE CASCADE,
+    reason_category TEXT NOT NULL DEFAULT 'personal'
+        CHECK (reason_category IN ('medical', 'personal', 'family', 'academic', 'event', 'other')),
+    reason_text TEXT,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    total_days INTEGER GENERATED ALWAYS AS ((end_date - start_date) + 1) STORED,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'approved', 'rejected')),
+    submitted_by UUID REFERENCES public.profiles(id),
+    approved_by UUID REFERENCES public.profiles(id),
+    approved_at TIMESTAMPTZ,
+    remarks TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_student_leaves_student ON public.student_leaves(student_id);
+CREATE INDEX IF NOT EXISTS idx_student_leaves_status ON public.student_leaves(status);
+CREATE INDEX IF NOT EXISTS idx_student_leaves_dates ON public.student_leaves(start_date, end_date);
+
+-- RLS
+ALTER TABLE public.student_leaves ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "student_leaves_read" ON public.student_leaves FOR SELECT USING (true);
+CREATE POLICY "student_leaves_insert" ON public.student_leaves FOR INSERT WITH CHECK (
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid())
+);
+CREATE POLICY "student_leaves_update" ON public.student_leaves FOR UPDATE USING (
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('hod', 'class_incharge', 'management', 'principal', 'developer'))
+);
+
+-- ----------------------------------------------------------------------------
 -- 12. ATTENDANCE PERMISSIONS (OD & Leave)
 -- ----------------------------------------------------------------------------
 CREATE TABLE public.attendance_permissions (

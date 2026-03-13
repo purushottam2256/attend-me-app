@@ -615,95 +615,96 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           <View style={{ marginBottom: verticalScale(24) }} />
 
           {/* Holidays / Events Section - Moved to main profile view */}
-          <Text
-            style={[
-              styles.sectionTitle,
-              { color: isDark ? "#FFFFFF" : "#1E293B", marginBottom: verticalScale(12) },
-            ]}
-          >
-            UPCOMING EVENTS
-          </Text>
-          {holidays && holidays.length === 0 ? (
-            <View
-              style={{
-                backgroundColor: isDark ? "#082020" : "#FFFFFF",
-                padding: scale(16),
-                borderRadius: moderateScale(16),
-                borderWidth: isDark ? 0 : 1,
-                borderColor: "#E2E8F0",
-                alignItems: "center",
-                marginBottom: verticalScale(24),
-              }}
+          <View style={styles.section}>
+            <Text
+              style={[
+                styles.sectionTitle,
+                { color: isDark ? "#FFFFFF" : "#1E293B", marginBottom: verticalScale(12) },
+              ]}
             >
-              <Ionicons name="calendar-clear" size={normalizeFont(32)} color={isDark ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.1)"} />
-              <Text style={{ color: isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.4)", marginTop: verticalScale(8), fontSize: normalizeFont(13) }}>
-                No upcoming events this week.
-              </Text>
-            </View>
-          ) : (
-            <View style={{ marginBottom: verticalScale(24) }}>
-              {holidays?.map((h, i) => (
-                <View
-                  key={i}
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    backgroundColor: isDark ? "#082020" : "#FFFFFF",
-                    padding: scale(16),
-                    borderRadius: moderateScale(16),
-                    marginBottom: verticalScale(12),
-                    borderWidth: isDark ? 0 : 1,
-                    borderColor: "#E2E8F0",
-                  }}
-                >
+              UPCOMING EVENTS
+            </Text>
+            {holidays && holidays.length === 0 ? (
+              <View
+                style={{
+                  backgroundColor: isDark ? "#082020" : "#FFFFFF",
+                  padding: scale(16),
+                  borderRadius: moderateScale(16),
+                  borderWidth: isDark ? 0 : 1,
+                  borderColor: "#E2E8F0",
+                  alignItems: "center",
+                }}
+              >
+                <Ionicons name="calendar-clear" size={normalizeFont(32)} color={isDark ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.1)"} />
+                <Text style={{ color: isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.4)", marginTop: verticalScale(8), fontSize: normalizeFont(13) }}>
+                  No upcoming events this week.
+                </Text>
+              </View>
+            ) : (
+              <View>
+                {holidays?.map((h, i) => (
                   <View
+                    key={i}
                     style={{
-                      width: scale(48),
-                      height: scale(48),
-                      borderRadius: moderateScale(12),
-                      backgroundColor: h?.type === "holiday" ? "rgba(239, 68, 68, 0.1)" : h?.type === "exam" ? "rgba(245, 158, 11, 0.1)" : "rgba(59, 130, 246, 0.1)",
+                      flexDirection: "row",
                       alignItems: "center",
-                      justifyContent: "center",
-                      marginRight: scale(16),
+                      backgroundColor: isDark ? "#082020" : "#FFFFFF",
+                      padding: scale(16),
+                      borderRadius: moderateScale(16),
+                      marginBottom: i < holidays.length - 1 ? verticalScale(12) : 0,
+                      borderWidth: isDark ? 0 : 1,
+                      borderColor: "#E2E8F0",
                     }}
                   >
-                    <Text
+                    <View
                       style={{
-                        fontSize: normalizeFont(18),
-                        fontWeight: "800",
-                        color: h?.type === "holiday" ? "#EF4444" : h?.type === "exam" ? "#F59E0B" : "#3B82F6",
+                        width: scale(48),
+                        height: scale(48),
+                        borderRadius: moderateScale(12),
+                        backgroundColor: h?.type === "holiday" ? "rgba(239, 68, 68, 0.1)" : h?.type === "exam" ? "rgba(245, 158, 11, 0.1)" : "rgba(59, 130, 246, 0.1)",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        marginRight: scale(16),
                       }}
                     >
-                      {h?.date ? new Date(h.date).getDate() : '--'}
-                    </Text>
-                    <Text
-                      style={{
-                        fontSize: normalizeFont(9),
-                        fontWeight: "700",
-                        textTransform: "uppercase",
-                        color: h?.type === "holiday" ? "#EF4444" : h?.type === "exam" ? "#F59E0B" : "#3B82F6",
-                      }}
-                    >
-                      {h?.date ? new Date(h.date).toLocaleString("default", { month: "short" }) : 'UNK'}
-                    </Text>
+                      <Text
+                        style={{
+                          fontSize: normalizeFont(18),
+                          fontWeight: "800",
+                          color: h?.type === "holiday" ? "#EF4444" : h?.type === "exam" ? "#F59E0B" : "#3B82F6",
+                        }}
+                      >
+                        {h?.date ? new Date(h.date).getDate() : '--'}
+                      </Text>
+                      <Text
+                        style={{
+                          fontSize: normalizeFont(9),
+                          fontWeight: "700",
+                          textTransform: "uppercase",
+                          color: h?.type === "holiday" ? "#EF4444" : h?.type === "exam" ? "#F59E0B" : "#3B82F6",
+                        }}
+                      >
+                        {h?.date ? new Date(h.date).toLocaleString("default", { month: "short" }) : 'UNK'}
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: isDark ? "#FFF" : "#0F172A", fontWeight: "700", fontSize: normalizeFont(15) }}>
+                        {h?.title || "Event"}
+                      </Text>
+                      <Text style={{ color: isDark ? "#94A3B8" : "#64748B", fontSize: normalizeFont(13), marginTop: verticalScale(2) }}>
+                        {h?.description || "College Event"}
+                      </Text>
+                    </View>
+                    <View style={{ backgroundColor: isDark ? "#334155" : "#F1F5F9", paddingHorizontal: scale(10), paddingVertical: verticalScale(4), borderRadius: moderateScale(100) }}>
+                      <Text style={{ fontSize: normalizeFont(10), color: isDark ? "#CBD5E1" : "#475569", fontWeight: "600", textTransform: "uppercase" }}>
+                        {h?.type || 'EVENT'}
+                      </Text>
+                    </View>
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: isDark ? "#FFF" : "#0F172A", fontWeight: "700", fontSize: normalizeFont(15) }}>
-                      {h?.title || "Event"}
-                    </Text>
-                    <Text style={{ color: isDark ? "#94A3B8" : "#64748B", fontSize: normalizeFont(13), marginTop: verticalScale(2) }}>
-                      {h?.description || "College Event"}
-                    </Text>
-                  </View>
-                  <View style={{ backgroundColor: isDark ? "#334155" : "#F1F5F9", paddingHorizontal: scale(10), paddingVertical: verticalScale(4), borderRadius: moderateScale(100) }}>
-                    <Text style={{ fontSize: normalizeFont(10), color: isDark ? "#CBD5E1" : "#475569", fontWeight: "600", textTransform: "uppercase" }}>
-                      {h?.type || 'EVENT'}
-                    </Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-          )}
+                ))}
+              </View>
+            )}
+          </View>
 
           {renderSection("Faculty Services", [
           {
@@ -734,14 +735,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             toggleValue: isDark,
             onToggle: () => setTheme(isDark ? "light" : "dark"),
             color: isDark ? "#8B5CF6" : "#F59E0B",
-          },
-          {
-            icon: "notifications",
-            label: "Push Notifications",
-            isToggle: true,
-            toggleValue: notificationsEnabled,
-            onToggle: toggleNotifications,
-            color: "#EC4899",
           },
 
           {
@@ -1528,17 +1521,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             }}
           >
             {!helpTopic && (
-              /* --- MAIN MENU --- */
+              /* --- MAIN MENU (Premium Design) --- */
               <View>
                 <View style={{ marginBottom: verticalScale(24) }}>
                   <Text
                     style={{
-                      fontSize: normalizeFont(16),
+                      fontSize: normalizeFont(15),
                       color: isDark ? "#94A3B8" : "#64748B",
                       lineHeight: verticalScale(24),
                     }}
                   >
-                    Select a topic below to view the detailed user manual.
+                    Tap a topic to explore the detailed guide.
                   </Text>
                 </View>
 
@@ -1548,36 +1541,48 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                     icon: "home",
                     title: "Home & Timetable",
                     desc: "Managing your daily schedule and attendance.",
+                    accent: "#0D9488",
+                    bgGrad: ["rgba(13,148,136,0.15)", "rgba(13,148,136,0.05)"],
                   },
                   {
                     id: "myclass",
                     icon: "school",
                     title: "My Class Hub",
                     desc: "Comprehensive monitoring for Class Incharges.",
+                    accent: "#6366F1",
+                    bgGrad: ["rgba(99,102,241,0.15)", "rgba(99,102,241,0.05)"],
                   },
                   {
                     id: "notifs",
                     icon: "notifications",
                     title: "Notifications & Alerts",
                     desc: "Managing requests and system updates.",
+                    accent: "#F59E0B",
+                    bgGrad: ["rgba(245,158,11,0.15)", "rgba(245,158,11,0.05)"],
                   },
                   {
                     id: "swaps",
                     icon: "swap-horizontal",
                     title: "Swaps & Substitutions",
                     desc: "Workflows for exchanging classes.",
+                    accent: "#EC4899",
+                    bgGrad: ["rgba(236,72,153,0.15)", "rgba(236,72,153,0.05)"],
                   },
                   {
                     id: "history",
                     icon: "time",
                     title: "History & Logs",
                     desc: "Tracking your past classes and swaps.",
+                    accent: "#8B5CF6",
+                    bgGrad: ["rgba(139,92,246,0.15)", "rgba(139,92,246,0.05)"],
                   },
                   {
                     id: "profile",
                     icon: "person",
                     title: "Profile & Utilities",
                     desc: "Digital ID, Leaves, and Reports.",
+                    accent: "#EF4444",
+                    bgGrad: ["rgba(239,68,68,0.15)", "rgba(239,68,68,0.05)"],
                   },
                 ].map((item, idx) => (
                   <TouchableOpacity
@@ -1589,19 +1594,25 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                       alignItems: "center",
                       padding: scale(16),
                       backgroundColor: isDark ? "#1E293B" : "#FFF",
-                      marginBottom: verticalScale(16),
+                      marginBottom: verticalScale(14),
                       borderRadius: moderateScale(16),
+                      borderLeftWidth: 4,
+                      borderLeftColor: item.accent,
                       borderWidth: 1,
                       borderColor: isDark ? "#334155" : "#E2E8F0",
-                      elevation: 2,
+                      elevation: 3,
+                      shadowColor: item.accent,
+                      shadowOffset: { width: 0, height: 4 },
+                      shadowOpacity: 0.08,
+                      shadowRadius: 12,
                     }}
                   >
-                    <View
+                    <LinearGradient
+                      colors={item.bgGrad as [string, string]}
                       style={{
-                        width: scale(48),
-                        height: scale(48),
-                        borderRadius: moderateScale(12),
-                        backgroundColor: isDark ? "#334155" : "#F0FDFA",
+                        width: scale(52),
+                        height: scale(52),
+                        borderRadius: moderateScale(14),
                         alignItems: "center",
                         justifyContent: "center",
                         marginRight: scale(16),
@@ -1610,36 +1621,63 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                       <Ionicons
                         name={item.icon as any}
                         size={normalizeFont(24)}
-                        color="#0D9488"
+                        color={item.accent}
                       />
-                    </View>
+                    </LinearGradient>
                     <View style={{ flex: 1 }}>
                       <Text
                         style={{
                           fontSize: normalizeFont(16),
                           fontWeight: "700",
                           color: isDark ? "#FFF" : "#0F172A",
-                          marginBottom: verticalScale(4),
+                          marginBottom: verticalScale(3),
                         }}
                       >
                         {item.title}
                       </Text>
                       <Text
                         style={{
-                          fontSize: normalizeFont(13),
+                          fontSize: normalizeFont(12),
                           color: isDark ? "#94A3B8" : "#64748B",
+                          lineHeight: normalizeFont(18),
                         }}
                       >
                         {item.desc}
                       </Text>
                     </View>
-                    <Ionicons
-                      name="chevron-forward"
-                      size={normalizeFont(20)}
-                      color={isDark ? "#64748B" : "#CBD5E1"}
-                    />
+                    <View style={{
+                      width: scale(32),
+                      height: scale(32),
+                      borderRadius: scale(16),
+                      backgroundColor: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.03)",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}>
+                      <Ionicons
+                        name="chevron-forward"
+                        size={normalizeFont(16)}
+                        color={isDark ? "#64748B" : "#94A3B8"}
+                      />
+                    </View>
                   </TouchableOpacity>
                 ))}
+
+                {/* Quick tip footer */}
+                <View style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  marginTop: verticalScale(8),
+                  padding: scale(14),
+                  backgroundColor: isDark ? "rgba(13,148,136,0.08)" : "rgba(13,148,136,0.05)",
+                  borderRadius: moderateScale(12),
+                  borderWidth: 1,
+                  borderColor: isDark ? "rgba(13,148,136,0.2)" : "rgba(13,148,136,0.1)",
+                }}>
+                  <Ionicons name="bulb" size={normalizeFont(18)} color="#0D9488" style={{ marginRight: scale(10) }} />
+                  <Text style={{ flex: 1, fontSize: normalizeFont(12), color: isDark ? "#94A3B8" : "#64748B", lineHeight: normalizeFont(18) }}>
+                    Tip: Use the back arrow to navigate between topics without closing this guide.
+                  </Text>
+                </View>
               </View>
             )}
 

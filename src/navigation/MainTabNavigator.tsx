@@ -366,7 +366,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 60,
     height: 60,
-    marginTop: -20, // Push up to center icon within the dock
+    marginTop: 0, // Reset to 0 so it stays perfectly vertically centered in the dock
   },
   scanButton: {
     width: 56, 

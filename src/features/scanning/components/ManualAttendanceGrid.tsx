@@ -94,6 +94,23 @@ const SquareItem = React.memo(({ item, onTap, onLongPress, isDark }: {
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
         >
+            {/* Student photo as background overlay */}
+            {item.photoUrl ? (
+              <Image
+                source={{ uri: item.photoUrl }}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  borderRadius: moderateScale(8),
+                  opacity: 0.25,
+                }}
+                resizeMode="cover"
+              />
+            ) : null}
+
             {/* Status Icon / Badge for OD/Leave */}
             {(item.status === 'od' || item.status === 'leave') && (
                 <View style={styles.statusBadge}>
@@ -106,7 +123,9 @@ const SquareItem = React.memo(({ item, onTap, onLongPress, isDark }: {
                     <Image source={{ uri: item.photoUrl }} style={styles.avatarGrid} />
                 ) : (
                     <View style={[styles.avatarGrid, { backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' }]}>
-                        <Ionicons name="person" size={normalizeFont(16)} color="rgba(255,255,255,0.6)" />
+                        <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: normalizeFont(10), fontWeight: '700' }}>
+                            {firstName?.slice(0, 2).toUpperCase() || '??'}
+                        </Text>
                     </View>
                 )}
                 <Text style={styles.rollText} numberOfLines={1}>{shortRoll}</Text>

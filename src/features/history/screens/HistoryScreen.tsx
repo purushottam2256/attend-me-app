@@ -440,8 +440,10 @@ export const HistoryScreen: React.FC = () => {
 
       // Helper to get short roll number
       const getShortRoll = (fullRoll: string): string => {
-        if (fullRoll?.startsWith('LE') || fullRoll?.startsWith('le')) {
-          return fullRoll.toUpperCase();
+        if (fullRoll?.toUpperCase().startsWith('LE')) {
+          // Format LE students as LE-XX (last two digits)
+          const lastTwo = fullRoll.slice(-2);
+          return `LE-${lastTwo}`;
         }
         return fullRoll?.slice(-2) || '??';
       };

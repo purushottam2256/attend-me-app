@@ -38,6 +38,9 @@ export const ProjectFeesScreen: React.FC<ProjectFeesScreenProps> = ({ navigation
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   
+  // Track which student cards have their reason section expanded
+  const [expandedStudentId, setExpandedStudentId] = useState<string | null>(null);
+  
   // Faculty class context
   const [facultyDept, setFacultyDept] = useState('');
   const [facultyYear, setFacultyYear] = useState<number>(0);
@@ -174,6 +177,12 @@ export const ProjectFeesScreen: React.FC<ProjectFeesScreenProps> = ({ navigation
           checkUnsavedChanges(updated);
           return updated;
       });
+      // Auto-expand reason section if marked due
+      if (newStatus === 'due') {
+        setExpandedStudentId(id);
+      } else {
+        if (expandedStudentId === id) setExpandedStudentId(null);
+      }
   };
 
   const updateStudentReason = (id: string, newReason: string) => {
@@ -214,97 +223,23 @@ export const ProjectFeesScreen: React.FC<ProjectFeesScreenProps> = ({ navigation
       }
   };
 
-  const renderStudentItem = ({ item, index }: { item: ProjectFeeStudent, index: number }) => {
-    return (
-      <View style={[
-        styles.studentCard,
-        { 
-          backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
-          borderColor: isDark ? '#334155' : '#E2E8F0',
-        }
-      ]}>
-        <View style={styles.cardHeader}>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.studentName, { color: isDark ? '#F1F5F9' : '#0F172A' }]}>
-              {index + 1}. {item.full_name}
-            </Text>
-            <Text style={[styles.studentRoll, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-              {item.roll_no}
-            </Text>
-          </View>
-          
-          <View style={styles.statusToggleContainer}>
-            <TouchableOpacity
-              style={[
-                styles.statusButton,
-                item.status === 'due' 
-                  ? { backgroundColor: 'rgba(239, 68, 68, 0.15)', borderColor: '#EF4444', borderWidth: 1 } 
-                  : { backgroundColor: isDark ? '#334155' : '#F1F5F9' }
-              ]}
-              onPress={() => updateStudentStatus(item.student_id, 'due')}
-            >
-              <Text style={[
-                styles.statusButtonText,
-                item.status === 'due' ? { color: '#EF4444', fontWeight: '700' } : { color: isDark ? '#94A3B8' : '#64748B' }
-              ]}>
-                DUE
-              </Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              style={[
-                styles.statusButton,
-                item.status === 'paid' 
-                  ? { backgroundColor: 'rgba(16, 185, 129, 0.15)', borderColor: '#10B981', borderWidth: 1 } 
-                  : { backgroundColor: isDark ? '#334155' : '#F1F5F9' }
-              ]}
-              onPress={() => updateStudentStatus(item.student_id, 'paid')}
-            >
-               <Text style={[
-                styles.statusButtonText,
-                item.status === 'paid' ? { color: '#10B981', fontWeight: '700' } : { color: isDark ? '#94A3B8' : '#64748B' }
-              ]}>
-                PAID
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Reason Box - Always visible if due, optional otherwise but good to have */}
-        <View style={styles.reasonContainer}>
-           <TextInput
-             style={[
-               styles.reasonInput,
-               {
-                 backgroundColor: isDark ? '#0F172A' : '#F8FAFC',
-                 color: isDark ? '#F1F5F9' : '#0F172A',
-                 borderColor: isDark ? '#334155' : '#E2E8F0',
-               }
-             ]}
-             placeholder="Add reason/remarks..."
-             placeholderTextColor={isDark ? '#475569' : '#94A3B8'}
-             value={item.reason}
-             onChangeText={(text) => updateStudentReason(item.student_id, text)}
-             maxLength={100}
-           />
-           {/* Quick Suggestion Chips */}
-           <View style={styles.chipsContainer}>
-              {["Financial Issue", "Partial Paid", "Waived", "Not Checked"].map(reason => (
-                <TouchableOpacity 
-                   key={reason}
-                   style={[styles.suggestionChip, { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}
-                   onPress={() => updateStudentReason(item.student_id, reason)}
-                 >
-                   <Text style={[styles.suggestionText, { color: isDark ? '#CBD5E1' : '#475569' }]}>
-                     {reason}
-                   </Text>
-                 </TouchableOpacity>
-              ))}
-           </View>
-        </View>
-      </View>
-    );
+  const toggleExpanded = (id: string) => {
+    setExpandedStudentId(prev => prev === id ? null : id);
   };
+
+  const renderStudentItem = React.useCallback(({ item, index }: { item: ProjectFeeStudent, index: number }) => {
+    return (
+      <StudentFeeCard
+        item={item}
+        index={index}
+        isDark={isDark}
+        isExpanded={expandedStudentId === item.student_id}
+        onToggleExpand={() => toggleExpanded(item.student_id)}
+        onStatusChange={(status: 'paid' | 'due') => updateStudentStatus(item.student_id, status)}
+        onReasonChange={(text: string) => updateStudentReason(item.student_id, text)}
+      />
+    );
+  }, [isDark, expandedStudentId, updateStudentStatus, updateStudentReason]);
 
   return (
     <ErrorBoundary>
@@ -458,27 +393,196 @@ export const ProjectFeesScreen: React.FC<ProjectFeesScreenProps> = ({ navigation
                </Text>
              </View>
           ) : (
-            <FlatList
-              data={students}
-              keyExtractor={(item) => item.student_id}
-              renderItem={renderStudentItem}
-              contentContainerStyle={styles.listContent}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-              ListEmptyComponent={() => (
-                <View style={styles.centerContainer}>
-                   <Text style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
-                     No active students found in this class section.
-                   </Text>
-                </View>
-              )}
-            />
+              <FlatList
+                data={students}
+                keyExtractor={(item) => item.student_id}
+                renderItem={renderStudentItem}
+                contentContainerStyle={styles.listContent}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                initialNumToRender={10}
+                maxToRenderPerBatch={10}
+                windowSize={5}
+                removeClippedSubviews={true}
+                ListEmptyComponent={() => (
+                  <View style={styles.centerContainer}>
+                     <Text style={{ color: isDark ? '#94A3B8' : '#64748B' }}>
+                       No active students found in this class section.
+                     </Text>
+                  </View>
+                )}
+              />
           )}
         </KeyboardAvoidingView>
       </View>
     </ErrorBoundary>
   );
 };
+
+// Extracted and memoized to prevent full-list re-renders when a single student changes.
+const StudentFeeCard = React.memo(({ 
+  item, 
+  index, 
+  isDark, 
+  isExpanded, 
+  onToggleExpand, 
+  onStatusChange, 
+  onReasonChange 
+}: { 
+  item: ProjectFeeStudent, 
+  index: number, 
+  isDark: boolean, 
+  isExpanded: boolean, 
+  onToggleExpand: () => void, 
+  onStatusChange: (status: 'paid' | 'due') => void, 
+  onReasonChange: (reason: string) => void 
+}) => {
+  const safeLength = item.full_name ? item.full_name.length : 0;
+  const initials = item.full_name?.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() || 'U';
+  const avatarColors = ['#FCA5A5', '#FDBA74', '#FCD34D', '#86EFAC', '#6EE7B7', '#93C5FD', '#A5B4FC', '#C4B5FD', '#F9A8D4'];
+  const avatarBg = avatarColors[safeLength % avatarColors.length];
+
+  return (
+    <View style={[
+      styles.studentCard,
+      { 
+        backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+        borderColor: isDark ? '#334155' : '#E2E8F0',
+        ...(isExpanded ? { borderColor: isDark ? 'rgba(13, 148, 136, 0.4)' : 'rgba(13, 148, 136, 0.3)', shadowOpacity: 0.1 } : {})
+      }
+    ]}>
+      <View style={styles.cardHeader}>
+        {/* Avatar Area */}
+        <View style={{ 
+            width: scale(36), height: scale(36), borderRadius: scale(18), 
+            backgroundColor: avatarBg, 
+            alignItems: 'center', justifyContent: 'center', marginRight: scale(12) 
+        }}>
+            <Text style={{ fontSize: normalizeFont(12), fontWeight: '700', color: '#FFF' }}>{initials}</Text>
+        </View>
+
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.studentName, { color: isDark ? '#F1F5F9' : '#0F172A' }]} numberOfLines={1}>
+            {index + 1}. {item.full_name}
+          </Text>
+          <Text style={[styles.studentRoll, { color: isDark ? '#94A3B8' : '#64748B' }]}>
+            {item.roll_no}
+          </Text>
+        </View>
+        
+        <View style={styles.statusToggleContainer}>
+          <TouchableOpacity
+            style={[
+              styles.statusButton,
+              item.status === 'due' 
+                ? { backgroundColor: 'rgba(239, 68, 68, 0.15)', borderColor: '#EF4444', borderWidth: 1 } 
+                : { backgroundColor: isDark ? '#334155' : '#F1F5F9' }
+            ]}
+            onPress={() => onStatusChange('due')}
+          >
+            <Text style={[
+              styles.statusButtonText,
+              item.status === 'due' ? { color: '#EF4444', fontWeight: '700' } : { color: isDark ? '#94A3B8' : '#64748B' }
+            ]}>
+              DUE
+            </Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={[
+              styles.statusButton,
+              item.status === 'paid' 
+                ? { backgroundColor: 'rgba(16, 185, 129, 0.15)', borderColor: '#10B981', borderWidth: 1 } 
+                : { backgroundColor: isDark ? '#334155' : '#F1F5F9' }
+            ]}
+            onPress={() => onStatusChange('paid')}
+          >
+             <Text style={[
+              styles.statusButtonText,
+              item.status === 'paid' ? { color: '#10B981', fontWeight: '700' } : { color: isDark ? '#94A3B8' : '#64748B' }
+            ]}>
+              PAID
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Reason Box - Always visible if 'due' and expanded */}
+      {item.status === 'due' && (
+        <TouchableOpacity 
+           style={{ 
+             flexDirection: 'row', 
+             alignItems: 'center', 
+             justifyContent: 'space-between',
+             paddingTop: verticalScale(10),
+             borderTopWidth: 1,
+             borderTopColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'
+           }}
+           onPress={onToggleExpand}
+        >
+           <Text style={{ fontSize: normalizeFont(12), color: isDark ? '#9A9A9A' : '#777' }}>
+             {item.reason ? `Reason: ${item.reason}` : 'Add a Due Reason...'}
+           </Text>
+           <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={normalizeFont(16)} color={isDark ? '#FFF' : '#000'} />
+        </TouchableOpacity>
+      )}
+
+      {isExpanded && item.status === 'due' && (
+        <View style={{
+          marginTop: verticalScale(12),
+          padding: scale(12),
+          backgroundColor: isDark ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.02)',
+          borderRadius: moderateScale(12),
+        }}>
+           <Text style={{ fontSize: normalizeFont(11), fontWeight: '700', color: isDark ? '#CBD5E1' : '#475569', marginBottom: verticalScale(8), textTransform: 'uppercase' }}>
+             Select Reason
+           </Text>
+           {/* Quick Suggestion Chips */}
+           <View style={styles.chipsContainer}>
+              {["Financial Issue", "Partial Paid", "Waived", "Not Checked"].map(reason => {
+                const isSelected = item.reason === reason;
+                return (
+                <TouchableOpacity 
+                   key={reason}
+                   style={[
+                     styles.suggestionChip, 
+                     { backgroundColor: isSelected ? 'rgba(13, 148, 136, 0.15)' : (isDark ? '#334155' : '#E2E8F0') },
+                     isSelected && { borderWidth: 1, borderColor: '#0D9488' }
+                   ]}
+                   onPress={() => onReasonChange(reason)}
+                 >
+                   <Text style={[
+                     styles.suggestionText, 
+                     { color: isSelected ? '#0D9488' : (isDark ? '#CBD5E1' : '#475569'), fontWeight: isSelected ? '700' : '500' }
+                   ]}>
+                     {reason}
+                   </Text>
+                 </TouchableOpacity>
+                )
+              })}
+           </View>
+           
+           <TextInput
+             style={[
+               styles.reasonInput,
+               {
+                 backgroundColor: isDark ? '#0F172A' : '#FFFFFF',
+                 color: isDark ? '#F1F5F9' : '#0F172A',
+                 borderColor: isDark ? '#334155' : '#E2E8F0',
+                 marginTop: verticalScale(12)
+               }
+             ]}
+             placeholder="Or type custom reason..."
+             placeholderTextColor={isDark ? '#475569' : '#94A3B8'}
+             value={item.reason}
+             onChangeText={onReasonChange}
+             maxLength={100}
+           />
+        </View>
+      )}
+    </View>
+  );
+});
 
 const styles = StyleSheet.create({
   container: {

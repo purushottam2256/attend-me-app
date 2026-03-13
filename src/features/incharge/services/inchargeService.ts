@@ -477,6 +477,26 @@ export const addPermission = async (
     throw error;
   }
 
+  // If the permission is a leave, also log it to the student_leaves table to notify the HOD
+  if (permission.type === 'leave') {
+    const leaveData = {
+      student_id: permission.student_id,
+      start_date: permission.start_date,
+      end_date: permission.end_date,
+      reason: permission.reason || 'Leave requested',
+      status: 'pending', // or whichever default status the table expects
+    };
+
+    const { error: leaveError } = await supabase
+      .from('student_leaves')
+      .insert(leaveData);
+
+    if (leaveError) {
+      console.warn('[InchargeService] Note: Failed to log leave for HOD notification:', leaveError);
+      // We don't throw an error here to avoid blocking the primary permission functionality
+    }
+  }
+
   return data;
 };
 

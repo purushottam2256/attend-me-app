@@ -243,13 +243,26 @@ export const ManualEntryScreen: React.FC = () => {
       {/* Stats & Actions */}
       <StatsBar counts={stats} onBulkAction={handleBulkAction} />
 
-      {/* Grid */}
-      <ManualAttendanceGrid
-        students={students}
-        onToggleStatus={handleToggle}
-        onLongPress={setSelectedStudent}
-        isDark={true}
-      />
+      {/* Grid with decorative background */}
+      <View style={{ flex: 1, position: 'relative' }}>
+        {/* Decorative background element */}
+        <View style={{
+          position: 'absolute',
+          top: '30%',
+          left: '50%',
+          transform: [{ translateX: -60 }, { translateY: -60 }],
+          opacity: 0.03,
+          zIndex: 0,
+        }}>
+          <Ionicons name="grid" size={120} color="#FFF" />
+        </View>
+        <ManualAttendanceGrid
+          students={students}
+          onToggleStatus={handleToggle}
+          onLongPress={setSelectedStudent}
+          isDark={true}
+        />
+      </View>
 
       {/* Floating Save Button */}
       {hasChanges && (

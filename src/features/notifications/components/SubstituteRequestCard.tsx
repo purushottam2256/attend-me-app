@@ -92,8 +92,24 @@ export const SubstituteRequestCard: React.FC<SubstituteRequestCardProps> = ({
 
                 {/* Content */}
                 <View style={styles.content}>
-                    <Text style={[styles.facultyName, { color: textColor }]}>{body}</Text>
-                    <Text style={[styles.classDetails, { color: subTextColor }]}>{details}</Text>
+                    {/* Faculty Avatar */}
+                    <View style={{
+                        width: scale(36),
+                        height: scale(36),
+                        borderRadius: scale(18),
+                        backgroundColor: isSwap ? 'rgba(99,102,241,0.15)' : 'rgba(61,220,151,0.15)',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginRight: scale(10),
+                    }}>
+                        <Text style={{ fontSize: normalizeFont(12), fontWeight: '700', color: isSwap ? '#6366F1' : '#3DDC97' }}>
+                            {senderName?.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() || 'F'}
+                        </Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                        <Text style={[styles.facultyName, { color: textColor }]}>{body}</Text>
+                        <Text style={[styles.classDetails, { color: subTextColor }]}>{details}</Text>
+                    </View>
                 </View>
 
                 {/* Actions or Status */}
