@@ -27,6 +27,7 @@ import {
   Dimensions,
   Modal,
   Vibration,
+  InteractionManager,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
@@ -150,6 +151,30 @@ export const ScanScreen: React.FC = () => {
   const [loadingLiveClass, setLoadingLiveClass] = useState(false);
   const [noLiveClassError, setNoLiveClassError] = useState<string | null>(null);
 
+  // Navigation Safety Refs
+  const isMountedRef = useRef(true);
+  const isNavigatingRef = useRef(false);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const safeNavigate = useCallback((action: () => void) => {
+    if (isNavigatingRef.current) return;
+    isNavigatingRef.current = true;
+    InteractionManager.runAfterInteractions(() => {
+      if (isMountedRef.current) {
+        action();
+      }
+      setTimeout(() => {
+        if (isMountedRef.current) isNavigatingRef.current = false;
+      }, 500);
+    });
+  }, []);
+
   // Use route classData if provided, otherwise use fetched liveClassData
   const routeClassData = route.params?.classData;
   const existingAttendance = route.params?.existingAttendance;
@@ -158,12 +183,14 @@ export const ScanScreen: React.FC = () => {
   // Failsafe: Redirect to ManualEntry if manual param is present (legacy or stale calls)
   useEffect(() => {
     if (isManualLegacy && routeClassData) {
-      navigation.replace("ManualEntry", {
-        classData: routeClassData,
-        existingAttendance,
+      safeNavigate(() => {
+        navigation.replace("ManualEntry", {
+          classData: routeClassData,
+          existingAttendance,
+        });
       });
     }
-  }, [isManualLegacy, routeClassData, navigation, existingAttendance]);
+  }, [isManualLegacy, routeClassData, navigation, existingAttendance, safeNavigate]);
 
   const classData = routeClassData || liveClassData;
 
@@ -360,6 +387,7 @@ export const ScanScreen: React.FC = () => {
           const stored = await AsyncStorage.getItem(
             `@attend_me/attendance_${key}`,
           );
+          if (!isMountedRef.current) return;
           if (stored) {
             const data = JSON.parse(stored);
             setPreviousAttendance({
@@ -844,11 +872,13 @@ export const ScanScreen: React.FC = () => {
         Vibration.vibrate(400); // Strict vibration feedback
 
         // Redirect immediately
-        if (navigation.canGoBack()) {
-          navigation.goBack();
-        } else {
-          navigation.navigate("Home");
-        }
+        safeNavigate(() => {
+          if (navigation.canGoBack()) {
+            navigation.goBack();
+          } else {
+            navigation.navigate("Home");
+          }
+        });
       } catch (err) {
         console.error("Critical failure during attendance save:", err);
         setToast({ visible: true, message: "A critical error occurred. Please try again or submit manually.", type: "error" });
@@ -861,16 +891,19 @@ export const ScanScreen: React.FC = () => {
   }, [navigation, classKey, presentCount, absentCount, submitToSupabase]);
 
   const handleCancel = useCallback(() => {
-    if (navigation.canGoBack()) {
-      navigation.goBack();
-    } else {
-      navigation.navigate("Home");
-    }
-  }, [navigation]);
+    safeNavigate(() => {
+      if (navigation.canGoBack()) {
+        navigation.goBack();
+      } else {
+        navigation.navigate("Home");
+      }
+    });
+  }, [navigation, safeNavigate]);
 
   const handleOverrideConfirm = useCallback(async () => {
     // Clear the stored attendance record
     await AsyncStorage.removeItem(`@attend_me/attendance_${classKey}`);
+    if (!isMountedRef.current) return;
     setPreviousAttendance(null);
     setShowOverride(false);
     // Reset animation values for fresh start
@@ -881,12 +914,14 @@ export const ScanScreen: React.FC = () => {
 
   const handleOverrideCancel = useCallback(() => {
     setShowOverride(false);
-    if (navigation.canGoBack()) {
-      navigation.goBack();
-    } else {
-      navigation.navigate("Home");
-    }
-  }, [navigation]);
+    safeNavigate(() => {
+      if (navigation.canGoBack()) {
+        navigation.goBack();
+      } else {
+        navigation.navigate("Home");
+      }
+    });
+  }, [navigation, safeNavigate]);
 
   const handleStudentStatusChange = useCallback(
     (
@@ -944,9 +979,11 @@ export const ScanScreen: React.FC = () => {
         <TouchableOpacity
           style={{ marginTop: verticalScale(40), padding: scale(10) }}
           onPress={() =>
-            navigation.navigate("ManualEntry", {
-              classData,
-              existingAttendance,
+            safeNavigate(() => {
+              navigation.navigate("ManualEntry", {
+                classData,
+                existingAttendance,
+              });
             })
           }
         >

@@ -151,19 +151,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({
     extrapolate: 'clamp',
   });
 
-  const handleTap = () => {
-    // LOCK: Disable tap for OD/Leave
-    if (status === 'od' || status === 'leave') {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      return; 
-    }
-
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (status === 'pending') onStatusChange('present');
-    else if (status === 'present') onStatusChange('absent');
-    else onStatusChange('pending');
-  };
-
+// Tap gestures removed to enforce swipe-only
   return (
     <View style={styles.container}>
       {/* Background reveal - Absent */}
@@ -188,11 +176,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({
           },
         ]}
       >
-        <TouchableOpacity 
-          style={styles.cardContent} 
-          onPress={handleTap}
-          activeOpacity={0.85}
-        >
+        <View style={styles.cardContent}>
           {/* Avatar Removed */}
 
           {/* Info */}
@@ -215,7 +199,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({
               />
             </View>
           )}
-        </TouchableOpacity>
+        </View>
       </Animated.View>
     </View>
   );

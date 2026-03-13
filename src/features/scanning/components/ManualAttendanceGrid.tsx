@@ -7,6 +7,7 @@ import {
   Dimensions,
   FlatList,
   Animated,
+  Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -19,13 +20,13 @@ interface Student {
   rollNo: string;
   status: 'pending' | 'present' | 'absent' | 'od' | 'leave';
   batch?: number | null;
+  photoUrl?: string;
 }
 
 interface ManualAttendanceGridProps {
   students: Student[];
   onToggleStatus: (studentId: string) => void;
   onLongPress: (student: Student) => void;
-  batchFilter: 'all' | 1 | 2;
   isDark: boolean;
 }
 
@@ -40,7 +41,7 @@ const StatusColors = {
   present: ['#10B981', '#059669'], // Green
   absent: ['#EF4444', '#DC2626'],  // Red
   od: ['#F59E0B', '#D97706'],      // Amber
-  leave: ['#8B5CF6', '#7C3AED'],   // Violet
+  leave: ['#F97316', '#EA580C'],   // Orange
 };
 
 const SquareItem = React.memo(({ item, onTap, onLongPress, isDark }: { 
@@ -101,6 +102,13 @@ const SquareItem = React.memo(({ item, onTap, onLongPress, isDark }: {
             )}
             
             <View style={styles.contentContainer}>
+                {item.photoUrl ? (
+                    <Image source={{ uri: item.photoUrl }} style={styles.avatarGrid} />
+                ) : (
+                    <View style={[styles.avatarGrid, { backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' }]}>
+                        <Ionicons name="person" size={normalizeFont(16)} color="rgba(255,255,255,0.6)" />
+                    </View>
+                )}
                 <Text style={styles.rollText} numberOfLines={1}>{shortRoll}</Text>
                 <Text style={styles.nameText} numberOfLines={1}>{firstName}</Text>
             </View>
@@ -115,19 +123,12 @@ export const ManualAttendanceGrid: React.FC<ManualAttendanceGridProps> = ({
   students,
   onToggleStatus,
   onLongPress,
-  batchFilter,
   isDark
 }) => {
-  // Filter students
-  const filteredStudents = students.filter(s => {
-    if (batchFilter === 'all') return true;
-    return s.batch === batchFilter;
-  });
-
   return (
     <View style={styles.container}>
       <FlatList
-        data={filteredStudents}
+        data={students}
         keyExtractor={(item) => item.id}
         numColumns={COLUMNS}
         contentContainerStyle={styles.gridContent}
@@ -187,20 +188,27 @@ const styles = StyleSheet.create({
   },
   rollText: {
     color: 'rgba(255,255,255,0.9)',
-    fontSize: normalizeFont(16), // Smaller font
+    fontSize: normalizeFont(12), // Smaller font to fit avatar
     fontWeight: '800',
     marginBottom: 0, // Tight layout
     fontVariant: ['tabular-nums'],
     letterSpacing: 0,
+    marginTop: verticalScale(2),
   },
   nameText: {
     color: 'rgba(255,255,255,0.85)',
-    fontSize: normalizeFont(9), // Very small for name
+    fontSize: normalizeFont(8), // Very small for name
     fontWeight: '600',
     textAlign: 'center',
     lineHeight: normalizeFont(10),
-    marginTop: verticalScale(2),
+    marginTop: 0,
     maxWidth: '100%',
+  },
+  avatarGrid: {
+    width: scale(28),
+    height: scale(28),
+    borderRadius: moderateScale(14),
+    backgroundColor: 'rgba(255,255,255,0.1)',
   },
   statusBadge: {
     position: 'absolute',

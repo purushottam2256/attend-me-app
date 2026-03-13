@@ -424,21 +424,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
           remindersPaused = pausedStr === 'true';
 
           if (notificationsEnabled && !remindersPaused) {
-             // 2. Cancel only CLASS reminders (preserve event reminders)
-             await NotificationService.cancelClassReminders();
-             
              // Skip scheduling if today is a holiday
              if (holidayInfo && holidayInfo.type === 'holiday') {
-
                 return;
              }
              
-             // 3. Get existing scheduled notifications for dedup
+             // Get already-scheduled notification slot IDs for dedup
+             // This avoids cancelling and re-scheduling on every app open
              const scheduled = await NotificationService.getAllScheduled();
-             const scheduledSubjects = new Set(
+             const alreadyScheduledSlotIds = new Set(
                  scheduled
                     .filter(n => n.content.data?.type === 'CLASS_REMINDER')
-                    .map(n => n.content.data?.subjectName)
+                    .map(n => n.content.data?.slotId)
+                    .filter(Boolean)
              );
              
              for (const slot of mergedClasses) {
@@ -446,13 +444,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
                      const classDate = parseTime(slot.start_time);
                      if (classDate.getTime() > Date.now()) { // Only future classes
                          const subjectName = slot.subject?.name || 'Class';
-                         
-                         // 4. Schedule if not duplicate
-                         if (!scheduledSubjects.has(subjectName)) {
+                         // Only schedule if: not already scheduled for this slot AND attendance not taken
+                         if (!alreadyScheduledSlotIds.has(slot.slot_id) && !completedSlotIds.has(slot.slot_id)) {
                              await NotificationService.scheduleClassReminder(
                                  subjectName,
                                  `${slot.target_year}-${slot.target_section} (${slot.room || 'N/A'})`,
-                                 classDate
+                                 classDate,
+                                 slot.slot_id
                              );
                          }
                      }

@@ -131,7 +131,7 @@ export const DigitalIdCard: React.FC<DigitalIdCardProps> = ({
               </View>
             </View>
             <View style={{ flexDirection: "row", gap: 12 }}>
-              <Ionicons name="wifi" size={18} color="rgba(255,255,255,0.6)" />
+              {/* Wifi Icon Removed */}
               {onEdit && (
                 <TouchableOpacity onPress={onEdit}>
                   <Ionicons name="pencil" size={18} color="#FFF" />
@@ -222,7 +222,7 @@ export const DigitalIdCard: React.FC<DigitalIdCardProps> = ({
           <View style={styles.footer}>
             {/* Chip removed */}
             <View />
-            <Text style={styles.collegeCode}>CODE: MRCE</Text>
+            {/* Code Removed */}
           </View>
         </View>
       </View>

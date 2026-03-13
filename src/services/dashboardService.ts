@@ -35,6 +35,7 @@ export interface Student {
   full_name: string;
   bluetooth_uuid: string | null;
   batch?: number | null;
+  photo_url?: string | null;
 }
 
 export interface AttendanceSession {
@@ -346,26 +347,33 @@ export async function getSwapsAndSubstitutions(
   }
 }
 
-/**
- * Check if today is a holiday or has suspended classes
- */
 export async function getHolidayInfo(
   date: string = new Date().toISOString().split('T')[0]
 ): Promise<HolidayInfo | null> {
   try {
     const { data, error } = await supabase
-      .from('academic_calendar')
+      .from('holidays')
       .select('*')
-      .eq('date', date)
-      .in('type', ['holiday', 'event', 'exam']);
+      .eq('date', date);
 
     if (error || !data || data.length === 0) return null;
     
-    // Priorities: holiday (1) > exam (2) > event (3)
-    const typePriority: Record<string, number> = { holiday: 1, exam: 2, event: 3 };
-    const sorted = [...data].sort((a, b) => (typePriority[a.type] || 99) - (typePriority[b.type] || 99));
+    // Priorities: national holiday > others
+    const sorted = [...data].sort((a, b) => {
+        if (a.is_national && !b.is_national) return -1;
+        if (!a.is_national && b.is_national) return 1;
+        return 0;
+    });
 
-    return sorted[0];
+    const record = sorted[0];
+
+    return {
+       id: record.id,
+       date: record.date,
+       title: record.name || record.title || 'Holiday',
+       type: record.type || (record.is_national ? 'holiday' : 'event'),
+       description: record.description || null
+    };
   } catch {
     return null;
   }
@@ -417,7 +425,7 @@ export async function getStudentsForClass(
   try {
     let query = supabase
       .from('students')
-      .select('id, roll_no, full_name, bluetooth_uuid, batch')
+      .select('id, roll_no, full_name, bluetooth_uuid, batch, photo_url')
       .eq('dept', dept)
       .eq('year', year)
       .eq('section', section)

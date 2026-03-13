@@ -318,7 +318,8 @@ export const NotificationService = {
   async scheduleClassReminder(
     subjectName: string,
     classDetails: string,
-    startTime: Date
+    startTime: Date,
+    slotId?: string
   ): Promise<string | null> {
     const triggerDate = new Date(startTime);
     triggerDate.setMinutes(triggerDate.getMinutes() - 10);
@@ -330,7 +331,7 @@ export const NotificationService = {
       return this.showLocalNotification({
         title: `📚 Upcoming: ${subjectName}`,
         body: `${classDetails} starts in ${minutesLeft} min`,
-        data: { type: 'CLASS_REMINDER' },
+        data: { type: 'CLASS_REMINDER', slotId },
         categoryId: 'REMINDER',
       });
     }
@@ -340,7 +341,7 @@ export const NotificationService = {
       title: `📚 Upcoming: ${subjectName}`,
       body: `${classDetails} starts in 10 minutes`,
       triggerDate,
-      data: { type: 'CLASS_REMINDER', subjectName },
+      data: { type: 'CLASS_REMINDER', subjectName, slotId },
       channelId: CHANNELS.REMINDERS.id,
       categoryId: 'REMINDER',
     });

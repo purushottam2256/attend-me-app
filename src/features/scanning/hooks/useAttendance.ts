@@ -45,6 +45,7 @@ export
 interface ClassData {
   id?: string;
   slot_id?: string;
+  originalSlotIds?: string[];
   subject?: {
     id: string;
     name: string;
@@ -138,7 +139,7 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
               rollNo: s.roll_no,
               bleUUID: s.bluetooth_uuid || undefined,
               status: initialStatus,
-              photoUrl: undefined,
+              photoUrl: s.photo_url || undefined,
               batch: s.batch,
             };
           });
@@ -270,26 +271,34 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
       status: s.status === 'pending' ? 'absent' as const : s.status,
     }));
 
+    // Determine all slot IDs to process (merged classes have multiple)
+    const slotIdsToProcess = classData.originalSlotIds?.length 
+      ? classData.originalSlotIds 
+      : [classData.slot_id];
+
     // If offline, queue the submission
     if (!isOnline || isOfflineMode) {
       try {
-        await queueSubmission({
-          classData: {
-            slotId: String(classData.slot_id || '0'),
-            subjectName: classData.subject?.name || 'Unknown',
-            subjectId: classData.subject?.id, 
-            dept: classData.target_dept,
-            year: classData.target_year,
-            sectionLetter: classData.target_section,
-            section: `${classData.target_dept}-${classData.target_year}-${classData.target_section}`,
-          },
-          attendance: records,
-          submittedAt: new Date().toISOString(),
-          id: `manual-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          retryCount: 0,
-        });
+        for (const sId of slotIdsToProcess) {
+          if (!sId) continue;
+          await queueSubmission({
+            classData: {
+              slotId: String(sId),
+              subjectName: classData.subject?.name || 'Unknown',
+              subjectId: classData.subject?.id, 
+              dept: classData.target_dept,
+              year: classData.target_year,
+              sectionLetter: classData.target_section,
+              section: `${classData.target_dept}-${classData.target_year}-${classData.target_section}`,
+            },
+            attendance: records,
+            submittedAt: new Date().toISOString(),
+            id: `manual-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            retryCount: 0,
+          });
+        }
         
-        log.info('Submission queued for later sync');
+        log.info(`Submission queued for ${slotIdsToProcess.length} slots for later sync`);
         // Clear draft after queuing
         if (classData.slot_id) {
             await clearDraftAttendance(classData.slot_id);
@@ -312,31 +321,36 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
         return { success: false, error: 'Missing subject ID' };
       }
 
-      const { sessionId, error: sessionError } = await createAttendanceSession(
-        user.id,
-        classData.subject.id,
-        classData.slot_id,
-        classData.target_dept,
-        classData.target_year,
-        classData.target_section,
-        totalCount,
-        classData.batch,
-        classData.isSubstitute || false,
-        classData.originalFacultyId || null
-      );
+      // Loop through all slot IDs and create sessions & submit attendance for each
+      for (const sId of slotIdsToProcess) {
+        if (!sId) continue;
 
-      if (sessionError || !sessionId) {
-        return { success: false, error: sessionError || 'Failed to create session' };
-      }
+        const { sessionId, error: sessionError } = await createAttendanceSession(
+          user.id,
+          classData.subject.id,
+          sId,
+          classData.target_dept,
+          classData.target_year,
+          classData.target_section,
+          totalCount,
+          classData.batch,
+          classData.isSubstitute || false,
+          classData.originalFacultyId || null
+        );
 
-      const { success, error: submitError } = await submitAttendance(
-        sessionId,
-        user.id,
-        records
-      );
+        if (sessionError || !sessionId) {
+          return { success: false, error: sessionError || `Failed to create session for slot ${sId}` };
+        }
 
-      if (!success) {
-        return { success: false, error: submitError || 'Failed to submit' };
+        const { success, error: submitError } = await submitAttendance(
+          sessionId,
+          user.id,
+          records
+        );
+
+        if (!success) {
+          return { success: false, error: submitError || `Failed to submit for slot ${sId}` };
+        }
       }
 
       // Clear draft after successful submission

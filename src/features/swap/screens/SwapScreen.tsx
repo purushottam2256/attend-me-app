@@ -41,6 +41,7 @@ interface Faculty {
   dept: string;
   email: string;
   push_token?: string;
+  isBusy?: boolean;
 }
 
 export const SwapScreen: React.FC = () => {
@@ -76,6 +77,7 @@ export const SwapScreen: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFaculty, setSelectedFaculty] = useState<Faculty | null>(null);
   const [substituteNote, setSubstituteNote] = useState('');
+  const [busyFacultyIds, setBusyFacultyIds] = useState<Set<string>>(new Set());
   
   // Swap Mode State
   const [swapMyClass, setSwapMyClass] = useState<TimetableSlot | null>(null);
@@ -155,6 +157,38 @@ export const SwapScreen: React.FC = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  // Load busy faculties for selected substitute period
+  useEffect(() => {
+    if (mode === 'substitute' && selectedClass) {
+      const loadBusyFaculties = async () => {
+        try {
+          const today = new Date();
+          const targetDate = isShowingTomorrow 
+              ? new Date(today.setDate(today.getDate() + 1))
+              : today;
+          const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+          const targetDay = days[targetDate.getDay()];
+
+          const { data } = await supabase
+            .from('master_timetables')
+            .select('faculty_id')
+            .eq('day', targetDay)
+            .eq('slot_id', selectedClass.slot_id)
+            .eq('is_active', true);
+            
+          if (data) {
+            setBusyFacultyIds(new Set(data.map((item: any) => item.faculty_id)));
+          }
+        } catch (e) {
+          console.error('[SwapScreen] Error fetching busy faculties', e);
+        }
+      };
+      loadBusyFaculties();
+    } else {
+      setBusyFacultyIds(new Set());
+    }
+  }, [selectedClass, mode, isShowingTomorrow]);
 
   // Pre-selection Effect (runs when screen is focused)
   useFocusEffect(
@@ -341,11 +375,33 @@ export const SwapScreen: React.FC = () => {
     setRefreshing(false);
   }, []);
 
-  // Filter faculty by search
-  const filteredFaculty = facultyList.filter(f =>
-    f.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    f.dept?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Filter and sort faculty by search and availability
+  const getProcessedFacultyList = () => {
+    let list = facultyList.map(f => ({
+      ...f,
+      isBusy: busyFacultyIds.has(f.id)
+    }));
+
+    if (searchQuery) {
+      list = list.filter(f => 
+        f.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        f.dept?.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    } else {
+      // Hide busy faculty when not searching
+      list = list.filter(f => !f.isBusy);
+    }
+
+    // Free first, then alphabetical
+    return list.sort((a, b) => {
+      if (a.isBusy === b.isBusy) {
+        return a.full_name.localeCompare(b.full_name);
+      }
+      return a.isBusy ? 1 : -1;
+    });
+  };
+
+  const processedFacultyList = getProcessedFacultyList();
 
   const filteredSwapFaculty = sameClassFaculties.filter(f =>
     f.full_name.toLowerCase().includes(swapSearchQuery.toLowerCase()) ||
@@ -635,12 +691,18 @@ export const SwapScreen: React.FC = () => {
         shadowOpacity: isSelected ? 0.25 : 0.15,
         shadowRadius: moderateScale(6),
         elevation: isSelected ? 6 : 3,
+        opacity: faculty.isBusy ? 0.5 : 1,
       }]}
-      onPress={onPress}
+      onPress={() => {
+        if (faculty.isBusy) {
+          showFeedback('warning', 'Faculty is Busy', `${faculty.full_name} has a class during this time. Choose carefully.`);
+        }
+        onPress();
+      }}
       activeOpacity={0.8}
     >
       <LinearGradient
-        colors={isSelected ? [colors.accent, colors.tealLight] : [colors.tealLight, colors.teal]}
+        colors={isSelected ? [colors.accent, colors.tealLight] : faculty.isBusy ? ['#94A3B8', '#64748B'] : [colors.tealLight, colors.teal]}
         style={styles.facultyAvatar}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
@@ -650,9 +712,16 @@ export const SwapScreen: React.FC = () => {
         </Text>
       </LinearGradient>
       <View style={styles.facultyInfo}>
-        <Text style={[styles.facultyName, { color: colors.textPrimary }]}>
-          {faculty.full_name}
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: scale(8) }}>
+          <Text style={[styles.facultyName, { color: colors.textPrimary }]}>
+            {faculty.full_name}
+          </Text>
+          {faculty.isBusy && (
+            <View style={{ backgroundColor: '#EF444420', paddingHorizontal: scale(6), paddingVertical: verticalScale(2), borderRadius: moderateScale(4) }}>
+              <Text style={{ color: '#EF4444', fontSize: normalizeFont(10), fontWeight: '700' }}>BUSY</Text>
+            </View>
+          )}
+        </View>
         <Text style={[styles.facultyDept, { color: colors.textSecondary }]}>
           {faculty.dept || 'Faculty'}
         </Text>
@@ -738,13 +807,13 @@ export const SwapScreen: React.FC = () => {
           </View>
           
           {/* Faculty List - show all, filtered by search */}
-          {filteredFaculty.map(f => renderFacultyItem(
+          {processedFacultyList.map(f => renderFacultyItem(
             f,
             selectedFaculty?.id === f.id,
             () => setSelectedFaculty(selectedFaculty?.id === f.id ? null : f)
           ))}
           
-          {filteredFaculty.length === 0 && (
+          {processedFacultyList.length === 0 && (
             <Text style={[styles.emptySubtitle, { color: colors.textMuted, textAlign: 'center', marginTop: 20 }]}>
               No faculty found in {userDept}
             </Text>

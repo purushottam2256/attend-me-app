@@ -48,6 +48,7 @@ import {
   moderateScale,
   normalizeFont,
 } from "../../../utils/responsive"; // Import responsive utils
+import ErrorBoundary from "../../../components/ErrorBoundary";
 
 interface ProfileScreenProps {
   userName: string;
@@ -155,25 +156,30 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const loadHolidays = async () => {
     try {
       // User requested 'holidays' table strictly
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("holidays")
         .select("*")
         .gte("date", new Date().toISOString())
         .order("date", { ascending: true })
         .limit(5);
 
-      if (data) {
+      if (error) throw error;
+
+      if (data && Array.isArray(data)) {
         // Map potential schema differences (e.g. name vs title)
         const mappedData = data.map((h: any) => ({
           ...h,
-          title: h.title || h.name || "Holiday",
-          type: h.type || "holiday",
-          description: h.description || "",
+          title: h?.title || h?.name || "Holiday",
+          type: h?.type || "holiday",
+          description: h?.description || "",
         }));
         setHolidays(mappedData);
+      } else {
+        setHolidays([]);
       }
     } catch (e) {
       console.error("Error loading holidays:", e);
+      setHolidays([]); // Ensure array state
     }
   };
 
@@ -181,8 +187,12 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     try {
       const {
         data: { user },
+        error: userError,
       } = await supabase.auth.getUser();
-      if (!user) return;
+      if (userError || !user) {
+        setTimetable([]);
+        return;
+      }
 
       const { data, error } = await supabase
         .from("master_timetables")
@@ -203,9 +213,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         .eq("is_active", true);
 
       if (error) throw error;
-      if (data) setTimetable(data);
+      setTimetable(data && Array.isArray(data) ? data : []);
     } catch (err) {
       console.log("Error loading timetable:", err);
+      setTimetable([]); // Ensure array state
     }
   };
 
@@ -213,32 +224,30 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     try {
       if (connectionStatus === "online") {
         // Online: Fetch from Supabase
-        try {
-          const {
-            data: { user },
-          } = await supabase.auth.getUser();
-          if (user) {
-            setUserEmail(user.email || "");
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+        
+        if (!userError && user) {
+          setUserEmail(user?.email || "");
 
-            const { data: profile } = await supabase
-              .from("profiles")
-              .select("*")
-              .eq("id", user.id)
-              .single();
+          const { data: profile, error: profileError } = await supabase
+            .from("profiles")
+            .select("*")
+            .eq("id", user.id)
+            .single();
 
-            if (profile) {
-              setDisplayName(profile.full_name || "");
-              setUserDept(profile.department || "CSM");
-              setUserRole(profile.role || "faculty");
-              setProfileImage(profile.avatar_url);
+          if (!profileError && profile) {
+            setDisplayName(profile?.full_name || "");
+            setUserDept(profile?.department || "CSM");
+            setUserRole(profile?.role || "faculty");
+            setProfileImage(profile?.avatar_url || null);
 
-              // We can still cache it for other screens like Home/Notifications,
-              // but we won't load it for the ID card if offline.
-              await cacheProfile(profile);
-            }
+            // We can still cache it for other screens like Home/Notifications,
+            // but we won't load it for the ID card if offline.
+            await cacheProfile(profile);
           }
-        } catch (e) {
-          console.error("Error loading user data:", e);
         }
       } else {
         // Offline Model Removed as per request
@@ -248,7 +257,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       // Ensure we treat this as "no offline data loaded"
       setIsOfflineData(false);
     } catch (error) {
-      console.error(error);
+      console.error("Error in loadUserData wrapper:", error);
     }
   };
 
@@ -262,13 +271,19 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
           const paused = await AsyncStorage.getItem('@attend_me/reminders_paused');
           if (paused !== null) setRemindersPaused(paused === 'true');
-      } catch (e) {}
+      } catch (e) {
+          console.error("Error loading settings:", e);
+      }
   };
 
   const toggleHaptics = async (val: boolean) => {
-    setHapticsEnabled(val);
-    await AsyncStorage.setItem("hapticsEnabled", val.toString());
-    if (val) await safeHaptic(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      setHapticsEnabled(val);
+      await AsyncStorage.setItem("hapticsEnabled", val.toString());
+      if (val) await safeHaptic(Haptics.ImpactFeedbackStyle.Light);
+    } catch (e) {
+      console.error("Error saving haptic setting:", e);
+    }
   };
 
   const toggleNotifications = async (val: boolean) => {
@@ -585,20 +600,112 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         ]}
         showsVerticalScrollIndicator={false}
       >
-        <DigitalIdCard
-          user={{
-            name: displayName || "Faculty Member",
-            email: userEmail || "No Email",
-            dept: userDept || "CSM",
-            role: userRole || "Faculty",
-            photoUrl: profileImage || undefined,
-          }}
-          onEdit={() => setEditProfileVisible(true)}
-        />
+        <ErrorBoundary>
+          <DigitalIdCard
+            user={{
+              name: displayName || "Faculty Member",
+              email: userEmail || "No Email",
+              dept: userDept || "CSM",
+              role: userRole || "Faculty",
+              photoUrl: profileImage || undefined,
+            }}
+            onEdit={() => setEditProfileVisible(true)}
+          />
 
-        <View style={{ marginBottom: verticalScale(24) }} />
+          <View style={{ marginBottom: verticalScale(24) }} />
 
-        {renderSection("Faculty Services", [
+          {/* Holidays / Events Section - Moved to main profile view */}
+          <Text
+            style={[
+              styles.sectionTitle,
+              { color: isDark ? "#FFFFFF" : "#1E293B", marginBottom: verticalScale(12) },
+            ]}
+          >
+            UPCOMING EVENTS
+          </Text>
+          {holidays && holidays.length === 0 ? (
+            <View
+              style={{
+                backgroundColor: isDark ? "#082020" : "#FFFFFF",
+                padding: scale(16),
+                borderRadius: moderateScale(16),
+                borderWidth: isDark ? 0 : 1,
+                borderColor: "#E2E8F0",
+                alignItems: "center",
+                marginBottom: verticalScale(24),
+              }}
+            >
+              <Ionicons name="calendar-clear" size={normalizeFont(32)} color={isDark ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.1)"} />
+              <Text style={{ color: isDark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.4)", marginTop: verticalScale(8), fontSize: normalizeFont(13) }}>
+                No upcoming events this week.
+              </Text>
+            </View>
+          ) : (
+            <View style={{ marginBottom: verticalScale(24) }}>
+              {holidays?.map((h, i) => (
+                <View
+                  key={i}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    backgroundColor: isDark ? "#082020" : "#FFFFFF",
+                    padding: scale(16),
+                    borderRadius: moderateScale(16),
+                    marginBottom: verticalScale(12),
+                    borderWidth: isDark ? 0 : 1,
+                    borderColor: "#E2E8F0",
+                  }}
+                >
+                  <View
+                    style={{
+                      width: scale(48),
+                      height: scale(48),
+                      borderRadius: moderateScale(12),
+                      backgroundColor: h?.type === "holiday" ? "rgba(239, 68, 68, 0.1)" : h?.type === "exam" ? "rgba(245, 158, 11, 0.1)" : "rgba(59, 130, 246, 0.1)",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginRight: scale(16),
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: normalizeFont(18),
+                        fontWeight: "800",
+                        color: h?.type === "holiday" ? "#EF4444" : h?.type === "exam" ? "#F59E0B" : "#3B82F6",
+                      }}
+                    >
+                      {h?.date ? new Date(h.date).getDate() : '--'}
+                    </Text>
+                    <Text
+                      style={{
+                        fontSize: normalizeFont(9),
+                        fontWeight: "700",
+                        textTransform: "uppercase",
+                        color: h?.type === "holiday" ? "#EF4444" : h?.type === "exam" ? "#F59E0B" : "#3B82F6",
+                      }}
+                    >
+                      {h?.date ? new Date(h.date).toLocaleString("default", { month: "short" }) : 'UNK'}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: isDark ? "#FFF" : "#0F172A", fontWeight: "700", fontSize: normalizeFont(15) }}>
+                      {h?.title || "Event"}
+                    </Text>
+                    <Text style={{ color: isDark ? "#94A3B8" : "#64748B", fontSize: normalizeFont(13), marginTop: verticalScale(2) }}>
+                      {h?.description || "College Event"}
+                    </Text>
+                  </View>
+                  <View style={{ backgroundColor: isDark ? "#334155" : "#F1F5F9", paddingHorizontal: scale(10), paddingVertical: verticalScale(4), borderRadius: moderateScale(100) }}>
+                    <Text style={{ fontSize: normalizeFont(10), color: isDark ? "#CBD5E1" : "#475569", fontWeight: "600", textTransform: "uppercase" }}>
+                      {h?.type || 'EVENT'}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {renderSection("Faculty Services", [
           {
             icon: "document-text",
             label: "Apply for Leave",
@@ -709,7 +816,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         >
           MRCE Attend-Me v1.0.3
         </Text>
-        <View style={{ height: 100 }} />
+          <View style={{ height: 100 }} />
+        </ErrorBoundary>
       </ScrollView>
 
       {/* --- Leave Modal --- */}
@@ -1327,138 +1435,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                 Swipe horizontal to view full week • Data synced from central db
               </Text>
 
-              {/* Holidays Section */}
-              <Text
-                style={[
-                  styles.sectionTitle,
-                  { color: isDark ? "#94A3B8" : "#64748B", marginTop: 32 },
-                ]}
-              >
-                UPCOMING HOLIDAYS & EVENTS
-              </Text>
-
-              {holidays.length === 0 ? (
-                <View
-                  style={{
-                    padding: scale(20),
-                    alignItems: "center",
-                    opacity: 0.5,
-                  }}
-                >
-                  <Text style={{ color: isDark ? "#FFF" : "#000" }}>
-                    No upcoming events.
-                  </Text>
-                </View>
-              ) : (
-                holidays.map((h, i) => (
-                  <View
-                    key={i}
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      backgroundColor: isDark
-                        ? "rgba(255,255,255,0.05)"
-                        : "#FFF",
-                      padding: scale(16),
-                      borderRadius: moderateScale(16),
-                      marginBottom: verticalScale(12),
-                      borderWidth: 1,
-                      borderColor: isDark
-                        ? "rgba(255,255,255,0.1)"
-                        : "transparent",
-                    }}
-                  >
-                    <View
-                      style={{
-                        width: scale(48),
-                        height: scale(48),
-                        borderRadius: moderateScale(12),
-                        backgroundColor:
-                          h.type === "holiday"
-                            ? "rgba(239, 68, 68, 0.1)"
-                            : h.type === "exam"
-                              ? "rgba(245, 158, 11, 0.1)"
-                              : "rgba(59, 130, 246, 0.1)",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        marginRight: scale(16),
-                      }}
-                    >
-                      <Text
-                        style={{
-                          fontSize: normalizeFont(18),
-                          fontWeight: "800",
-                          color:
-                            h.type === "holiday"
-                              ? "#EF4444"
-                              : h.type === "exam"
-                                ? "#F59E0B"
-                                : "#3B82F6",
-                        }}
-                      >
-                        {new Date(h.date).getDate()}
-                      </Text>
-                      <Text
-                        style={{
-                          fontSize: normalizeFont(9),
-                          fontWeight: "700",
-                          textTransform: "uppercase",
-                          color:
-                            h.type === "holiday"
-                              ? "#EF4444"
-                              : h.type === "exam"
-                                ? "#F59E0B"
-                                : "#3B82F6",
-                        }}
-                      >
-                        {new Date(h.date).toLocaleString("default", {
-                          month: "short",
-                        })}
-                      </Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text
-                        style={{
-                          color: isDark ? "#FFF" : "#0F172A",
-                          fontWeight: "700",
-                          fontSize: normalizeFont(15),
-                        }}
-                      >
-                        {h.title}
-                      </Text>
-                      <Text
-                        style={{
-                          color: isDark ? "#94A3B8" : "#64748B",
-                          fontSize: normalizeFont(13),
-                          marginTop: verticalScale(2),
-                        }}
-                      >
-                        {h.description || "College Event"}
-                      </Text>
-                    </View>
-                    <View
-                      style={{
-                        backgroundColor: isDark ? "#334155" : "#F1F5F9",
-                        paddingHorizontal: scale(10),
-                        paddingVertical: verticalScale(4),
-                        borderRadius: moderateScale(100),
-                      }}
-                    >
-                      <Text
-                        style={{
-                          fontSize: normalizeFont(10),
-                          color: isDark ? "#CBD5E1" : "#475569",
-                          fontWeight: "600",
-                          textTransform: "uppercase",
-                        }}
-                      >
-                        {h.type}
-                      </Text>
-                    </View>
-                  </View>
-                ))
-              )}
-
+              {/* Holidays Section Moved to Main Profile View */}
               <View style={{ height: 100 }} />
             </ScrollView>
           </View>

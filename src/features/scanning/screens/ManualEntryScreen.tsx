@@ -29,9 +29,6 @@ import { supabase } from '@config/supabase';
 import { ZenToast } from '@components/ZenToast';
 import { scale, verticalScale, moderateScale, normalizeFont } from '@utils/responsive';
 
-// Types
-type BatchFilter = 'all' | 1 | 2;
-
 // Stats Component
 const StatsBar = ({ counts, onBulkAction }: { 
     counts: { present: number, absent: number, od: number, leave: number, total: number },
@@ -85,7 +82,6 @@ export const ManualEntryScreen: React.FC = () => {
   const { classData } = route.params;
 
   // State
-  const [batchFilter, setBatchFilter] = useState<BatchFilter>('all');
   const [hasChanges, setHasChanges] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<any | null>(null); // For Modal
@@ -111,7 +107,7 @@ export const ManualEntryScreen: React.FC = () => {
   } = useAttendance({ classData, batchOverride: 'full' });
 
   // Filter Logic
-  const filteredStudents = students.filter(s => batchFilter === 'all' || s.batch === batchFilter);
+  const filteredStudents = students;
   
   const stats = {
       present: filteredStudents.filter(s => s.status === 'present').length,
@@ -185,12 +181,6 @@ export const ManualEntryScreen: React.FC = () => {
     }
   };
 
-  const cycleFilter = () => {
-      if (batchFilter === 'all') setBatchFilter(1);
-      else if (batchFilter === 1) setBatchFilter(2);
-      else setBatchFilter('all');
-  };
-
   const colors = {
       bgGradient: ['#0D4A4A', '#1A6B6B', '#0F3D3D'],
       accent: '#3DDC97',
@@ -247,13 +237,7 @@ export const ManualEntryScreen: React.FC = () => {
             )}
         </View>
 
-        {/* Filter Button (Replacing Save) */}
-        <TouchableOpacity onPress={cycleFilter} style={styles.filterButton}>
-            <Ionicons name="filter" size={normalizeFont(16)} color="#FFF" />
-            <Text style={styles.filterText}>
-                {batchFilter === 'all' ? 'All' : `B${batchFilter}`}
-            </Text>
-        </TouchableOpacity>
+        {/* Filter Button (Replacing Save) - REMOVED AS PER REQUIREMENT */}
       </View>
 
       {/* Stats & Actions */}
@@ -264,7 +248,6 @@ export const ManualEntryScreen: React.FC = () => {
         students={students}
         onToggleStatus={handleToggle}
         onLongPress={setSelectedStudent}
-        batchFilter={batchFilter}
         isDark={true}
       />
 
@@ -303,7 +286,11 @@ export const ManualEntryScreen: React.FC = () => {
                     </TouchableOpacity>
                     
                     <View style={styles.modalAvatarPlaceholder}>
-                         <Text style={styles.modalAvatarText}>{selectedStudent.name[0]}</Text>
+                        {selectedStudent.photoUrl ? (
+                            <Image source={{ uri: selectedStudent.photoUrl }} style={{ width: scale(64), height: scale(64), borderRadius: moderateScale(32) }} />
+                        ) : (
+                            <Text style={styles.modalAvatarText}>{selectedStudent.name[0]}</Text>
+                        )}
                     </View>
                     
                     <Text style={styles.modalName}>{selectedStudent.name}</Text>

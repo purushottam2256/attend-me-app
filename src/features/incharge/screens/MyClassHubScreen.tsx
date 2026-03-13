@@ -597,6 +597,17 @@ export const MyClassHubScreen: React.FC = () => {
               <Text style={[styles.actionSubtitle, { color: colors.textSecondary }]}>View History</Text>
             </TouchableOpacity>
 
+            <TouchableOpacity 
+              style={[styles.actionCard, { backgroundColor: colors.surface }]}
+              activeOpacity={0.7}
+              onPress={() => navigation.navigate('ProjectFees' as never)}
+            >
+              <View style={[styles.iconCircle, { backgroundColor: 'rgba(13, 148, 136, 0.1)' }]}>
+                <Ionicons name="briefcase" size={normalizeFont(24)} color="#0D9488" />
+              </View>
+              <Text style={[styles.actionTitle, { color: colors.textPrimary }]}> Project Fees</Text>
+              <Text style={[styles.actionSubtitle, { color: colors.textSecondary }]}>Manage Class Fees</Text>
+            </TouchableOpacity>
 
           </View>
         </View>

@@ -180,6 +180,7 @@ CREATE TABLE public.students (
     batch INTEGER CHECK (batch IN (1, 2)), -- For lab sessions
     bluetooth_uuid TEXT UNIQUE, -- Beacon UUID
     face_id_data TEXT, -- Encrypted face recognition data
+    avatar_url TEXT, -- Student profile photo URL
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
@@ -1948,6 +1949,8 @@ CREATE TRIGGER on_swap_created
 CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions;
 
 -- Function to send push to ALL faculty when calendar event is created
+-- Push notifications are ONLY sent if event is TODAY
+-- Future events get in-app notifications only (push via daily cron)
 CREATE OR REPLACE FUNCTION notify_calendar_event()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -1976,37 +1979,39 @@ BEGIN
 
   notification_body := NEW.title || ' on ' || TO_CHAR(NEW.date, 'Mon DD, YYYY');
 
-  -- Loop through all faculty with push tokens
-  FOR faculty_token IN 
-    SELECT push_token FROM profiles 
-    WHERE push_token IS NOT NULL 
-      AND role = 'faculty'
-      AND notifications_enabled = true
-  LOOP
-    -- Send push via Edge Function
-    PERFORM net.http_post(
-      url := supabase_url || '/functions/v1/send-push',
-      headers := jsonb_build_object(
-        'Authorization', 'Bearer ' || service_key,
-        'Content-Type', 'application/json'
-      ),
-      body := jsonb_build_object(
-        'token', faculty_token,
-        'title', notification_title,
-        'body', notification_body,
-        'data', jsonb_build_object('type', 'CALENDAR_EVENT', 'eventId', NEW.id)
-      )
-    );
-  END LOOP;
+  -- ONLY send push notifications if event is TODAY
+  IF NEW.date = CURRENT_DATE THEN
+    FOR faculty_token IN 
+      SELECT push_token FROM profiles 
+      WHERE push_token IS NOT NULL 
+        AND role = 'faculty'
+        AND notifications_enabled = true
+    LOOP
+      PERFORM net.http_post(
+        url := supabase_url || '/functions/v1/send-push',
+        headers := jsonb_build_object(
+          'Authorization', 'Bearer ' || service_key,
+          'Content-Type', 'application/json'
+        ),
+        body := jsonb_build_object(
+          'token', faculty_token,
+          'title', notification_title,
+          'body', notification_body,
+          'data', jsonb_build_object('type', 'CALENDAR_EVENT', 'eventId', NEW.id)
+        )
+      );
+    END LOOP;
+  END IF;
 
-  -- Also create in-app notifications for all faculty
-  INSERT INTO notifications (user_id, type, title, body, is_read)
+  -- Always create in-app notifications (with event date stored for daily cron push)
+  INSERT INTO notifications (user_id, type, title, body, is_read, data)
   SELECT 
     id, 
     'alert', 
     notification_title, 
     notification_body, 
-    false
+    false,
+    jsonb_build_object('event_date', NEW.date, 'event_type', NEW.type, 'eventId', NEW.id, 'push_sent', (NEW.date = CURRENT_DATE))
   FROM profiles 
   WHERE role = 'faculty' AND notifications_enabled = true;
 
@@ -2660,5 +2665,177 @@ CREATE POLICY "Anyone can delete their own avatar."
   USING ( bucket_id = 'avatars' );
 
 -- ============================================================================
+-- PROJECT FEES TABLES
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- PROJECT_FEES — Fee projects created by HOD
+-- ----------------------------------------------------------------------------
+CREATE TABLE public.project_fees (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    title TEXT NOT NULL,
+    description TEXT,
+    amount NUMERIC NOT NULL CHECK (amount > 0),
+    due_date DATE NOT NULL,
+    created_by UUID REFERENCES public.admins(id),
+    dept TEXT,
+    is_complete BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_project_fees_dept ON public.project_fees(dept);
+CREATE INDEX idx_project_fees_due_date ON public.project_fees(due_date);
+CREATE INDEX idx_project_fees_complete ON public.project_fees(is_complete);
+
+ALTER TABLE public.project_fees ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "project_fees_read" ON public.project_fees FOR SELECT USING (true);
+
+CREATE POLICY "project_fees_manage" ON public.project_fees FOR ALL
+USING (
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('hod', 'management', 'principal', 'developer'))
+    OR EXISTS (SELECT 1 FROM public.admins WHERE id = auth.uid() AND role IN ('hod', 'management', 'principal', 'developer'))
+)
+WITH CHECK (
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('hod', 'management', 'principal', 'developer'))
+    OR EXISTS (SELECT 1 FROM public.admins WHERE id = auth.uid() AND role IN ('hod', 'management', 'principal', 'developer'))
+);
+
+-- Trigger for updated_at
+CREATE TRIGGER update_project_fees_updated_at
+    BEFORE UPDATE ON public.project_fees
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
+-- ----------------------------------------------------------------------------
+-- PROJECT_FEE_CLASSES — Which classes are targeted by a fee project
+-- ----------------------------------------------------------------------------
+CREATE TABLE public.project_fee_classes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    fee_id UUID NOT NULL REFERENCES public.project_fees(id) ON DELETE CASCADE,
+    dept TEXT NOT NULL,
+    year INTEGER NOT NULL CHECK (year BETWEEN 1 AND 4),
+    section TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT unique_fee_class UNIQUE (fee_id, dept, year, section)
+);
+
+CREATE INDEX idx_pf_classes_fee ON public.project_fee_classes(fee_id);
+CREATE INDEX idx_pf_classes_class ON public.project_fee_classes(dept, year, section);
+
+ALTER TABLE public.project_fee_classes ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "pf_classes_read" ON public.project_fee_classes FOR SELECT USING (true);
+
+CREATE POLICY "pf_classes_manage" ON public.project_fee_classes FOR ALL
+USING (
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('hod', 'management', 'principal', 'developer'))
+    OR EXISTS (SELECT 1 FROM public.admins WHERE id = auth.uid() AND role IN ('hod', 'management', 'principal', 'developer'))
+)
+WITH CHECK (
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('hod', 'management', 'principal', 'developer'))
+    OR EXISTS (SELECT 1 FROM public.admins WHERE id = auth.uid() AND role IN ('hod', 'management', 'principal', 'developer'))
+);
+
+-- ----------------------------------------------------------------------------
+-- PROJECT_FEE_STUDENTS — Per-student payment tracking
+-- ----------------------------------------------------------------------------
+CREATE TABLE public.project_fee_students (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    fee_id UUID NOT NULL REFERENCES public.project_fees(id) ON DELETE CASCADE,
+    student_id UUID NOT NULL REFERENCES public.students(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'due' CHECK (status IN ('paid', 'due')),
+    reason TEXT,
+    updated_by UUID REFERENCES public.profiles(id),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT unique_fee_student UNIQUE (fee_id, student_id)
+);
+
+CREATE INDEX idx_pf_students_fee ON public.project_fee_students(fee_id);
+CREATE INDEX idx_pf_students_student ON public.project_fee_students(student_id);
+CREATE INDEX idx_pf_students_status ON public.project_fee_students(status);
+
+ALTER TABLE public.project_fee_students ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "pf_students_read" ON public.project_fee_students FOR SELECT USING (true);
+
+-- HOD/Management can do everything
+CREATE POLICY "pf_students_manage" ON public.project_fee_students FOR ALL
+USING (
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('hod', 'management', 'principal', 'developer'))
+    OR EXISTS (SELECT 1 FROM public.admins WHERE id = auth.uid() AND role IN ('hod', 'management', 'principal', 'developer'))
+)
+WITH CHECK (
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('hod', 'management', 'principal', 'developer'))
+    OR EXISTS (SELECT 1 FROM public.admins WHERE id = auth.uid() AND role IN ('hod', 'management', 'principal', 'developer'))
+);
+
+-- Class incharges can update status/reason for students in their assigned classes
+CREATE POLICY "pf_students_incharge_update" ON public.project_fee_students FOR UPDATE USING (
+    EXISTS (
+        SELECT 1 FROM public.class_incharges ci
+        JOIN public.students s ON s.dept = ci.dept AND s.year = ci.year AND s.section = ci.section
+        WHERE ci.faculty_id = auth.uid()
+          AND ci.is_active = TRUE
+          AND s.id = project_fee_students.student_id
+    )
+);
+
+-- Trigger for updated_at
+CREATE TRIGGER update_pf_students_updated_at
+    BEFORE UPDATE ON public.project_fee_students
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
+-- ============================================================================
 -- END OF SCHEMA
 -- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- Function: Auto-update faculty role based on class incharge assignments
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.handle_class_incharge_role_update()
+RETURNS TRIGGER AS $$
+DECLARE
+    active_count INTEGER;
+    target_faculty_id UUID;
+    current_role public.user_role;
+BEGIN
+    -- Determine the target faculty_id based on the operation
+    IF TG_OP = 'DELETE' THEN
+        target_faculty_id := OLD.faculty_id;
+    ELSE
+        target_faculty_id := NEW.faculty_id;
+    END IF;
+
+    -- Get the current role of the faculty
+    SELECT role INTO current_role FROM public.profiles WHERE id = target_faculty_id;
+
+    -- We only promote 'faculty' to 'class_incharge' or demote 'class_incharge' to 'faculty'.
+    -- We don't want to demote a 'hod' or 'principal' just because they get unassigned.
+    IF current_role NOT IN ('faculty', 'class_incharge') THEN
+        RETURN COALESCE(NEW, OLD);
+    END IF;
+
+    -- Count active incharge assignments for this faculty
+    SELECT COUNT(*) INTO active_count
+    FROM public.class_incharges
+    WHERE faculty_id = target_faculty_id AND is_active = TRUE;
+
+    IF active_count > 0 AND current_role = 'faculty' THEN
+        UPDATE public.profiles SET role = 'class_incharge' WHERE id = target_faculty_id;
+    ELSIF active_count = 0 AND current_role = 'class_incharge' THEN
+        UPDATE public.profiles SET role = 'faculty' WHERE id = target_faculty_id;
+    END IF;
+
+    RETURN COALESCE(NEW, OLD);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_class_incharge_role_change ON public.class_incharges;
+CREATE TRIGGER on_class_incharge_role_change
+    AFTER INSERT OR UPDATE OF is_active, faculty_id OR DELETE ON public.class_incharges
+    FOR EACH ROW
+    EXECUTE FUNCTION public.handle_class_incharge_role_update();

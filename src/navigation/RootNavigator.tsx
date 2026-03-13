@@ -27,6 +27,7 @@ import {
   MyClassHubScreen,
   PermissionScreen,
   ManagePermissionsScreen,
+  ProjectFeesScreen,
 } from '@features/incharge/screens';
 import { ManualEntryScreen } from '@features/scanning/screens/ManualEntryScreen';
 import { BeaconDoctorScreen } from '@features/diagnostics/screens/BeaconDoctorScreen';
@@ -48,6 +49,7 @@ export type RootStackParamList = {
   Main: undefined;
   Permission: undefined;
   ManagePermissions: undefined;
+  ProjectFees: undefined;
   ManualEntry: { 
     classData: {
       id?: string;
@@ -210,6 +212,11 @@ export const RootNavigator: React.FC = () => {
             name="ManualEntry" 
             component={ManualEntryScreen}
             options={{ headerShown: false, animation: 'slide_from_bottom' }}
+          />
+          <RootStack.Screen 
+            name="ProjectFees" 
+            component={ProjectFeesScreen}
+            options={{ headerShown: false, animation: 'slide_from_right' }}
           />
           <RootStack.Screen 
             name="BeaconDoctor" 

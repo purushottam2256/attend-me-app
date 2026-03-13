@@ -48,7 +48,7 @@ interface ScanButtonProps {
   accessibilityState?: { selected?: boolean };
 }
 
-// Custom Floating Scan Button
+// Custom Floating Scan Button (no label, centered icon)
 const ScanButton: React.FC<ScanButtonProps> = ({ onPress, accessibilityState }) => {
   const focused = accessibilityState?.selected;
   const scaleValue = React.useRef(new Animated.Value(1)).current;
@@ -83,7 +83,6 @@ const ScanButton: React.FC<ScanButtonProps> = ({ onPress, accessibilityState }) 
       ]}>
         <Ionicons name="bluetooth" size={24} color="#FFFFFF" />
       </Animated.View>
-      <Text style={styles.scanLabel}>Scan</Text>
     </TouchableOpacity>
   );
 };
@@ -194,9 +193,6 @@ const CustomTabBar = ({ state, descriptors, navigation, insets }: any) => {
           const isFocused = state.index === index;
           
           // Handle hidden tabs (MyClass/Profile logic) via options.tabBarButton
-          // If tabBarButton returns null, we shouldn't render.
-          // In standard nav, it passes props, but here we can just check the option itself if we set it to a function returning null.
-          // However, we set it to `undefined` or `() => null`.
           if (options.tabBarButton && options.tabBarButton() === null) {
             return null;
           }
@@ -286,7 +282,6 @@ export const MainTabNavigator: React.FC<MainTabNavigatorProps> = ({ userName, us
         component={ScanScreen}
         options={{
           tabBarLabel: 'Scan',
-          // No special options needed here as CustomTabBar handles it by name 'Scan'
         }}
       />
       
@@ -333,7 +328,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.15,
     shadowRadius: 30,
-    paddingHorizontal: 4, // Moderate padding
+    paddingHorizontal: 4,
     overflow: 'hidden',
   },
   blurContainer: {
@@ -343,7 +338,7 @@ const styles = StyleSheet.create({
   tabLabel: {
     fontSize: 9,
     fontFamily: Fonts.family.semiBold,
-    marginTop: 4, // Small gap between icon and label
+    marginTop: 4,
     letterSpacing: 0.2,
   },
   tabItemsContainer: {
@@ -357,7 +352,7 @@ const styles = StyleSheet.create({
     height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 8, // Ensure visual centering
+    paddingTop: 8,
   },
   scanButtonWrapper: {
     flex: 1,
@@ -371,7 +366,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 60,
     height: 60,
-    marginTop: -5, // Lowered even more as requested (was -15)
+    marginTop: -20, // Push up to center icon within the dock
   },
   scanButton: {
     width: 56, 
@@ -388,12 +383,6 @@ const styles = StyleSheet.create({
   },
   scanButtonFocused: {
     backgroundColor: '#1A6B6B',
-  },
-  scanLabel: {
-    fontSize: 10,
-    fontFamily: Fonts.family.semiBold,
-    color: '#0D4A4A',
-    marginTop: 4,
   },
   placeholder: {
     flex: 1,

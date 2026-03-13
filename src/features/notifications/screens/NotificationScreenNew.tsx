@@ -21,6 +21,7 @@ import { NotificationSkeleton } from '../../../components/ui/LoadingAnimation'; 
 import { NotificationDetailModal } from '../components/NotificationDetailModal';
 import { ConfirmationModal } from '../../../components/ConfirmationModal';
 import { ZenToast } from '../../../components/ZenToast';
+import ErrorBoundary from '../../../components/ErrorBoundary';
 import { formatDistanceToNow, isToday, isYesterday, format } from 'date-fns';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -678,26 +679,30 @@ export const NotificationScreen = ({ navigation }: any) => {
 
   // Effect to trigger actual mark read for items in viewableItemsRef
   const handleViewableItemsChanged = useRef(({ viewableItems }: any) => {
-      const idsToMark: string[] = [];
-      
-      viewableItems.forEach((viewable: any) => {
-          const item = viewable.item;
-          if (item?.data && 
-              !item.isRead && 
-              item.type !== 'request' && 
-              item.type !== 'swap' && 
-              item.type !== 'leave' &&
-              !viewableItemsRef.current.has(item.id)) {
-                  
-              idsToMark.push(item.id);
-              viewableItemsRef.current.add(item.id);
-          }
-      });
+      try {
+          const idsToMark: string[] = [];
+          
+          (viewableItems || []).forEach((viewable: any) => {
+              const item = viewable?.item;
+              if (item?.data && 
+                  item?.isRead === false && 
+                  item?.type !== 'request' && 
+                  item?.type !== 'swap' && 
+                  item?.type !== 'leave' &&
+                  !viewableItemsRef.current.has(item.id)) {
+                      
+                  idsToMark.push(item.id);
+                  viewableItemsRef.current.add(item.id);
+              }
+          });
 
-      if (idsToMark.length > 0) {
-        markNotificationsAsRead(idsToMark);
-         // Local state update
-         setNotifications(prev => prev.map(n => idsToMark.includes(n.id) ? { ...n, is_read: true } : n));
+          if (idsToMark.length > 0) {
+            markNotificationsAsRead(idsToMark);
+             // Local state update
+             setNotifications(prev => prev.map(n => idsToMark.includes(n.id) ? { ...n, is_read: true } : n));
+          }
+      } catch (err) {
+          console.warn('Error marking viewable items as read:', err);
       }
   }).current;
 
@@ -1227,57 +1232,59 @@ const ListItem = React.memo(({ item, isSelected, selectionMode, isDark, onToggle
              <NotificationSkeleton />
          </View>
       ) : (
-      <SectionList
-        sections={sections}
-        keyExtractor={(item) => `${item.type}_${item.id}`}
-        renderItem={({ item }) => (
-          <ListItem
-            item={item}
-            isSelected={selectedIds.has(item.id)}
-            selectionMode={selectionMode}
-            isDark={isDark}
-            onToggle={toggleSelection}
-            onAction={handleRequestAction}
-            onPressNotif={handlePressNotification}
-          />
-        )}
-        renderSectionHeader={({ section }) => (
-          <View style={[styles.sectionHeader, { backgroundColor: isDark ? '#0A0F0F' : '#F5F5F5' }]}>
-            <Text style={[styles.sectionTitle, { color: isDark ? 'rgba(255,255,255,0.5)' : '#0D4A4A' }]}>
-              {section.title}
-            </Text>
-          </View>
-        )}
-        stickySectionHeadersEnabled={false}
-        contentContainerStyle={[
-          styles.listContent,
-          sections.length === 0 && styles.emptyList
-        ]}
-        ListEmptyComponent={renderEmptyState}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#0D4A4A"
-            colors={['#0D4A4A']}
-          />
-        }
-        showsVerticalScrollIndicator={false}
-        onEndReached={onLoadMore}
-        onEndReachedThreshold={0.5}
-        ListFooterComponent={
-            loadingMore ? (
-                <View style={{ paddingVertical: 20 }}>
-                     <NotificationSkeleton />
-                </View>
-            ) : null
-        }
-        onViewableItemsChanged={handleViewableItemsChanged}
-        viewabilityConfig={{
-            itemVisiblePercentThreshold: 50,
-            minimumViewTime: 500,
-        }}
-      />
+      <ErrorBoundary>
+        <SectionList
+          sections={sections}
+          keyExtractor={(item) => `${item.type}_${item.id}`}
+          renderItem={({ item }) => (
+            <ListItem
+              item={item}
+              isSelected={selectedIds.has(item.id)}
+              selectionMode={selectionMode}
+              isDark={isDark}
+              onToggle={toggleSelection}
+              onAction={handleRequestAction}
+              onPressNotif={handlePressNotification}
+            />
+          )}
+          renderSectionHeader={({ section }) => (
+            <View style={[styles.sectionHeader, { backgroundColor: isDark ? '#0A0F0F' : '#F5F5F5' }]}>
+              <Text style={[styles.sectionTitle, { color: isDark ? 'rgba(255,255,255,0.5)' : '#0D4A4A' }]}>
+                {section.title}
+              </Text>
+            </View>
+          )}
+          stickySectionHeadersEnabled={false}
+          contentContainerStyle={[
+            styles.listContent,
+            sections.length === 0 && styles.emptyList
+          ]}
+          ListEmptyComponent={renderEmptyState}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#0D4A4A"
+              colors={['#0D4A4A']}
+            />
+          }
+          showsVerticalScrollIndicator={false}
+          onEndReached={onLoadMore}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+              loadingMore ? (
+                  <View style={{ paddingVertical: 20 }}>
+                       <NotificationSkeleton />
+                  </View>
+              ) : null
+          }
+          onViewableItemsChanged={handleViewableItemsChanged}
+          viewabilityConfig={{
+              itemVisiblePercentThreshold: 50,
+              minimumViewTime: 500,
+          }}
+        />
+      </ErrorBoundary>
       )}
 
 

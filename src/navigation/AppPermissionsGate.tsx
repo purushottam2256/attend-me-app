@@ -1,20 +1,27 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, AppState, AppStateStatus, Linking, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, Text, StyleSheet, AppState, AppStateStatus, Linking, TouchableOpacity, Animated, Dimensions } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { BleManager } from 'react-native-ble-plx';
 import { Colors } from '@constants';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { LinearGradient } from 'expo-linear-gradient';
+import { scale, verticalScale, moderateScale, normalizeFont } from '../utils/responsive';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface Props {
   onPermissionsGranted: () => void;
   onLogout: () => void;
 }
 
+const { width } = Dimensions.get('window');
+
 export const AppPermissionsGate: React.FC<Props> = ({ onPermissionsGranted, onLogout }) => {
   const [checking, setChecking] = useState(true);
   const [missingPermissions, setMissingPermissions] = useState<string[]>([]);
   const manager = React.useMemo(() => new BleManager(), []);
+  const insets = useSafeAreaInsets();
+  
+  // Animation for the toast
+  const slideAnim = useRef(new Animated.Value(200)).current;
 
   const checkPermissions = async () => {
     setChecking(true);
@@ -42,6 +49,24 @@ export const AppPermissionsGate: React.FC<Props> = ({ onPermissionsGranted, onLo
     setChecking(false);
 
     if (missing.length === 0) {
+      // Hide toast if visible
+      Animated.timing(slideAnim, {
+        toValue: 200,
+        duration: 300,
+        useNativeDriver: true,
+      }).start(() => {
+        onPermissionsGranted();
+      });
+    } else {
+      // Show toast
+      Animated.spring(slideAnim, {
+        toValue: 0,
+        friction: 8,
+        tension: 40,
+        useNativeDriver: true,
+      }).start();
+      
+      // Auto-proceed allows the app underneath to be interactive
       onPermissionsGranted();
     }
   };
@@ -65,123 +90,143 @@ export const AppPermissionsGate: React.FC<Props> = ({ onPermissionsGranted, onLo
       await Notifications.requestPermissionsAsync();
     }
     
-    if (missingPermissions.includes('Bluetooth (Turn On)')) {
-       // On Android we could enable it, but standard approach is leading to settings
-       manager.enable();
+    if (missingPermissions.includes('Bluetooth (Turn On)') || missingPermissions.includes('Bluetooth Permission')) {
+       try {
+         manager.enable();
+       } catch (e) {
+         console.log('Error enabling bluetooth', e);
+       }
     }
     
-    // Some permissions need settings app
+    // Check again after requesting
+    checkPermissions();
+  };
+
+  const handleOpenSettings = () => {
     Linking.openSettings();
   };
 
-  if (checking) return null; // Or a subtle loading spinner
-
-  if (missingPermissions.length === 0) return null; // Will trigger onPermissionsGranted
+  // If checking or no missing permissions, render nothing (toast is hidden)
+  if (checking || missingPermissions.length === 0) return null;
 
   return (
-    <LinearGradient colors={['#050D0D', '#0A1A1A']} style={styles.container}>
-      <View style={styles.card}>
-        <View style={styles.iconContainer}>
-            <Ionicons name="shield-checkmark" size={48} color="#F97316" />
-        </View>
-        <Text style={styles.title}>Action Required</Text>
-        <Text style={styles.subtitle}>Attend-Me requires the following permissions to function correctly:</Text>
-        
-        <View style={styles.list}>
-          {missingPermissions.map((perm, idx) => (
-            <View key={idx} style={styles.listItem}>
-              <Ionicons name="close-circle" size={20} color="#EF4444" />
-              <Text style={styles.listText}>{perm}</Text>
-            </View>
-          ))}
+    <Animated.View 
+      style={[
+        styles.toastContainer, 
+        { 
+          paddingBottom: Math.max(insets.bottom, verticalScale(16)),
+          transform: [{ translateY: slideAnim }] 
+        }
+      ]}
+    >
+      <View style={styles.toastCard}>
+        <View style={styles.headerRow}>
+          <View style={styles.iconContainer}>
+            <Ionicons name="shield-checkmark" size={moderateScale(20)} color="#10B981" />
+          </View>
+          <View style={styles.headerTextContainer}>
+            <Text style={styles.title}>Permissions Required</Text>
+            <Text style={styles.subtitle}>
+              {missingPermissions.join(', ')} missing
+            </Text>
+          </View>
         </View>
 
-        <TouchableOpacity style={styles.mainButton} onPress={handleRequestPermissions}>
-          <Text style={styles.mainButtonText}>Fix Permissions</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.logoutButton} onPress={onLogout}>
-          <Text style={styles.logoutButtonText}>Logout</Text>
-        </TouchableOpacity>
+        <View style={styles.actionRow}>
+          <TouchableOpacity style={styles.settingsButton} onPress={handleOpenSettings}>
+            <Ionicons name="settings-outline" size={moderateScale(16)} color="#10B981" />
+            <Text style={styles.settingsButtonText}>Settings</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.allowAllButton} onPress={handleRequestPermissions}>
+            <Text style={styles.allowAllButtonText}>Allow All</Text>
+          </TouchableOpacity>
+        </View>
       </View>
-    </LinearGradient>
+    </Animated.View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
+  toastContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 9999, // Ensure it floats above everything
+    paddingHorizontal: scale(16),
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
   },
-  card: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    padding: 32,
-    borderRadius: 24,
-    width: '100%',
-    alignItems: 'center',
+  toastCard: {
+    backgroundColor: '#0F172A', // Very dark slate
+    borderRadius: moderateScale(16),
+    padding: scale(16),
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: 'rgba(16, 185, 129, 0.3)', // Green border
   },
-  iconContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(249, 115, 22, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  title: {
-    fontSize: 24,
-    color: '#FFF',
-    fontFamily: 'Inter_700Bold',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 15,
-    color: 'rgba(255,255,255,0.6)',
-    textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 22,
-  },
-  list: {
-    width: '100%',
-    marginBottom: 32,
-    backgroundColor: 'rgba(0,0,0,0.2)',
-    padding: 16,
-    borderRadius: 16,
-  },
-  listItem: {
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: verticalScale(16),
   },
-  listText: {
-    color: '#FFF',
-    marginLeft: 12,
-    fontSize: 16,
-    fontFamily: 'Inter_500Medium',
-  },
-  mainButton: {
-    backgroundColor: '#F97316',
-    width: '100%',
-    padding: 16,
-    borderRadius: 12,
+  iconContainer: {
+    width: scale(36),
+    height: scale(36),
+    borderRadius: moderateScale(18),
+    backgroundColor: 'rgba(16, 185, 129, 0.15)', // Light green bg
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 16,
+    marginRight: scale(12),
   },
-  mainButtonText: {
+  headerTextContainer: {
+    flex: 1,
+  },
+  title: {
+    fontSize: normalizeFont(14),
     color: '#FFF',
-    fontSize: 16,
+    fontFamily: 'Inter_700Bold',
+    fontWeight: '700',
+  },
+  subtitle: {
+    fontSize: normalizeFont(12),
+    color: '#94A3B8', // Slate 400
+    fontFamily: 'Inter_500Medium',
+    marginTop: verticalScale(2),
+  },
+  actionRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: scale(12),
+  },
+  settingsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: verticalScale(8),
+    paddingHorizontal: scale(16),
+    borderRadius: moderateScale(8),
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  settingsButtonText: {
+    color: '#10B981', // Green text
+    fontSize: normalizeFont(13),
     fontFamily: 'Inter_600SemiBold',
+    fontWeight: '600',
+    marginLeft: scale(6),
   },
-  logoutButton: {
-    padding: 12,
+  allowAllButton: {
+    paddingVertical: verticalScale(8),
+    paddingHorizontal: scale(16),
+    borderRadius: moderateScale(8),
+    backgroundColor: '#10B981', // Solid green
   },
-  logoutButtonText: {
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 14,
-  }
+  allowAllButtonText: {
+    color: '#000', // Dark text on green background
+    fontSize: normalizeFont(13),
+    fontFamily: 'Inter_600SemiBold',
+    fontWeight: '700',
+  },
 });
