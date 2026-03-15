@@ -605,7 +605,7 @@ export const MyClassHubScreen: React.FC = () => {
               <View style={[styles.iconCircle, { backgroundColor: 'rgba(13, 148, 136, 0.1)' }]}>
                 <Ionicons name="briefcase" size={normalizeFont(28)} color="#0D9488" />
               </View>
-              <Text style={[styles.actionTitle, { color: colors.textPrimary }]}>Project Fees</Text>
+              <Text style={[styles.actionTitle, { color: colors.textPrimary }]}>Student Fees</Text>
               <Text style={[styles.actionSubtitle, { color: colors.textSecondary }]}>Manage Class Fees</Text>
             </TouchableOpacity>
 

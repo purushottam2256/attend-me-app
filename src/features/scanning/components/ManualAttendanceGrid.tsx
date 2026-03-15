@@ -50,7 +50,7 @@ const SquareItem = React.memo(({ item, onTap, onLongPress, isDark }: {
     onLongPress: (student: Student) => void;
     isDark: boolean 
 }) => {
-  const scale = useRef(new Animated.Value(1)).current;
+  const scaleAnim = useRef(new Animated.Value(1)).current;
 
   // Formatting: "21P31A0501" -> "501" usually, but user asked for "name and roll no"
   // Let's show last 3 digits of roll + First Name
@@ -59,8 +59,8 @@ const SquareItem = React.memo(({ item, onTap, onLongPress, isDark }: {
 
   const handlePress = () => {
     Animated.sequence([
-      Animated.timing(scale, { toValue: 0.95, duration: 50, useNativeDriver: true }),
-      Animated.timing(scale, { toValue: 1, duration: 100, useNativeDriver: true })
+      Animated.timing(scaleAnim, { toValue: 0.95, duration: 50, useNativeDriver: true }),
+      Animated.timing(scaleAnim, { toValue: 1, duration: 100, useNativeDriver: true })
     ]).start();
 
     if (item.status === 'present') {
@@ -87,30 +87,58 @@ const SquareItem = React.memo(({ item, onTap, onLongPress, isDark }: {
       }}
       disabled={!isInteractive && item.status !== 'od' && item.status !== 'leave'}
     >
-      <Animated.View style={[styles.squareContainer, { transform: [{ scale }], opacity }]}>
-        <LinearGradient
-          colors={colors as [string, string]}
-          style={styles.squareGradient}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-        >
-            {/* Student photo as background overlay */}
-            {item.photoUrl ? (
-              <Image
-                source={{ uri: item.photoUrl }}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  borderRadius: moderateScale(8),
-                  opacity: 0.25,
-                }}
-                resizeMode="cover"
-              />
-            ) : null}
+      <Animated.View style={[styles.squareContainer, { transform: [{ scale: scaleAnim }], opacity }]}>
+        {item.photoUrl ? (
+          // Full photo background mode
+          <View style={styles.squareGradient}>
+            <Image
+              source={{ uri: item.photoUrl }}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                borderRadius: moderateScale(8),
+              }}
+              resizeMode="cover"
+            />
+            {/* Status color overlay */}
+            <LinearGradient
+              colors={['transparent', colors[1] + 'DD']}
+              style={{
+                position: 'absolute',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: '65%',
+                borderBottomLeftRadius: moderateScale(8),
+                borderBottomRightRadius: moderateScale(8),
+              }}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+            />
 
+            {/* Status Icon / Badge for OD/Leave */}
+            {(item.status === 'od' || item.status === 'leave') && (
+                <View style={styles.statusBadge}>
+                    <Text style={styles.statusBadgeText}>{item.status.toUpperCase().slice(0, 1)}</Text>
+                </View>
+            )}
+
+            <View style={[styles.contentContainer, { justifyContent: 'flex-end', paddingBottom: scale(4) }]}>
+                <Text style={styles.rollText} numberOfLines={1}>{shortRoll}</Text>
+                <Text style={styles.nameText} numberOfLines={1}>{firstName}</Text>
+            </View>
+          </View>
+        ) : (
+          // No photo: gradient box with initials
+          <LinearGradient
+            colors={colors as [string, string]}
+            style={styles.squareGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          >
             {/* Status Icon / Badge for OD/Leave */}
             {(item.status === 'od' || item.status === 'leave') && (
                 <View style={styles.statusBadge}>
@@ -119,20 +147,16 @@ const SquareItem = React.memo(({ item, onTap, onLongPress, isDark }: {
             )}
             
             <View style={styles.contentContainer}>
-                {item.photoUrl ? (
-                    <Image source={{ uri: item.photoUrl }} style={styles.avatarGrid} />
-                ) : (
-                    <View style={[styles.avatarGrid, { backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' }]}>
-                        <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: normalizeFont(10), fontWeight: '700' }}>
-                            {firstName?.slice(0, 2).toUpperCase() || '??'}
-                        </Text>
-                    </View>
-                )}
+                <View style={[styles.avatarGrid, { backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' }]}>
+                    <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: normalizeFont(10), fontWeight: '700' }}>
+                        {firstName?.slice(0, 2).toUpperCase() || '??'}
+                    </Text>
+                </View>
                 <Text style={styles.rollText} numberOfLines={1}>{shortRoll}</Text>
                 <Text style={styles.nameText} numberOfLines={1}>{firstName}</Text>
             </View>
-
-        </LinearGradient>
+          </LinearGradient>
+        )}
       </Animated.View>
     </TouchableOpacity>
   );

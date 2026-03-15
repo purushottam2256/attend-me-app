@@ -69,6 +69,7 @@ export const HistoryScreen: React.FC = () => {
   const [filterBatch, setFilterBatch] = useState<string>('all');
   const [showFilters, setShowFilters] = useState(false);
   const [isOfflineData, setIsOfflineData] = useState(false);
+  const [dateHolidays, setDateHolidays] = useState<any[]>([]); // holidays/exams/events for the selected month
 
   const { status: connectionStatus } = useConnectionStatus();
   const connectionStatusRef = useRef(connectionStatus);
@@ -130,6 +131,38 @@ export const HistoryScreen: React.FC = () => {
            d1.getFullYear() === d2.getFullYear();
   };
 
+  // Fetch holidays/exams/events for the month from DB
+  const loadMonthHolidays = useCallback(async () => {
+    try {
+      const year = selectedDate.getFullYear();
+      const month = selectedDate.getMonth();
+      const startOfMonth = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+      const endOfMonth = `${year}-${String(month + 1).padStart(2, '0')}-${new Date(year, month + 1, 0).getDate()}`;
+
+      const { data, error } = await supabase
+        .from('holidays')
+        .select('*')
+        .gte('date', startOfMonth)
+        .lte('date', endOfMonth);
+
+      if (!error && data) {
+        setDateHolidays(data);
+      }
+    } catch (e) {
+      console.error('[HistoryScreen] Error loading holidays:', e);
+    }
+  }, [selectedDate]);
+
+  useEffect(() => {
+    loadMonthHolidays();
+  }, [loadMonthHolidays]);
+
+  // Get the holiday/event info for a specific date (from DB data)
+  const getHolidayForDate = (date: Date) => {
+    const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    return dateHolidays.find(h => h.date === dateStr) || null;
+  };
+
   // Get no-class reason for a date
   const getNoClassReason = (date: Date): { isNoClass: boolean; reason: string; emoji: string } => {
     const day = date.getDay();
@@ -139,17 +172,10 @@ export const HistoryScreen: React.FC = () => {
       return { isNoClass: true, reason: 'Sunday', emoji: '☀️' };
     }
 
-    // Check for holidays (example - could be from API)
-    const dateStr = date.toISOString().split('T')[0];
-    const holidays: Record<string, string> = {
-      '2026-01-26': 'Republic Day',
-      '2026-08-15': 'Independence Day',
-      '2026-10-02': 'Gandhi Jayanti',
-      // Add more holidays as needed
-    };
-
-    if (holidays[dateStr]) {
-      return { isNoClass: true, reason: holidays[dateStr], emoji: '🎊' };
+    // Check DB holidays
+    const holidayInfo = getHolidayForDate(date);
+    if (holidayInfo && holidayInfo.type === 'holiday') {
+      return { isNoClass: true, reason: holidayInfo.title || holidayInfo.name || 'Holiday', emoji: '🎊' };
     }
 
     return { isNoClass: false, reason: '', emoji: '' };
@@ -598,6 +624,53 @@ export const HistoryScreen: React.FC = () => {
     }, [route.params?.date])
   );
 
+  // Render a holiday/exam/event banner for the selected date
+  const renderDateBanner = () => {
+    const holidayInfo = getHolidayForDate(selectedDate);
+    if (!holidayInfo) return null;
+
+    const type = holidayInfo.type || 'holiday';
+    let bannerColor = '#F59E0B'; // default amber
+    let bannerIcon: any = 'calendar';
+    let bannerLabel = 'Holiday';
+
+    if (type === 'exam') {
+      bannerColor = '#EF4444';
+      bannerIcon = 'document-text';
+      bannerLabel = 'Exam';
+    } else if (type === 'event') {
+      bannerColor = '#8B5CF6';
+      bannerIcon = 'star';
+      bannerLabel = 'Event';
+    }
+
+    return (
+      <View style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: isDark ? `${bannerColor}15` : `${bannerColor}10`,
+        marginHorizontal: scale(16),
+        marginBottom: verticalScale(12),
+        padding: scale(12),
+        borderRadius: moderateScale(12),
+        borderLeftWidth: 3,
+        borderLeftColor: bannerColor,
+      }}>
+        <Ionicons name={bannerIcon} size={normalizeFont(20)} color={bannerColor} style={{ marginRight: scale(10) }} />
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: bannerColor, fontWeight: '700', fontSize: normalizeFont(13) }}>
+            {bannerLabel}: {holidayInfo.title || holidayInfo.name || 'Scheduled'}
+          </Text>
+          {holidayInfo.description ? (
+            <Text style={{ color: isDark ? 'rgba(255,255,255,0.5)' : '#64748B', fontSize: normalizeFont(11), marginTop: 2 }}>
+              {holidayInfo.description}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+    );
+  };
+
   // Render session card
   const renderSessionCard = (session: AttendanceSession, index: number) => {
     const isExpanded = expandedId === (session.id || String(index));
@@ -900,6 +973,9 @@ export const HistoryScreen: React.FC = () => {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0D4A4A" />
         }
       >
+        {/* Holiday/Event/Exam banner for the selected date */}
+        {renderDateBanner()}
+        
         {loading ? (
           <View style={styles.loadingContainer}>
             <PulsingDots size="large" color="#0D9488" />

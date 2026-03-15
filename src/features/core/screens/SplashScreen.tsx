@@ -15,6 +15,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Colors, Fonts, Layout } from '@constants';
 import { getCurrentSession, getStoredProfile } from '@services/authService';
+import { supabase } from '@config/supabase';
 
 const { width } = Dimensions.get('window');
 
@@ -24,6 +25,7 @@ interface SplashScreenProps {
 
 export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
   const [statusText, setStatusText] = useState('Initializing...');
+  const [appVersion, setAppVersion] = useState('v1.0.0');
   
   // Animation values
   const logoOpacity = useRef(new Animated.Value(0)).current;
@@ -36,6 +38,13 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
   useEffect(() => {
     startAnimations();
     checkAuthWithDelay();
+    // Fetch version from DB
+    (async () => {
+      try {
+        const { data } = await supabase.from('app_config').select('value').eq('key', 'version').single();
+        if (data?.value) setAppVersion(String(data.value).replace(/"/g, ''));
+      } catch {}
+    })();
   }, []);
 
   const startAnimations = () => {
@@ -161,7 +170,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
       </Animated.View>
 
       {/* Version */}
-      <Text style={styles.versionText}>v1.0.0</Text>
+      <Text style={styles.versionText}>{appVersion}</Text>
     </LinearGradient>
   );
 };

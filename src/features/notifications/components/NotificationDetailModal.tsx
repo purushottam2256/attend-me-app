@@ -57,13 +57,13 @@ export const NotificationDetailModal = ({
                     {/* Content */}
                     <ScrollView style={styles.content}>
                         <Text style={[styles.date, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-                            {notification.timestamp}
+                            {notification?.timestamp || 'Just now'}
                         </Text>
                         <Text style={[styles.title, { color: isDark ? '#FFFFFF' : '#0F172A' }]}>
-                            {notification.title}
+                            {notification?.title || 'Notification'}
                         </Text>
                         <Text style={[styles.body, { color: isDark ? '#CBD5E1' : '#334155' }]}>
-                            {notification.body}
+                            {notification?.body || 'No details available.'}
                         </Text>
                     </ScrollView>
 

@@ -145,6 +145,14 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
   // --------------------------------------------------------------------------
 
   const setupNotificationListeners = () => {
+    // Prevent duplicate listeners from hot-reloads or rapid state changes
+    if (notificationListenerRef.current) {
+      notificationListenerRef.current.remove();
+    }
+    if (responseListenerRef.current) {
+      responseListenerRef.current.remove();
+    }
+
     // Foreground notification received
     notificationListenerRef.current =
       Notifications.addNotificationReceivedListener((notification) => {

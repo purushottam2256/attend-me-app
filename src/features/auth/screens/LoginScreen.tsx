@@ -48,6 +48,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [focusedField, setFocusedField] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState('v1.0.0');
 
   const { isOnline, queueAction } = useNetwork();
   const sliderRef = useRef<SlideToLoginRef>(null);
@@ -62,7 +63,23 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   useEffect(() => {
     startEntryAnimation();
     loadLastEmail();
+    loadAppVersion();
   }, []);
+
+  const loadAppVersion = async () => {
+    try {
+      const { data } = await supabase
+        .from('app_config')
+        .select('value')
+        .eq('key', 'version')
+        .single();
+      if (data?.value) {
+        setAppVersion(String(data.value).replace(/"/g, ''));
+      }
+    } catch (e) {
+      console.log('Failed to load app version');
+    }
+  };
 
   const startEntryAnimation = () => {
     // Logo fade in and scale
@@ -201,11 +218,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               ]}
             >
               <Image
-                source={require('@assets/college-logo.png')}
+                source={require('@assets/icon.png')}
                 style={styles.logo}
                 resizeMode="contain"
               />
-              <Text style={styles.appName}>Attend-Me</Text>
+              <Text style={styles.appName}>AttendMe</Text>
               <Text style={styles.tagline}>Your Attendance, Simplified</Text>
             </Animated.View>
 
@@ -309,7 +326,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
             {/* Footer */}
             <View style={styles.footer}>
-              <Text style={styles.footerText}>MRCE Attend-Me • v1.0.0</Text>
+              <Text style={styles.footerText}>MRCE AttendMe • {appVersion}</Text>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -364,15 +381,15 @@ const styles = StyleSheet.create({
     marginBottom: verticalScale(32),
   },
   logo: {
-    width: scale(80),
-    height: scale(80),
-    borderRadius: moderateScale(16),
+    width: scale(100),
+    height: scale(100),
+    borderRadius: moderateScale(20),
   },
   appName: {
-    fontSize: normalizeFont(28),
-    fontWeight: '700',
+    fontSize: normalizeFont(32),
+    fontWeight: '800',
     color: Colors.premium.textPrimary,
-    letterSpacing: 1.5,
+    letterSpacing: 2,
     marginTop: verticalScale(16),
   },
   tagline: {

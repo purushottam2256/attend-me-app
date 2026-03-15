@@ -8,9 +8,12 @@ import {
   Image,
   Animated,
   Easing,
+  Modal,
+  TouchableWithoutFeedback,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
+import QRCode from 'react-native-qrcode-svg';
 
 import { useTheme } from "@contexts";
 import {
@@ -32,7 +35,7 @@ interface DigitalIdCardProps {
 }
 
 const { width } = Dimensions.get("window");
-const CARD_ASPECT_RATIO = 1.586;
+const CARD_ASPECT_RATIO = 1.3; // Taller card to fit QR safely without overlapping
 const CARD_WIDTH = width - scale(40);
 const CARD_HEIGHT = CARD_WIDTH / CARD_ASPECT_RATIO;
 
@@ -42,6 +45,7 @@ export const DigitalIdCard: React.FC<DigitalIdCardProps> = ({
 }) => {
   const { isDark } = useTheme();
   const [imageError, setImageError] = React.useState(false);
+  const [isQRModalVisible, setIsQRModalVisible] = React.useState(false);
 
   // Shimmer animation
   const shimmerAnim = useRef(new Animated.Value(0)).current;
@@ -246,9 +250,66 @@ export const DigitalIdCard: React.FC<DigitalIdCardProps> = ({
           {/* ── FOOTER ── */}
           <View style={styles.footer}>
             <Text style={styles.collegeCode}>MRCE • 2024-25</Text>
+            {/* Real QR Code */}
+            <TouchableOpacity 
+              activeOpacity={0.8}
+              onPress={() => setIsQRModalVisible(true)}
+              style={{
+                width: scale(46),
+                height: scale(46),
+                backgroundColor: '#FFF', // White background required for QR scannability
+                borderRadius: moderateScale(6),
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderWidth: 1,
+                borderColor: 'rgba(61,220,151,0.25)',
+                overflow: 'hidden',
+              }}>
+              <QRCode 
+                value={user.email || 'placeholder'} 
+                size={scale(40)} 
+                color="#000" 
+                backgroundColor="#FFF" 
+              />
+            </TouchableOpacity>
           </View>
         </View>
       </View>
+
+      {/* QR Code Modal Overlay */}
+      <Modal
+        visible={isQRModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsQRModalVisible(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setIsQRModalVisible(false)}>
+          <View style={[styles.modalOverlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.8)' : 'rgba(0,0,0,0.6)' }]}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.modalContent, { backgroundColor: isDark ? '#1E293B' : '#FFFFFF' }]}>
+                <View style={styles.modalHeader}>
+                  <Text style={[styles.modalTitle, { color: isDark ? '#FFF' : '#0F172A' }]}>Scan ID</Text>
+                  <TouchableOpacity onPress={() => setIsQRModalVisible(false)} style={styles.closeButton}>
+                    <Ionicons name="close" size={normalizeFont(24)} color={isDark ? '#94A3B8' : '#64748B'} />
+                  </TouchableOpacity>
+                </View>
+                
+                <View style={styles.largeQRContainer}>
+                  <QRCode 
+                    value={user.email || 'placeholder'} 
+                    size={scale(200)} 
+                    color="#000" 
+                    backgroundColor="#FFF" 
+                  />
+                </View>
+                <Text style={[styles.modalSubtitle, { color: isDark ? '#94A3B8' : '#64748B' }]}>
+                  {user.email}
+                </Text>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </View>
   );
 };
@@ -257,6 +318,49 @@ const styles = StyleSheet.create({
   container: {
     alignItems: "center",
     marginVertical: verticalScale(20),
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: scale(24),
+  },
+  modalContent: {
+    width: '100%',
+    borderRadius: moderateScale(24),
+    padding: scale(24),
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: verticalScale(10) },
+    shadowOpacity: 0.3,
+    shadowRadius: moderateScale(20),
+    elevation: 10,
+  },
+  modalHeader: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: verticalScale(24),
+  },
+  modalTitle: {
+    fontSize: normalizeFont(20),
+    fontWeight: '700',
+  },
+  closeButton: {
+    padding: scale(4),
+  },
+  largeQRContainer: {
+    backgroundColor: '#FFF',
+    padding: scale(16),
+    borderRadius: moderateScale(16),
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.1)',
+    marginBottom: verticalScale(16),
+  },
+  modalSubtitle: {
+    fontSize: normalizeFont(14),
+    fontWeight: '500',
   },
   glowContainer: {
     position: "absolute",

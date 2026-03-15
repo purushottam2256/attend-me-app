@@ -269,7 +269,7 @@ export const ProjectFeesScreen: React.FC<ProjectFeesScreenProps> = ({ navigation
                 </TouchableOpacity>
                 <View style={styles.headerTextContainer}>
                   <Text style={[styles.headerTitle, { color: isDark ? '#FFF' : '#0F172A' }]}>
-                     Project Fees
+                     Student Fees
                   </Text>
                   {facultyYear > 0 && (
                      <Text style={[styles.headerSubtitle, { color: isDark ? '#94A3B8' : '#64748B' }]}>
@@ -470,36 +470,41 @@ const StudentFeeCard = React.memo(({
           </Text>
         </View>
         
-        <View style={styles.statusToggleContainer}>
-          <TouchableOpacity
+        
+        <View style={[styles.statusToggleContainer, { backgroundColor: isDark ? '#334155' : '#F1F5F9' }]}>
+          {/* Animated Slider Background */}
+          <Animated.View 
             style={[
-              styles.statusButton,
-              item.status === 'due' 
-                ? { backgroundColor: 'rgba(239, 68, 68, 0.15)', borderColor: '#EF4444', borderWidth: 1 } 
-                : { backgroundColor: isDark ? '#334155' : '#F1F5F9' }
-            ]}
+              StyleSheet.absoluteFill,
+              {
+                width: '50%',
+                backgroundColor: item.status === 'paid' ? '#10B981' : '#EF4444',
+                borderRadius: moderateScale(6),
+                transform: [{
+                  translateX: item.status === 'paid' ? scale(38) : 0 // Assuming approx total width 76
+                }]
+              }
+            ]} 
+          />
+          <TouchableOpacity
+            style={[styles.statusButton, { flex: 1, zIndex: 1 }]}
             onPress={() => onStatusChange('due')}
           >
             <Text style={[
               styles.statusButtonText,
-              item.status === 'due' ? { color: '#EF4444', fontWeight: '700' } : { color: isDark ? '#94A3B8' : '#64748B' }
+              item.status === 'due' ? { color: '#FFF', fontWeight: '800' } : { color: isDark ? '#94A3B8' : '#64748B' }
             ]}>
               DUE
             </Text>
           </TouchableOpacity>
           
           <TouchableOpacity
-            style={[
-              styles.statusButton,
-              item.status === 'paid' 
-                ? { backgroundColor: 'rgba(16, 185, 129, 0.15)', borderColor: '#10B981', borderWidth: 1 } 
-                : { backgroundColor: isDark ? '#334155' : '#F1F5F9' }
-            ]}
+            style={[styles.statusButton, { flex: 1, zIndex: 1 }]}
             onPress={() => onStatusChange('paid')}
           >
              <Text style={[
               styles.statusButtonText,
-              item.status === 'paid' ? { color: '#10B981', fontWeight: '700' } : { color: isDark ? '#94A3B8' : '#64748B' }
+              item.status === 'paid' ? { color: '#FFF', fontWeight: '800' } : { color: isDark ? '#94A3B8' : '#64748B' }
             ]}>
               PAID
             </Text>
@@ -726,15 +731,16 @@ const styles = StyleSheet.create({
   },
   statusToggleContainer: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(0,0,0,0.02)',
+    width: scale(76),
+    height: verticalScale(28),
     borderRadius: moderateScale(8),
-    overflow: 'hidden',
+    padding: 2,
+    position: 'relative'
   },
   statusButton: {
-    paddingHorizontal: scale(12),
-    paddingVertical: verticalScale(8),
     justifyContent: 'center',
     alignItems: 'center',
+    borderRadius: moderateScale(6),
   },
   statusButtonText: {
     fontSize: normalizeFont(12),

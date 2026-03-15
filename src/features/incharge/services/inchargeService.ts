@@ -232,8 +232,10 @@ export const getKeyPeriodAttendance = async (
     throw error;
   }
 
-  // Helper to normalize slot_id for comparison
-  const normalize = (id: string) => id.toString().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normalize = (id: string | null | undefined) => {
+    if (!id) return '';
+    return id.toString().toLowerCase().replace(/[^a-z0-9]/g, '');
+  };
 
   const p1Variants = ['p1', '1', 'period1', '09:00', '9:00'];
   const p4Variants = ['p4', '4', 'period4', '13:00', '13:20', '01:00']; // Common afternoon times
@@ -335,12 +337,11 @@ export const getClassTrends = async (
         '6': 'P6', 'p6': 'P6', '15:10': 'P6',
     };
     
-    // Sort and Normalize
-    const sorted = (data || []).sort((a, b) => a.slot_id.localeCompare(b.slot_id));
+    const sorted = (data || []).filter(s => s.slot_id).sort((a, b) => a.slot_id.localeCompare(b.slot_id));
     
     return sorted.map(s => {
-        const normId = s.slot_id.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const label = slotMap[normId] || slotMap[s.slot_id] || s.slot_id.toUpperCase();
+        const normId = s.slot_id ? s.slot_id.toLowerCase().replace(/[^a-z0-9]/g, '') : '';
+        const label = slotMap[normId] || slotMap[s.slot_id] || (s.slot_id ? s.slot_id.toUpperCase() : 'UNKNOWN');
         return {
             label: label,
             value: s.total_students > 0 ? Math.round((s.present_count / s.total_students) * 100) : 0
@@ -477,14 +478,16 @@ export const addPermission = async (
     throw error;
   }
 
-  // If the permission is a leave, also log it to the student_leaves table to notify the HOD
+    // If the permission is a leave, also log it to the student_leaves table to notify the HOD
   if (permission.type === 'leave') {
     const leaveData = {
       student_id: permission.student_id,
+      reason_category: permission.category === 'other' ? 'personal' : (permission.category === 'event' ? 'event' : 'personal'), // Map to CHECK constraint
+      reason_text: permission.reason || 'Leave requested',
       start_date: permission.start_date,
       end_date: permission.end_date,
-      reason: permission.reason || 'Leave requested',
-      status: 'pending', // or whichever default status the table expects
+      status: 'pending', 
+      submitted_by: permission.granted_by // Since it's faculty submitting it
     };
 
     const { error: leaveError } = await supabase
