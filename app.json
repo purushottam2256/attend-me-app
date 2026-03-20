@@ -11,7 +11,8 @@
       "typedRoutes": false
     },
     "updates": {
-      "enabled": false
+      "enabled": true,
+      "fallbackToCacheTimeout": 0
     },
     "splash": {
       "image": "./assets/splash.png",

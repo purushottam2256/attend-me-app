@@ -30,6 +30,7 @@ interface DigitalIdCardProps {
     dept: string;
     role: string;
     photoUrl?: string;
+    userId?: string; // Supabase user ID for QR code
   };
   onEdit?: () => void;
 }
@@ -266,7 +267,7 @@ export const DigitalIdCard: React.FC<DigitalIdCardProps> = ({
                 overflow: 'hidden',
               }}>
               <QRCode 
-                value={user.email || 'placeholder'} 
+                value={user.userId || user.email || 'placeholder'} 
                 size={scale(40)} 
                 color="#000" 
                 backgroundColor="#FFF" 
@@ -296,7 +297,7 @@ export const DigitalIdCard: React.FC<DigitalIdCardProps> = ({
                 
                 <View style={styles.largeQRContainer}>
                   <QRCode 
-                    value={user.email || 'placeholder'} 
+                    value={user.userId || user.email || 'placeholder'} 
                     size={scale(200)} 
                     color="#000" 
                     backgroundColor="#FFF" 

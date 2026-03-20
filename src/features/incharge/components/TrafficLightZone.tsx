@@ -55,7 +55,7 @@ const ZenLight: React.FC<{
                 <View style={[styles.statusBar, { backgroundColor: ringColor }]} />
             </View>
         ) : (
-            <Text style={{color: '#8E8E93'}}>--</Text>
+            <Text style={{color: '#8E8E93', fontSize: normalizeFont(14), fontWeight: '600', textAlign: 'center'}}>Yet to be taken</Text>
         )}
       </View>
 

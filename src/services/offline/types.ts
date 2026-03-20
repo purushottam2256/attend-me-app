@@ -20,6 +20,7 @@ export const STORAGE_KEYS = {
   HISTORY: "@attend_me/history",
   WATCHLIST: "@attend_me/watchlist",
   CLASS_STATS: "@attend_me/class_stats",
+  PERMISSIONS: "@attend_me/permissions", // OD/Leave cache for offline
 
   // Metadata
   CACHE_TIMESTAMPS: "@attend_me/cache_timestamps",

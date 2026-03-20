@@ -90,6 +90,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [userRole, setUserRole] = useState("");
   const [displayName, setDisplayName] = useState(userName);
   const [profileImage, setProfileImage] = useState<string | null>(null);
+  const [userSupaId, setUserSupaId] = useState(''); // User's Supabase ID for QR
   const [isOfflineData, setIsOfflineData] = useState(false);
 
   const { status: connectionStatus } = useConnectionStatus();
@@ -231,6 +232,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         
         if (!userError && user) {
           setUserEmail(user?.email || "");
+          setUserSupaId(user.id); // Store user ID for QR code
 
           const { data: profile, error: profileError } = await supabase
             .from("profiles")
@@ -608,6 +610,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               dept: userDept || "CSM",
               role: userRole || "Faculty",
               photoUrl: profileImage || undefined,
+              userId: userSupaId || undefined,
             }}
             onEdit={() => setEditProfileVisible(true)}
           />

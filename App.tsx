@@ -14,19 +14,26 @@ import { NotificationProvider } from '@contexts/NotificationContext';
 import { OfflineBanner } from '@components/ui/OfflineBanner';
 import ErrorBoundary from '@components/ErrorBoundary';
 
-import { initOffline } from '@services/offline';
-import createLogger from '@utils/logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SQLite from 'expo-sqlite';
+import { initOffline } from '@services/offline';
+import createLogger from '@utils/logger';
+import { setupGlobalErrorHandlers } from '@utils/globalErrorHandler';
+import { checkForUpdates } from '@services/updateService';
+import { trackEvent, Events } from '@services/analyticsService';
+import * as Sentry from '@sentry/react-native';
 
 const log = createLogger('App');
+
+// CRASH PREVENTION: Setup global error handlers before anything else
+setupGlobalErrorHandlers();
 
 // Setup Database Connection
 const getDb = () => {
     return SQLite.openDatabaseSync('offline_sync.db');
 };
 
-export default function App() {
+function App() {
   const [isReady, setIsReady] = React.useState(false);
 
   React.useEffect(() => {
@@ -55,7 +62,13 @@ export default function App() {
         }
       })
       .catch(err => log.error("Failed to init offline service:", err))
-      .finally(() => setIsReady(true));
+      .finally(() => {
+        setIsReady(true);
+        // Analytics: App launched successfully
+        trackEvent('app_launched');
+        // Check for OTA updates in background (doesn't block UI)
+        checkForUpdates();
+      });
   }, []);
 
   if (!isReady) {
@@ -84,3 +97,5 @@ export default function App() {
     </ErrorBoundary>
   );
 }
+
+export default Sentry.wrap(App);

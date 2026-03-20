@@ -214,14 +214,10 @@ export const getKeyPeriodAttendance = async (
 ): Promise<{ p1: PeriodAttendance | null; p4: PeriodAttendance | null }> => {
   const today = getLocalDate();
   
-  // Fetch all sessions for today to handle variable slot_ids (e.g., '1', 'p1', 'P1')
+  // Fetch all sessions for today only
   const { data, error } = await supabase
     .from('attendance_sessions')
-    .select(`
-      slot_id,
-      present_count,
-      total_students
-    `)
+    .select(`slot_id, present_count, total_students`)
     .eq('target_dept', dept)
     .eq('target_year', year)
     .eq('target_section', section)
@@ -238,7 +234,7 @@ export const getKeyPeriodAttendance = async (
   };
 
   const p1Variants = ['p1', '1', 'period1', '09:00', '9:00'];
-  const p4Variants = ['p4', '4', 'period4', '13:00', '13:20', '01:00']; // Common afternoon times
+  const p4Variants = ['p4', '4', 'period4', '13:00', '13:20', '01:00'];
 
   const p1Session = data?.find(s => p1Variants.includes(normalize(s.slot_id)));
   const p4Session = data?.find(s => p4Variants.includes(normalize(s.slot_id)));
@@ -273,11 +269,7 @@ export const getAllPeriodAttendance = async (
   
   const { data, error } = await supabase
     .from('attendance_sessions')
-    .select(`
-      slot_id,
-      present_count,
-      total_students
-    `)
+    .select(`slot_id, present_count, total_students`)
     .eq('target_dept', dept)
     .eq('target_year', year)
     .eq('target_section', section)
@@ -290,7 +282,7 @@ export const getAllPeriodAttendance = async (
   }
 
   return (data || []).map(s => ({
-    slot_id: s.slot_id, // Normalize later if needed
+    slot_id: s.slot_id,
     present_count: s.present_count || 0,
     total_count: s.total_students || 0,
     percentage: s.total_students > 0 

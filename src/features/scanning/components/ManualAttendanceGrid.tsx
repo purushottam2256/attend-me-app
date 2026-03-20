@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useRef } from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,6 @@ import {
   Dimensions,
   FlatList,
   Animated,
-  Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -32,19 +31,50 @@ interface ManualAttendanceGridProps {
 
 const { width } = Dimensions.get('window');
 const GRID_PADDING = scale(12);
-const GAP = scale(8);
+const GAP = scale(6);
 const COLUMNS = 5;
 const ITEM_SIZE = (width - (GRID_PADDING * 2) - (GAP * (COLUMNS - 1))) / COLUMNS;
 
-const StatusColors = {
-  pending: ['#9CA3AF', '#6B7280'], // Gray (unmarked)
-  present: ['#10B981', '#059669'], // Green
-  absent: ['#EF4444', '#DC2626'],  // Red
-  od: ['#F59E0B', '#D97706'],      // Amber
-  leave: ['#F97316', '#EA580C'],   // Orange
+// Premium color palette — distinct, accessible, production-grade
+const StatusConfig = {
+  pending: {
+    gradient: ['#64748B', '#475569'] as const,
+    icon: 'person-outline' as const,
+    iconColor: 'rgba(255,255,255,0.4)',
+    label: '',
+    overlay: 'rgba(71,85,105,0.85)', // Strong gray = absent/unmarked
+  },
+  present: {
+    gradient: ['#10B981', '#059669'] as const,
+    icon: 'checkmark-circle' as const,
+    iconColor: 'rgba(255,255,255,0.9)',
+    label: '',
+    overlay: 'rgba(5,150,105,0.15)', // Minimal overlay = vivid/colored
+  },
+  absent: {
+    gradient: ['#64748B', '#475569'] as const,
+    icon: 'close-circle' as const,
+    iconColor: 'rgba(239,68,68,0.9)',
+    label: '',
+    overlay: 'rgba(71,85,105,0.85)', // Strong gray = absent
+  },
+  od: {
+    gradient: ['#F59E0B', '#D97706'] as const,
+    icon: 'briefcase' as const,
+    iconColor: '#FFF',
+    label: 'OD',
+    overlay: 'rgba(217,119,6,0.2)',
+  },
+  leave: {
+    gradient: ['#F97316', '#EA580C'] as const,
+    icon: 'calendar' as const,
+    iconColor: '#FFF',
+    label: 'LV',
+    overlay: 'rgba(234,88,12,0.2)',
+  },
 };
 
-const SquareItem = React.memo(({ item, onTap, onLongPress, isDark }: { 
+const SquareItem = React.memo(({ item, onTap, onLongPress }: { 
     item: Student; 
     onTap: (id: string) => void; 
     onLongPress: (student: Student) => void;
@@ -52,30 +82,28 @@ const SquareItem = React.memo(({ item, onTap, onLongPress, isDark }: {
 }) => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
-  // Formatting: "21P31A0501" -> "501" usually, but user asked for "name and roll no"
-  // Let's show last 3 digits of roll + First Name
   const shortRoll = item.rollNo.slice(-3);
   const firstName = item.name.split(' ')[0];
+  const initials = item.name
+    ? item.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
+    : '??';
+
+  const config = StatusConfig[item.status] || StatusConfig.pending;
+  const isInteractive = item.status !== 'od' && item.status !== 'leave';
+  const isMarkedPresent = item.status === 'present';
+  const isAbsentOrPending = item.status === 'absent' || item.status === 'pending';
 
   const handlePress = () => {
     Animated.sequence([
-      Animated.timing(scaleAnim, { toValue: 0.95, duration: 50, useNativeDriver: true }),
-      Animated.timing(scaleAnim, { toValue: 1, duration: 100, useNativeDriver: true })
+      Animated.timing(scaleAnim, { toValue: 0.92, duration: 40, useNativeDriver: true }),
+      Animated.spring(scaleAnim, { toValue: 1, friction: 5, useNativeDriver: true })
     ]).start();
 
-    if (item.status === 'present') {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    } else {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
+    Haptics.impactAsync(
+      isMarkedPresent ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light
+    );
     onTap(item.id);
   };
-
-  const isInteractive = item.status === 'present' || item.status === 'absent' || item.status === 'pending';
-  const colors = StatusColors[item.status] || StatusColors.present;
-  
-  // Opacity for non-interactive states (OD/Leave)
-  const opacity = isInteractive ? 1 : 0.8;
 
   return (
     <TouchableOpacity
@@ -87,76 +115,59 @@ const SquareItem = React.memo(({ item, onTap, onLongPress, isDark }: {
       }}
       disabled={!isInteractive && item.status !== 'od' && item.status !== 'leave'}
     >
-      <Animated.View style={[styles.squareContainer, { transform: [{ scale: scaleAnim }], opacity }]}>
-        {item.photoUrl ? (
-          // Full photo background mode
-          <View style={styles.squareGradient}>
-            <Image
-              source={{ uri: item.photoUrl }}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                borderRadius: moderateScale(8),
-              }}
-              resizeMode="cover"
-            />
-            {/* Status color overlay */}
-            <LinearGradient
-              colors={['transparent', colors[1] + 'DD']}
-              style={{
-                position: 'absolute',
-                bottom: 0,
-                left: 0,
-                right: 0,
-                height: '65%',
-                borderBottomLeftRadius: moderateScale(8),
-                borderBottomRightRadius: moderateScale(8),
-              }}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 0, y: 1 }}
-            />
+      <Animated.View style={[styles.squareContainer, { transform: [{ scale: scaleAnim }] }]}>
+        <LinearGradient
+          colors={config.gradient as [string, string]}
+          style={[
+            styles.squareGradient,
+            isAbsentOrPending && styles.grayedOut,
+            isMarkedPresent && styles.presentGlow,
+          ]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
+          {/* Large initials as background watermark */}
+          <Text style={[
+            styles.initialsWatermark,
+            isAbsentOrPending && { opacity: 0.15 },
+            isMarkedPresent && { opacity: 0.25 },
+          ]}>
+            {initials}
+          </Text>
 
-            {/* Status Icon / Badge for OD/Leave */}
-            {(item.status === 'od' || item.status === 'leave') && (
-                <View style={styles.statusBadge}>
-                    <Text style={styles.statusBadgeText}>{item.status.toUpperCase().slice(0, 1)}</Text>
-                </View>
-            )}
-
-            <View style={[styles.contentContainer, { justifyContent: 'flex-end', paddingBottom: scale(4) }]}>
-                <Text style={styles.rollText} numberOfLines={1}>{shortRoll}</Text>
-                <Text style={styles.nameText} numberOfLines={1}>{firstName}</Text>
+          {/* Status indicator dot */}
+          {isMarkedPresent && (
+            <View style={styles.presentIndicator}>
+              <Ionicons name="checkmark" size={normalizeFont(10)} color="#FFF" />
             </View>
+          )}
+          
+          {/* OD/Leave locked badge */}
+          {(item.status === 'od' || item.status === 'leave') && (
+            <View style={[styles.lockedBadge, { 
+              backgroundColor: item.status === 'od' ? 'rgba(245,158,11,0.3)' : 'rgba(249,115,22,0.3)' 
+            }]}>
+              <Ionicons name={config.icon} size={normalizeFont(8)} color="#FFF" />
+              <Text style={styles.lockedBadgeText}>{config.label}</Text>
+            </View>
+          )}
+
+          {/* Bottom content: roll + name */}
+          <View style={styles.contentContainer}>
+            <Text style={[
+              styles.rollText,
+              isAbsentOrPending && { opacity: 0.6 },
+            ]} numberOfLines={1}>
+              {shortRoll}
+            </Text>
+            <Text style={[
+              styles.nameText,
+              isAbsentOrPending && { opacity: 0.5 },
+            ]} numberOfLines={1}>
+              {firstName}
+            </Text>
           </View>
-        ) : (
-          // No photo: gradient box with initials
-          <LinearGradient
-            colors={colors as [string, string]}
-            style={styles.squareGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          >
-            {/* Status Icon / Badge for OD/Leave */}
-            {(item.status === 'od' || item.status === 'leave') && (
-                <View style={styles.statusBadge}>
-                    <Text style={styles.statusBadgeText}>{item.status.toUpperCase().slice(0, 1)}</Text>
-                </View>
-            )}
-            
-            <View style={styles.contentContainer}>
-                <View style={[styles.avatarGrid, { backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' }]}>
-                    <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: normalizeFont(10), fontWeight: '700' }}>
-                        {firstName?.slice(0, 2).toUpperCase() || '??'}
-                    </Text>
-                </View>
-                <Text style={styles.rollText} numberOfLines={1}>{shortRoll}</Text>
-                <Text style={styles.nameText} numberOfLines={1}>{firstName}</Text>
-            </View>
-          </LinearGradient>
-        )}
+        </LinearGradient>
       </Animated.View>
     </TouchableOpacity>
   );
@@ -188,6 +199,7 @@ export const ManualAttendanceGrid: React.FC<ManualAttendanceGridProps> = ({
         initialNumToRender={30}
         maxToRenderPerBatch={30}
         windowSize={10}
+        removeClippedSubviews={true}
       />
     </View>
   );
@@ -199,7 +211,7 @@ const styles = StyleSheet.create({
   },
   gridContent: {
     padding: GRID_PADDING,
-    paddingBottom: verticalScale(120), // Space for FAB
+    paddingBottom: verticalScale(120),
   },
   columnWrapper: {
     gap: GAP,
@@ -207,67 +219,93 @@ const styles = StyleSheet.create({
   },
   squareContainer: {
     width: ITEM_SIZE,
-    height: ITEM_SIZE, // Square
-    borderRadius: moderateScale(8), // Smaller radius for smaller items
+    height: ITEM_SIZE,
+    borderRadius: moderateScale(10),
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: verticalScale(1) },
-    shadowOpacity: 0.15,
-    shadowRadius: moderateScale(2),
-    elevation: 2,
+    shadowOffset: { width: 0, height: verticalScale(2) },
+    shadowOpacity: 0.2,
+    shadowRadius: moderateScale(4),
+    elevation: 3,
   },
   squareGradient: {
     flex: 1,
-    borderRadius: moderateScale(8),
-    padding: scale(2), // Less padding
+    borderRadius: moderateScale(10),
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    overflow: 'hidden',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  // Grayed out = absent/pending look
+  grayedOut: {
+    opacity: 0.7,
+  },
+  // Present = vivid glow
+  presentGlow: {
+    borderColor: 'rgba(16,185,129,0.5)',
+    shadowColor: '#10B981',
+  },
+  // Large initials as background watermark (replaces image for crash safety)
+  initialsWatermark: {
+    position: 'absolute',
+    top: '15%',
+    fontSize: normalizeFont(22),
+    fontWeight: '900',
+    color: 'rgba(255,255,255,0.3)',
+    letterSpacing: 1,
+  },
+  // Green checkmark for present
+  presentIndicator: {
+    position: 'absolute',
+    top: scale(3),
+    right: scale(3),
+    width: scale(16),
+    height: scale(16),
+    borderRadius: scale(8),
+    backgroundColor: 'rgba(16,185,129,0.9)',
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
-  contentContainer: {
-      alignItems: 'center',
-      justifyContent: 'center',
-      width: '100%',
-  },
-  rollText: {
-    color: 'rgba(255,255,255,0.9)',
-    fontSize: normalizeFont(12), // Smaller font to fit avatar
-    fontWeight: '800',
-    marginBottom: 0, // Tight layout
-    fontVariant: ['tabular-nums'],
-    letterSpacing: 0,
-    marginTop: verticalScale(2),
-  },
-  nameText: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: normalizeFont(8), // Very small for name
-    fontWeight: '600',
-    textAlign: 'center',
-    lineHeight: normalizeFont(10),
-    marginTop: 0,
-    maxWidth: '100%',
-  },
-  avatarGrid: {
-    width: scale(28),
-    height: scale(28),
-    borderRadius: moderateScale(14),
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  statusBadge: {
+  // OD/Leave locked badge
+  lockedBadge: {
     position: 'absolute',
-    top: scale(2),
-    right: scale(2),
-    backgroundColor: 'rgba(0,0,0,0.25)',
-    paddingHorizontal: scale(3),
-    paddingVertical: verticalScale(1),
-    borderRadius: moderateScale(3),
+    top: scale(3),
+    right: scale(3),
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: scale(2),
+    paddingHorizontal: scale(4),
+    paddingVertical: verticalScale(2),
+    borderRadius: moderateScale(4),
   },
-  statusBadgeText: {
+  lockedBadgeText: {
     color: '#FFF',
     fontSize: normalizeFont(7),
     fontWeight: '800',
+    letterSpacing: 0.5,
   },
-  checkIcon: { // Removed Check icon for space
-      display: 'none' 
-  }
+  contentContainer: {
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    width: '100%',
+    paddingBottom: scale(4),
+    paddingHorizontal: scale(2),
+  },
+  rollText: {
+    color: 'rgba(255,255,255,0.95)',
+    fontSize: normalizeFont(12),
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+    letterSpacing: 0.5,
+  },
+  nameText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: normalizeFont(8),
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: normalizeFont(10),
+    maxWidth: '100%',
+  },
 });

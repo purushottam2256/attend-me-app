@@ -1,0 +1,24 @@
+appId: com.attendme.app
+---
+- launchApp
+# Assuming we are already logged in from previous session cache
+- extendedWaitUntil:
+    visible: "Today's Schedule"
+    timeout: 5000
+
+# Navigate to scanner tab
+- tapOn: "Scan"
+
+- assertVisible: "Start BLE Scan"
+- assertVisible: "Switch to Manual Entry"
+
+# Open the Manual grid to check component rendering
+- tapOn: "Switch to Manual Entry"
+- assertVisible: "Manual Attendance"
+- assertVisible: "Mark All Present"
+
+# Simulate marking a student (assumes a student name like 'John' exists in mock data, or just tapping the first card)
+- tapOn: 
+    point: 50%, 50% # Tap middle of screen to hit grid
+    
+- assertVisible: "Submit"

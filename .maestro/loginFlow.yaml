@@ -1,0 +1,24 @@
+appId: com.attendme.app
+---
+- launchApp
+- assertVisible: "Email Address"
+- assertVisible: "Password"
+
+- tapOn: "Email Address"
+- inputText: "faculty@cvr.ac.in"
+
+- tapOn: "Password"
+- inputText: "password123"
+
+# Dismiss keyboard (standard Android behavior)
+- hideKeyboard
+
+- tapOn: "Secure Login"
+
+# Wait for network request to resolve and dashboard home to appear
+- extendedWaitUntil:
+    visible: "Today's Schedule"
+    timeout: 10000
+
+- assertVisible: "Scan"
+- assertVisible: "History"

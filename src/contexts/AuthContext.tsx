@@ -3,6 +3,7 @@ import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../config/supabase';
 import * as SecureStore from 'expo-secure-store';
 import createLogger from '../utils/logger';
+import { safeJsonParse } from '../utils/safeUtils';
 
 const log = createLogger('Auth');
 

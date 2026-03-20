@@ -1,9 +1,14 @@
 /**
  * useConnectionStatus - Hook for online/offline/syncing status
  * Monitors network state and offline queue
+ * 
+ * FIX: Previously reported 'syncing' (non-online) when offline queue had
+ * pending items, causing manual mode & BLE scanner to falsely show offline.
+ * Now: status strictly reflects network connectivity. Queue count is tracked
+ * separately and only affects the sync badge, not the connection status.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import NetInfo, { NetInfoState } from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -23,6 +28,8 @@ export const useConnectionStatus = (): UseConnectionStatusReturn => {
   const [status, setStatus] = useState<ConnectionStatus>('online');
   const [queueCount, setQueueCount] = useState(0);
   const [isConnected, setIsConnected] = useState(true);
+  // Track whether an active sync operation is in progress (set externally via context)
+  const isSyncingRef = useRef(false);
 
   const checkQueue = useCallback(async () => {
     try {
@@ -43,12 +50,11 @@ export const useConnectionStatus = (): UseConnectionStatusReturn => {
       return;
     }
 
-    const count = await checkQueue();
-    if (count > 0) {
-      setStatus('syncing');
-    } else {
-      setStatus('online');
-    }
+    // FIX: When connected, always report 'online'.
+    // 'syncing' is only set during an actual sync operation, not when queue has items.
+    // Queue count is tracked separately for UI badges.
+    await checkQueue();
+    setStatus(isSyncingRef.current ? 'syncing' : 'online');
   }, [checkQueue]);
 
   const refresh = useCallback(async () => {
@@ -65,8 +71,8 @@ export const useConnectionStatus = (): UseConnectionStatusReturn => {
       updateStatus(state.isConnected ?? true);
     });
 
-    // Check queue periodically
-    const interval = setInterval(checkQueue, 30000); // Reduced from 10s to 30s
+    // Check queue periodically (just for badge count, not status)
+    const interval = setInterval(checkQueue, 30000);
 
     return () => {
       unsubscribe();

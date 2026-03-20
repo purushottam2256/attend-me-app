@@ -16,6 +16,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import * as Haptics from 'expo-haptics';
+import * as Location from 'expo-location';
+import { Platform, Alert, Linking } from 'react-native';
 import {
   initBLE,
   getBLEState,
@@ -325,19 +327,63 @@ export const useBLE = ({
   }, [stopBLEScan]);
   
   // === FIX: React to enabled changes with stable refs ===
+  // Also request Location permission (Android REQUIRES it for BLE scanning)
   useEffect(() => {
     if (enabled) {
       console.log('[useBLE] Enabled=true - requesting permissions then scan');
-      requestBLEPermissions().then((granted) => {
+      
+      const requestAllPermissions = async () => {
+        // 1. Request Location permission (required for BLE on Android)
+        if (Platform.OS === 'android') {
+          try {
+            const { status: locStatus } = await Location.requestForegroundPermissionsAsync();
+            console.log('[useBLE] Location permission:', locStatus);
+            
+            if (locStatus !== 'granted') {
+              setError('Location permission is required for Bluetooth scanning');
+              Alert.alert(
+                'Location Permission Required',
+                'Android requires Location access to scan for Bluetooth devices. Please grant location permission in Settings.',
+                [
+                  { text: 'Open Settings', onPress: () => Linking.openSettings() },
+                  { text: 'Cancel', style: 'cancel' }
+                ]
+              );
+              return;
+            }
+            
+            // 2. Check if Location Services (GPS) are enabled
+            const locationEnabled = await Location.hasServicesEnabledAsync();
+            console.log('[useBLE] Location services enabled:', locationEnabled);
+            
+            if (!locationEnabled) {
+              Alert.alert(
+                'Enable GPS',
+                'Please turn on Location/GPS services. Bluetooth scanning requires GPS to be active on Android.',
+                [
+                  { text: 'Open Settings', onPress: () => Linking.sendIntent?.('android.settings.LOCATION_SOURCE_SETTINGS').catch(() => Linking.openSettings()) },
+                  { text: 'Continue Anyway', style: 'cancel' }
+                ]
+              );
+            }
+          } catch (locErr) {
+            console.warn('[useBLE] Location permission error:', locErr);
+          }
+        }
+        
+        // 3. Request BLE permissions
+        const granted = await requestBLEPermissions();
         setPermissionsGranted(granted);
         if (granted) {
-          console.log('[useBLE] Permissions granted - starting scan');
+          console.log('[useBLE] All permissions granted - starting scan');
           startBLEScan();
         } else {
-          console.log('[useBLE] Permissions denied');
+          console.log('[useBLE] BLE Permissions denied');
           setError('Bluetooth permissions denied');
         }
-      });
+      };
+      
+      requestAllPermissions();
     } else {
       console.log('[useBLE] Enabled=false - stopping scan');
       stopBLEScan();

@@ -7,7 +7,7 @@
  * - Offline support with fallback to cached roster
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   getStudentsForClass, 
   createAttendanceSession, 
@@ -23,7 +23,7 @@ import {
   getDraftAttendance,
   clearDraftAttendance
 } from '../../../services/offlineService';
-import { useNetworkStatus } from '../../../hooks/useNetworkStatus';
+import { useConnectionStatus } from '../../../hooks';
 import createLogger from '../../../utils/logger';
 
 const log = createLogger('useAttendance');
@@ -85,8 +85,12 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isOfflineMode, setIsOfflineMode] = useState(false);
+  const { isOnline } = useConnectionStatus();
   
-  const { isOnline } = useNetworkStatus();
+  // Use a ref so fetchStudents always reads the LATEST value without
+  // being recreated every time isOnline changes (which caused the race condition).
+  const isOnlineRef = useRef(isOnline);
+  isOnlineRef.current = isOnline;
 
   // Derived counts
   const presentCount = students.filter(s => s.status === 'present' || s.status === 'od').length;
@@ -112,49 +116,49 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
       const batchNumber = batchOverride === 'full' ? null : (classData?.batch ?? null);
       
       let mappedStudents: AttendanceStudent[] = [];
+      let fetchedOnline = false;
       
-      if (isOnline) {
-        try {
-          const fetchedStudents = await getStudentsForClass(
-            target_dept,
-            target_year,
-            target_section,
-            batchNumber
-          );
+      // Always TRY the online path first, regardless of cached isOnline state.
+      // This prevents the false-offline bug caused by stale state.
+      try {
+        const fetchedStudents = await getStudentsForClass(
+          target_dept,
+          target_year,
+          target_section,
+          batchNumber
+        );
 
-          if (signal?.aborted) return;
+        if (signal?.aborted) return;
 
-          const permissions = await getClassPermissions(fetchedStudents.map(s => s.id));
-          const permissionMap = new Map(permissions.map(p => [p.student_id, p.type]));
+        const permissions = await getClassPermissions(fetchedStudents.map(s => s.id));
+        const permissionMap = new Map(permissions.map(p => [p.student_id, p.type]));
 
-          mappedStudents = fetchedStudents.map(s => {
-            const permissionType = permissionMap.get(s.id);
-            const initialStatus = permissionType 
-              ? permissionType as 'od' | 'leave'
-              : 'pending';
+        mappedStudents = fetchedStudents.map(s => {
+          const permissionType = permissionMap.get(s.id);
+          const initialStatus = permissionType 
+            ? permissionType as 'od' | 'leave'
+            : 'pending';
 
-            return {
-              id: s.id,
-              name: s.full_name,
-              rollNo: s.roll_no,
-              bleUUID: s.bluetooth_uuid || undefined,
-              status: initialStatus,
-              photoUrl: s.photo_url || undefined,
-              batch: s.batch,
-            };
-          });
-          
-          setIsOfflineMode(false);
-        } catch (onlineErr) {
-          if (signal?.aborted) return;
-          log.info('Online fetch failed, trying cache');
-        }
+          return {
+            id: s.id,
+            name: s.full_name,
+            rollNo: s.roll_no,
+            bleUUID: s.bluetooth_uuid || undefined,
+            status: initialStatus,
+            photoUrl: s.photo_url || undefined,
+            batch: s.batch,
+          };
+        });
+        
+        fetchedOnline = true;
+        setIsOfflineMode(false);
+      } catch (onlineErr: any) {
+        if (signal?.aborted) return;
+        log.error('Online fetch failed:', onlineErr?.message || onlineErr);
       }
       
-      if (mappedStudents.length === 0 && !signal?.aborted) {
-        const slotIdStr = String(classData.slot_id || '0');
-        const slotId = /^\d+$/.test(slotIdStr) ? parseInt(slotIdStr, 10) : 0;
-        
+      // Only fall back to cache if the online fetch genuinely failed
+      if (!fetchedOnline && mappedStudents.length === 0 && !signal?.aborted) {
         const cachedRoster = await findCachedRoster(
           classData.target_dept, 
           classData.target_year, 
@@ -184,9 +188,12 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
           }
           
           setIsOfflineMode(true);
-        } else if (!isOnline) {
+        } else if (!isOnlineRef.current) {
           setError('Offline - No cached roster available');
           setIsOfflineMode(true);
+        } else {
+          // Online but fetch failed and no cache — show error so user knows
+          setError('Failed to load roster. Please try again.');
         }
       }
 
@@ -223,7 +230,7 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
         setLoading(false);
       }
     }
-  }, [classData, batchOverride, isOnline]);
+  }, [classData, batchOverride]); // REMOVED isOnline from deps to prevent re-fetch race
 
   // Fetch on mount and when class/batch changes
   useEffect(() => {
@@ -238,6 +245,7 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
       setIsOfflineMode(false);
     }
   }, [isOnline]);
+
 
   // Update a single student's status
   const updateStudentStatus = useCallback((studentId: string, status: 'pending' | 'present' | 'absent' | 'od' | 'leave') => {
@@ -277,7 +285,7 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
       : [classData.slot_id];
 
     // If offline, queue the submission
-    if (!isOnline || isOfflineMode) {
+    if (!isOnlineRef.current || isOfflineMode) {
       try {
         for (const sId of slotIdsToProcess) {
           if (!sId) continue;

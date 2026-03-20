@@ -24,6 +24,14 @@ import { ScanScreen } from '../features/scanning';
 import { SwapScreen } from '../features/swap';
 import { MyClassHubScreen } from '../features/incharge';
 import { useTheme } from '../contexts';
+import { withSafeScreen } from '../components/withSafeScreen';
+
+// Wrap every screen in ErrorBoundary — crash in one tab won't kill the app
+const SafeHomeScreen = withSafeScreen(HomeScreen, 'HomeScreen');
+const SafeScanScreen = withSafeScreen(ScanScreen, 'ScanScreen');
+const SafeSwapScreen = withSafeScreen(SwapScreen, 'SwapScreen');
+const SafeHistoryScreen = withSafeScreen(HistoryScreen, 'HistoryScreen');
+const SafeMyClassHubScreen = withSafeScreen(MyClassHubScreen, 'MyClassHubScreen');
 
 export type MainTabParamList = {
   Home: undefined;
@@ -268,18 +276,18 @@ export const MainTabNavigator: React.FC<MainTabNavigatorProps> = ({ userName, us
         name="Home"
         options={{ tabBarLabel: 'Home' }}
       >
-        {() => <HomeScreen userName={userName} />}
+        {() => <SafeHomeScreen userName={userName} />}
       </Tab.Screen>
       
       <Tab.Screen 
         name="Delegate"
-        component={SwapScreen}
+        component={SafeSwapScreen}
         options={{ tabBarLabel: 'Swap' }}
       />
       
       <Tab.Screen 
         name="Scan" 
-        component={ScanScreen}
+        component={SafeScanScreen}
         options={{
           tabBarLabel: 'Scan',
         }}
@@ -287,14 +295,14 @@ export const MainTabNavigator: React.FC<MainTabNavigatorProps> = ({ userName, us
       
       <Tab.Screen 
         name="History" 
-        component={HistoryScreen}
+        component={SafeHistoryScreen}
         options={{ tabBarLabel: 'History' }}
       />
       
       {/* MyClass - visible in dock for class/lab incharges */}
       <Tab.Screen 
         name="MyClass"
-        component={MyClassHubScreen}
+        component={SafeMyClassHubScreen}
         options={{ 
           tabBarLabel: 'My Class',
           tabBarButton: showMyClass ? undefined : () => null, 

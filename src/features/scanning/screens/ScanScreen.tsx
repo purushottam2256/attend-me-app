@@ -54,6 +54,7 @@ import {
 import { ZenToast } from "@components/ZenToast";
 import { PulsingDots } from "@components/ui/LoadingAnimation";
 import { scale, verticalScale, moderateScale, normalizeFont } from "@utils/responsive";
+import { safeJsonParse } from "@utils/safeUtils";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -389,13 +390,15 @@ export const ScanScreen: React.FC = () => {
           );
           if (!isMountedRef.current) return;
           if (stored) {
-            const data = JSON.parse(stored);
-            setPreviousAttendance({
-              className: name,
-              takenAt: data.takenAt,
-            });
-            // Show confirmation popup
-            setShowOverride(true);
+            const data = safeJsonParse<{ takenAt?: string }>(stored, null as any);
+            if (data) {
+              setPreviousAttendance({
+                className: name,
+                takenAt: data.takenAt || '',
+              });
+              // Show confirmation popup
+              setShowOverride(true);
+            }
           } else {
              setPreviousAttendance(null);
              setShowOverride(false);
@@ -464,14 +467,16 @@ export const ScanScreen: React.FC = () => {
         try {
           const stored = await AsyncStorage.getItem(`@attend_me/attendance_${classKey}`);
           if (stored) {
-             const data = JSON.parse(stored);
-             setPreviousAttendance({
-               className: `${subjectName} - ${displaySection}`,
-               takenAt: data.takenAt,
-             });
-             setShowOverride(true);
-             setIsScanning(false); // Stop scanning if we found previous data
-             setScanState("HANDSHAKE");
+             const data = safeJsonParse<{ takenAt?: string }>(stored, null as any);
+             if (data) {
+               setPreviousAttendance({
+                 className: `${subjectName} - ${displaySection}`,
+                 takenAt: data.takenAt || '',
+               });
+               setShowOverride(true);
+               setIsScanning(false); // Stop scanning if we found previous data
+               setScanState("HANDSHAKE");
+             }
           } else {
              setPreviousAttendance(null);
              if (scanState === 'HANDSHAKE') {

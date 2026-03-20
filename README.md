@@ -172,10 +172,9 @@ Sophisticated roster management with role-based access controls.
 Secure, role-based access control for the institution.
 
 - **Supabase Authentication:** Enterprise login with email/password, integrated with Supabase Auth.
+- **Digital ID & QR Codes:** A built-in dynamic Digital ID card featuring scannable QR codes natively generated from the user's secure database ID for rapid manual identification.
 - **Role-Based Access:** Separate experiences for `faculty`, `admin`, and `management` roles with tailored permissions and dashboards.
-- **Password Recovery:** Secure forgot-password flow with email-based OTP verification.
 - **Profile Hub:** Faculty can manage settings, view institutional details, and access platform configurations from a centralized profile screen.
-- **Help & Support:** In-app help documentation and bug reporting functionality.
 
 ### 9. Attendance History & Analytics
 
@@ -184,6 +183,16 @@ Comprehensive reporting tools for tracking historical attendance data.
 - **Filtered History:** Browse past attendance sessions with multi-criteria filters (date range, subject, section).
 - **Calendar View:** Visual calendar interface showing attendance session dates at a glance.
 - **Detailed Reports:** Per-session breakdown of present, absent, OD, and leave counts with exportable data.
+
+### 10. Senior Testing & Observability Infrastructure (Enterprise-Grade)
+
+The app utilizes industry-standard architectures for flawless deployment reliability.
+
+- **Automated E2E:** Integrated with Maestro for robotic End-to-End automation flows (e.g., automated login and attendance UI testing).
+- **Unit & Component Testing:** Verified core utilities, offline caching, and boundaries utilizing `Jest` and `React Native Testing Library`.
+- **Sentry Crash Analytics:** `App.tsx` and the `globalErrorHandler` are wrapped in Sentry SDK to beam unhandled fatal promise deaths and Javascript crashes securely to the cloud.
+- **Over-The-Air (OTA) Updates:** Powered by `expo-updates`, allowing javascript bundle fixes to bypass the Play Store review queue directly to faculty phones.
+- **Secure Backend (RLS):** Complete integration of PostgreSQL Row Level Security (`prod-rls.sql`) locking down data exposure dynamically based on the active session's JWT.
 
 ---
 
@@ -345,5 +354,5 @@ This project is proprietary software developed for MRCE (Malla Reddy College of 
 ---
 
 <p align="center">
-  <b>Built with ❤️ for MRCE</b>
+  <b>Built with ❤️ By PJ for MRCE</b>
 </p>

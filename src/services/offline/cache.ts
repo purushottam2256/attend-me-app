@@ -484,3 +484,78 @@ export async function clearDraftAttendance(slotId: string | number): Promise<voi
     log.error("Error clearing draft attendance:", error);
   }
 }
+
+// ============================================================================
+// OD/LEAVE PERMISSIONS CACHING (Issue #10)
+// ============================================================================
+
+interface CachedPermission {
+  student_id: string;
+  type: 'od' | 'leave';
+  start_date: string;
+  end_date: string;
+}
+
+/**
+ * Cache OD/Leave permissions for offline use.
+ * Stores by date key so we can quickly look up permissions for any date.
+ */
+export async function cachePermissions(date: string, permissions: CachedPermission[]): Promise<void> {
+  InteractionManager.runAfterInteractions(async () => {
+    try {
+      // Load existing cache
+      const raw = await storage.getItem(STORAGE_KEYS.PERMISSIONS);
+      const all: Record<string, CachedPermission[]> = raw ? JSON.parse(raw) : {};
+      
+      // Merge / overwrite for this date
+      all[date] = permissions;
+      
+      await storage.setItem(STORAGE_KEYS.PERMISSIONS, JSON.stringify(all));
+      await setCacheTimestamp("permissions");
+      log.info(`Cached ${permissions.length} permissions for ${date}`);
+    } catch (error) {
+      log.error("Error caching permissions:", error);
+    }
+  });
+}
+
+/**
+ * Get cached OD/Leave permissions for a specific date.
+ */
+export async function getCachedPermissions(date: string): Promise<CachedPermission[]> {
+  try {
+    const raw = await storage.getItem(STORAGE_KEYS.PERMISSIONS);
+    if (!raw) return [];
+    const all: Record<string, CachedPermission[]> = JSON.parse(raw);
+    return all[date] || [];
+  } catch (error) {
+    log.error("Error getting cached permissions:", error);
+    return [];
+  }
+}
+
+/**
+ * Remove expired permissions (end_date < today) to prevent stale data buildup.
+ */
+export async function purgeExpiredPermissions(): Promise<void> {
+  try {
+    const raw = await storage.getItem(STORAGE_KEYS.PERMISSIONS);
+    if (!raw) return;
+    const all: Record<string, CachedPermission[]> = JSON.parse(raw);
+    
+    const today = new Date().toISOString().split('T')[0];
+    const cleaned: Record<string, CachedPermission[]> = {};
+    
+    for (const [date, perms] of Object.entries(all)) {
+      if (date >= today) {
+        // Keep future + today entries, but also filter out individually expired perms
+        cleaned[date] = perms.filter(p => p.end_date >= today);
+      }
+    }
+    
+    await storage.setItem(STORAGE_KEYS.PERMISSIONS, JSON.stringify(cleaned));
+  } catch (error) {
+    log.error("Error purging expired permissions:", error);
+  }
+}
+

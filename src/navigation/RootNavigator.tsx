@@ -34,6 +34,18 @@ import { BeaconDoctorScreen } from '@features/diagnostics/screens/BeaconDoctorSc
 import { SyncManagerScreen } from '@features/sync/screens/SyncManagerScreen';
 import { NotificationScreen } from '@features/notifications/screens/NotificationScreenNew';
 import { SwapHistoryScreen } from '@features/swap/screens/SwapHistoryScreen';
+import { withSafeScreen } from '@components/withSafeScreen';
+import { trackScreen } from '@services/analyticsService';
+
+// Crash-proof all stack screens
+const SafeManualEntry = withSafeScreen(ManualEntryScreen, 'ManualEntryScreen');
+const SafeBeaconDoctor = withSafeScreen(BeaconDoctorScreen, 'BeaconDoctorScreen');
+const SafeSyncManager = withSafeScreen(SyncManagerScreen, 'SyncManagerScreen');
+const SafeNotifications = withSafeScreen(NotificationScreen, 'NotificationScreen');
+const SafeSwapHistory = withSafeScreen(SwapHistoryScreen, 'SwapHistoryScreen');
+const SafePermission = withSafeScreen(PermissionScreen, 'PermissionScreen');
+const SafeManagePerms = withSafeScreen(ManagePermissionsScreen, 'ManagePermissionsScreen');
+const SafeProjectFees = withSafeScreen(ProjectFeesScreen, 'ProjectFeesScreen');
 // Keep native splash screen visible
 SplashScreenExpo.preventAutoHideAsync();
 
@@ -187,7 +199,31 @@ export const RootNavigator: React.FC = () => {
 
   return (
     <View style={styles.container} onLayout={onLayoutRootView}>
-      <NavigationContainer ref={navigationRef}>
+      <NavigationContainer 
+        ref={navigationRef}
+        onStateChange={(state) => {
+          // Send automatic screen tracking events
+          if (!state) return;
+          try {
+            const currentRoute = state.routes[state.index];
+            if (currentRoute) {
+              const routeName = currentRoute.name;
+              // If we are in the 'Main' tab, drill down to find the specific tab
+              if (routeName === 'Main' && currentRoute.state) {
+                 const tabState = currentRoute.state as any;
+                 const tabRoute = tabState.routes[tabState.index];
+                 if (tabRoute) {
+                   trackScreen(`Tab_${tabRoute.name}`);
+                   return;
+                 }
+              }
+              trackScreen(routeName);
+            }
+          } catch (e) {
+            // Silently fail if navigation state is somehow malformed
+          }
+        }}
+      >
         <RootStack.Navigator screenOptions={{ headerShown: false }}>
           {appState === 'AUTH' ? (
             <RootStack.Screen name="Auth">
@@ -200,42 +236,42 @@ export const RootNavigator: React.FC = () => {
           )}
           <RootStack.Screen 
             name="Permission" 
-            component={PermissionScreen}
+            component={SafePermission}
             options={{ presentation: 'modal' }}
           />
           <RootStack.Screen 
             name="ManagePermissions" 
-            component={ManagePermissionsScreen}
+            component={SafeManagePerms}
             options={{ headerShown: false }}
           />
           <RootStack.Screen 
             name="ManualEntry" 
-            component={ManualEntryScreen}
+            component={SafeManualEntry}
             options={{ headerShown: false, animation: 'slide_from_bottom' }}
           />
           <RootStack.Screen 
             name="ProjectFees" 
-            component={ProjectFeesScreen}
+            component={SafeProjectFees}
             options={{ headerShown: false, animation: 'slide_from_right' }}
           />
           <RootStack.Screen 
             name="BeaconDoctor" 
-            component={BeaconDoctorScreen}
+            component={SafeBeaconDoctor}
             options={{ headerShown: false }}
           />
           <RootStack.Screen 
             name="SyncManager" 
-            component={SyncManagerScreen}
+            component={SafeSyncManager}
             options={{ headerShown: false }}
           />
         <RootStack.Screen 
           name="Notifications" 
-          component={NotificationScreen} 
+          component={SafeNotifications} 
           options={{ animation: 'slide_from_right' }}
         />
         <RootStack.Screen 
           name="SwapHistory" 
-          component={SwapHistoryScreen} 
+          component={SafeSwapHistory} 
           options={{ animation: 'slide_from_right', headerShown: false }}
         />
       </RootStack.Navigator>

@@ -96,14 +96,17 @@ CREATE TABLE public.profiles (
     dept TEXT,
     faculty_id TEXT UNIQUE,
     mobile TEXT,
-    is_biometric_enabled BOOLEAN DEFAULT FALSE,
     device_token TEXT, -- For FCM push notifications (Legacy)
     push_token TEXT, -- For Push Notifications
     push_token_type TEXT, -- Type: 'fcm' (Android), 'apns' (iOS), or 'expo'
     push_token_updated_at TIMESTAMPTZ, -- When push token was last updated
     avatar_url TEXT, -- Profile picture URL
+    qr_code_url TEXT, -- URL to the generated QR code in storage
     is_on_leave BOOLEAN DEFAULT FALSE,
     notifications_enabled BOOLEAN DEFAULT TRUE,
+    last_lat DOUBLE PRECISION,
+    last_lng DOUBLE PRECISION,
+    last_location_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -1170,6 +1173,21 @@ RETURNS BOOLEAN AS $$
   )
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
+-- Is the current user management?
+CREATE OR REPLACE FUNCTION public.is_management_user()
+RETURNS boolean
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.admins WHERE id = auth.uid() AND role = 'management'
+  )
+  OR EXISTS (
+    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'management'
+  );
+$$;
+
 -- Is the current user HOD of a specific dept?
 CREATE OR REPLACE FUNCTION public.is_hod_of(target_dept TEXT)
 RETURNS BOOLEAN AS $$
@@ -1215,6 +1233,7 @@ GRANT EXECUTE ON FUNCTION public.auth_user_dept() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.is_elevated_role() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.is_hod() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.is_hod_of(TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_management_user() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_user_admin_role(TEXT) TO authenticated;
 
 -- ============================================================================
@@ -1249,6 +1268,11 @@ CREATE POLICY "profiles_delete_elevated" ON public.profiles
 -- Users can insert their own profile (used during initial welcome setup)
 CREATE POLICY "profiles_insert_own" ON public.profiles
   FOR INSERT WITH CHECK (id = auth.uid());
+
+-- Allow faculty to update their own location for the scanner GPS verification
+CREATE POLICY "faculty_update_own_location" ON public.profiles
+    FOR UPDATE USING (id = auth.uid())
+    WITH CHECK (id = auth.uid());
 
 -- ============================================================================
 -- DEPARTMENTS Policies
@@ -1732,6 +1756,8 @@ create table if not exists public.holidays (
   date date not null,
   type text check (type in ('holiday', 'event', 'exam')) default 'holiday',
   description text,
+  dept text,
+  created_by uuid references public.profiles(id),
   created_at timestamptz default now()
 );
 
@@ -1756,6 +1782,40 @@ insert into public.holidays (title, date, type, description) values
   ('Annual Tech Fest', '2026-03-15', 'event', 'College wide technical symposium'),
   ('Mid Semester Exams', '2026-02-10', 'exam', 'Phase 1 internal assessments')
 ON CONFLICT DO NOTHING;
+
+-- ============================================================================
+-- 17B. FACULTY ATTENDANCE LOGS
+-- ============================================================================
+create table if not exists public.faculty_attendance_logs (
+  id uuid primary key default uuid_generate_v4(),
+  faculty_id uuid not null references public.profiles(id) on delete cascade,
+  date date not null default current_date,
+  check_in timestamptz not null default now(),
+  check_out timestamptz,
+  status text check (status in ('present', 'absent', 'late', 'on_leave', 'half_day')) default 'present',
+  session_duration_minutes integer,
+  device_info text,
+  location_lat decimal,
+  location_lng decimal,
+  scanned_by uuid references public.profiles(id),
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  constraint faculty_attendance_daily_unique unique (faculty_id, date)
+);
+
+create index if not exists idx_faculty_attendance_logs_date on public.faculty_attendance_logs(date);
+create index if not exists idx_faculty_attendance_logs_faculty on public.faculty_attendance_logs(faculty_id);
+
+alter table public.faculty_attendance_logs enable row level security;
+
+create policy "faculty_attendance_read_all" on public.faculty_attendance_logs
+  for select using (true);
+
+create policy "faculty_attendance_insert" on public.faculty_attendance_logs
+  for insert with check (true);
+
+create policy "faculty_attendance_update" on public.faculty_attendance_logs
+  for update using (true);
 
 -- ============================================================================
 -- 18. ISSUES/REPORTS TABLE
@@ -2826,11 +2886,6 @@ CREATE TRIGGER update_pf_students_updated_at
     BEFORE UPDATE ON public.project_fee_students
     FOR EACH ROW
     EXECUTE FUNCTION public.update_updated_at_column();
-
--- ============================================================================
--- END OF SCHEMA
--- ============================================================================
-
 -- ----------------------------------------------------------------------------
 -- Function: Auto-update faculty role based on class incharge assignments
 -- ----------------------------------------------------------------------------
@@ -2877,3 +2932,33 @@ CREATE TRIGGER on_class_incharge_role_change
     AFTER INSERT OR UPDATE OF is_active, faculty_id OR DELETE ON public.class_incharges
     FOR EACH ROW
     EXECUTE FUNCTION public.handle_class_incharge_role_update();
+    
+-- ============================================================================
+-- STORAGE CONFIGURATION: QR CODES
+-- ============================================================================
+INSERT INTO storage.buckets (id, name, public) VALUES ('qrcodes', 'qrcodes', true)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE POLICY "qrcodes_public_read" ON storage.objects
+  FOR SELECT USING (bucket_id = 'qrcodes');
+
+CREATE POLICY "qrcodes_auth_insert" ON storage.objects
+  FOR INSERT WITH CHECK (bucket_id = 'qrcodes' AND auth.role() = 'authenticated');
+
+-- ============================================================================
+-- MANAGEMENT ROLE RLS SUPPLEMENTAL POLICIES 
+-- (Ensures Dashboard & Data works for Management role since they are in admins)
+-- ============================================================================
+CREATE POLICY "management_read_attendance_sessions" ON public.attendance_sessions FOR SELECT USING (public.is_management_user());
+CREATE POLICY "management_read_leaves" ON public.leaves FOR SELECT USING (public.is_management_user());
+CREATE POLICY "management_read_profiles" ON public.profiles FOR SELECT USING (public.is_management_user());
+CREATE POLICY "management_read_attendance_permissions" ON public.attendance_permissions FOR SELECT USING (public.is_management_user());
+CREATE POLICY "management_read_subjects" ON public.subjects FOR SELECT USING (public.is_management_user());
+CREATE POLICY "management_read_holidays" ON public.holidays FOR SELECT USING (public.is_management_user());
+CREATE POLICY "management_read_students" ON public.students FOR SELECT USING (public.is_management_user());
+CREATE POLICY "management_read_notifications" ON public.notifications FOR SELECT USING (public.is_management_user());
+CREATE POLICY "management_read_faculty_logs" ON public.faculty_attendance_logs FOR SELECT USING (public.is_management_user());
+
+-- ============================================================================
+-- END OF SCHEMA
+-- ============================================================================

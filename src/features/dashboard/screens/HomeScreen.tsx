@@ -39,6 +39,7 @@ import {
   LeaveInfo
 } from '../../../services/dashboardService';
 import { NotificationService } from '../../../services/NotificationService';
+import * as Notifications from 'expo-notifications';
 import { PulsingDots } from '../../../components/ui/LoadingAnimation';
 import { 
   cacheTodaySchedule, 
@@ -55,6 +56,7 @@ import { useConnectionStatus } from '../../../hooks';
 import { useOfflineSync } from '../../../contexts/OfflineSyncContext';
 import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive';
 import { OffHoursScanModal, type OffHoursReason } from '../components';
+import { safeJsonParse } from '../../../utils/safeUtils';
 
 
 type HeroState = 'CLASS_NOW' | 'BREAK' | 'DONE' | 'LOADING' | 'NO_CLASSES' | 'HOLIDAY' | 'LEAVE';
@@ -267,8 +269,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
       if (!forceRefresh) {
         const cached = await AsyncStorage.getItem(SCHEDULE_CACHE_KEY);
         if (cached) {
-          const { data, timestamp } = JSON.parse(cached);
-          if (Date.now() - timestamp < 5 * 60 * 1000) {
+          const { data, timestamp } = safeJsonParse(cached, { data: [] as any[], timestamp: 0 });
+          if (data && Date.now() - timestamp < 5 * 60 * 1000) {
             LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
             setSchedule(data);
             determineHeroState(data);
@@ -365,28 +367,44 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
       }));
 
       // Add substitute classes (classes you're covering for someone else)
-      const subClasses: ScheduleSlot[] = substitutions.map(sub => {
-        const now = new Date();
-        const start = parseTime(sub.slot_id.split('_')[1] || '09:00'); // Extract time from slot_id or default
+      // FIX #4: Use enriched start_time/end_time from dashboardService (not parsed from slot_id)
+      const GRACE_SUB_MINUTES = 10;
+      const subClasses: ScheduleSlot[] = substitutions
+        .filter((sub: any) => sub.start_time && sub.end_time) // Only include subs with valid times
+        .map((sub: any) => {
+          const now = new Date();
+          const start = parseTime(sub.start_time);
+          const end = parseTime(sub.end_time);
+          const graceEnd = new Date(end.getTime() + GRACE_SUB_MINUTES * 60 * 1000);
+          
+          // FIX #5: Determine status independently based on time (not blocked by other live classes)
+          let status: 'live' | 'completed' | 'incomplete' | 'upcoming';
+          if (now >= start && now <= graceEnd) {
+            status = 'live';
+          } else if (now > graceEnd) {
+            status = completedSlotIds.has(sub.slot_id) ? 'completed' : 'incomplete';
+          } else {
+            status = 'upcoming';
+          }
         
-        return {
-          id: sub.id,
-          day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
-          slot_id: sub.slot_id,
-          start_time: sub.slot_id.split('_')[1] || '09:00',
-          end_time: sub.slot_id.split('_')[2] || '10:00',
-          room: null,
-          subject: sub.subject,
-          target_dept: sub.target_dept,
-          target_year: sub.target_year,
-          target_section: sub.target_section,
-          batch: null,
-          status: now > parseTime(sub.slot_id.split('_')[2] || '10:00') ? 'incomplete' : 'upcoming' as const,
-          isSwap: false,
-          isSubstitute: true,
-          originalFacultyId: sub.original_faculty_id, // Track who we're substituting for
-        };
-      });
+          return {
+            id: sub.id,
+            day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
+            slot_id: sub.slot_id,
+            start_time: sub.start_time,
+            end_time: sub.end_time,
+            room: sub.room || null,
+            subject: sub.subject,
+            target_dept: sub.target_dept,
+            target_year: sub.target_year,
+            target_section: sub.target_section,
+            batch: null,
+            status,
+            isSwap: false,
+            isSubstitute: true,
+            originalFacultyId: sub.original_faculty_id,
+          };
+        });
 
       const allClasses = [...processed, ...subClasses];
       allClasses.sort((a, b) => a.start_time.localeCompare(b.start_time));
@@ -417,7 +435,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
               await AsyncStorage.setItem(NOTIF_PREF_KEY, JSON.stringify(notificationsEnabled));
           } else {
               const cachedPref = await AsyncStorage.getItem(NOTIF_PREF_KEY);
-              notificationsEnabled = cachedPref ? JSON.parse(cachedPref) : true;
+              notificationsEnabled = cachedPref ? safeJsonParse(cachedPref, true) : true;
           }
 
           const pausedStr = await AsyncStorage.getItem('@attend_me/reminders_paused');
@@ -430,7 +448,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
              }
              
              // Get already-scheduled notification slot IDs for dedup
-             // This avoids cancelling and re-scheduling on every app open
              const scheduled = await NotificationService.getAllScheduled();
              const alreadyScheduledSlotIds = new Set(
                  scheduled
@@ -438,6 +455,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
                     .map(n => n.content.data?.slotId)
                     .filter(Boolean)
              );
+             
+             // FIX #6: Cancel existing reminders for classes where attendance is already taken
+             for (const notification of scheduled) {
+                 if (notification.content.data?.type === 'CLASS_REMINDER') {
+                     const notifSlotId = notification.content.data?.slotId;
+                     if (notifSlotId && completedSlotIds.has(notifSlotId)) {
+                         await Notifications.cancelScheduledNotificationAsync(notification.identifier);
+                     }
+                 }
+             }
              
              for (const slot of mergedClasses) {
                  if (slot.status === 'upcoming' || slot.status === 'live') {

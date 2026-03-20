@@ -15,7 +15,8 @@ import {
   Animated,
   Modal,
   StyleSheet,
-  Dimensions
+  Dimensions,
+  Image
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,6 +29,7 @@ import { getTodaySchedule, getTomorrowSchedule, TimetableSlot } from '../../../s
 import { useConnectionStatus } from '../../../hooks/useConnectionStatus'; // Added import
 import { swapStyles as styles } from '../styles/SwapScreen.styles';
 import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive';
+import { OptimizedImage } from '../../../../src/components/ui/OptimizedImage'; // Adjust path based on your true components directory
 
 type SwapScreenRouteProp = RouteProp<{
     Swap: { classToSwap?: TimetableSlot };
@@ -41,6 +43,7 @@ interface Faculty {
   dept: string;
   email: string;
   push_token?: string;
+  avatar_url?: string;
   isBusy?: boolean;
 }
 
@@ -221,7 +224,6 @@ export const SwapScreen: React.FC = () => {
         .eq('id', user.id)
         .single();
       setUserDept(profile?.dept || null);
-      setUserDept(profile?.dept || null);
       
       // Load today's schedule
       const schedule = await getTodaySchedule(user.id);
@@ -248,7 +250,7 @@ export const SwapScreen: React.FC = () => {
       if (profile?.dept) {
         const { data: faculties, error: fetchError } = await supabase
           .from('profiles')
-          .select('id, full_name, dept, email, push_token')
+          .select('id, full_name, dept, email, push_token, avatar_url')
           .eq('dept', profile.dept)
           .neq('id', user.id)
           .order('full_name');
@@ -303,7 +305,7 @@ export const SwapScreen: React.FC = () => {
         // Fetch Profiles
         const { data: profiles } = await supabase
           .from('profiles')
-          .select('id, full_name, dept, email, push_token')
+          .select('id, full_name, dept, email, push_token, avatar_url')
           .in('id', facultyIds);
           
         if (profiles) {
@@ -387,10 +389,8 @@ export const SwapScreen: React.FC = () => {
         f.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         f.dept?.toLowerCase().includes(searchQuery.toLowerCase())
       );
-    } else {
-      // Hide busy faculty when not searching
-      list = list.filter(f => !f.isBusy);
     }
+    // FIX: Always show all faculty (including busy) with BUSY tag, not hidden
 
     // Free first, then alphabetical
     return list.sort((a, b) => {
@@ -426,10 +426,11 @@ export const SwapScreen: React.FC = () => {
           ? new Date(today.setDate(today.getDate() + 1)).toISOString().split('T')[0]
           : today.toISOString().split('T')[0];
       
-      const { error } = await supabase
+      // FIX: Use .select() to get back the inserted record ID for accept/reject to work
+      const { data: insertedSub, error } = await supabase
         .from('substitutions')
         .insert({
-          date: targetDate, // Use calculated date
+          date: targetDate,
           slot_id: selectedClass.slot_id,
           original_faculty_id: userId,
           substitute_faculty_id: selectedFaculty.id,
@@ -440,32 +441,25 @@ export const SwapScreen: React.FC = () => {
           status: 'pending',
           created_by: userId,
           notes: substituteNote || null,
-        });
+        })
+        .select('id')
+        .single();
       
       if (error) {
-
           throw error;
       }
       
-      // Create notification
-      // Notification created via Realtime trigger or NotificationScreen fetches 'substitutions' directly
-      // Removed redundant manual notification insert to prevent duplicates
-
-      // Send Real Push (Formal)
+      // Send Push Notification (no old logo)
       if (selectedFaculty.push_token) {
           const { data: { user } } = await supabase.auth.getUser();
           const senderName = user?.user_metadata?.full_name || 'A Faculty Member';
-          
-          // Hosted Splash Logo
-          const logoUrl = 'https://xxemwolzhhwkiwvjyniv.supabase.co/storage/v1/object/public/avatars/5cb62ec2-fc11-4b6d-abe1-cf76a21f9570/app-images/splash-logo.jpg';
 
           NotificationService.sendPushNotification(
               selectedFaculty.push_token,
-              'Formal Substitution Request',
+              'Substitution Request',
               `Dear ${selectedFaculty.full_name},\n\nProf. ${senderName} requests you to substitute for their ${selectedClass.target_dept}-${selectedClass.target_year}-${selectedClass.target_section} class (${selectedClass.start_time}).\n\nPlease verify your availability and respond.`,
-              { type: 'SUB_REQUEST', requestId: selectedClass.slot_id },
-              'SUB_REQUEST', // Category ID
-              logoUrl // Add Logo
+              { type: 'SUB_REQUEST', requestId: insertedSub?.id || selectedClass.slot_id },
+              'SUB_REQUEST'
           );
       }
       
@@ -499,7 +493,7 @@ export const SwapScreen: React.FC = () => {
           ? new Date(today.setDate(today.getDate() + 1)).toISOString().split('T')[0]
           : today.toISOString().split('T')[0];
       
-      const { error } = await supabase
+      const { data: insertedSwap, error } = await supabase
         .from('class_swaps')
         .insert({
           date: targetDate,
@@ -509,28 +503,23 @@ export const SwapScreen: React.FC = () => {
           slot_b_id: swapTargetSlot,
           status: 'pending',
           notes: swapNote || null,
-        });
+        })
+        .select('id')
+        .single();
       
       if (error) throw error;
-      
-      // Notification handled by Database Trigger (notification_triggers.sql)
-      // await supabase.from('notifications').insert({...});
 
-      // Send Real Push
+      // Send Push Notification (no old logo)
       if (swapTargetFaculty.push_token) {
           const { data: { user: currentUser } } = await supabase.auth.getUser();
           const senderName = currentUser?.user_metadata?.full_name || 'A Faculty Member';
-          
-          // Hosted Splash Logo
-          const logoUrl = 'https://xxemwolzhhwkiwvjyniv.supabase.co/storage/v1/object/public/avatars/5cb62ec2-fc11-4b6d-abe1-cf76a21f9570/app-images/splash-logo.jpg';
 
           NotificationService.sendPushNotification(
               swapTargetFaculty.push_token,
               'Class Swap Proposal',
               `Dear ${swapTargetFaculty.full_name},\n\nProf. ${senderName} proposes a class swap.\n\nYou give: ${swapTargetSlot}\nThey give: ${swapMyClass.target_dept}-${swapMyClass.target_year}-${swapMyClass.target_section} (${swapMyClass.slot_id})\n\nKindly respond at your earliest convenience.`,
-              { type: 'SWAP_REQUEST' },
-              'SWAP_REQUEST', // Category ID
-              logoUrl // Add Logo
+              { type: 'SWAP_REQUEST', requestId: insertedSwap?.id },
+              'SWAP_REQUEST'
           );
       }
       
@@ -701,16 +690,30 @@ export const SwapScreen: React.FC = () => {
       }}
       activeOpacity={0.8}
     >
-      <LinearGradient
-        colors={isSelected ? [colors.accent, colors.tealLight] : faculty.isBusy ? ['#94A3B8', '#64748B'] : [colors.tealLight, colors.teal]}
-        style={styles.facultyAvatar}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-      >
-        <Text style={styles.facultyInitial}>
-          {faculty.full_name?.charAt(0)?.toUpperCase() || '?'}
-        </Text>
-      </LinearGradient>
+      {/* Faculty Avatar with OptimizedImage support */}
+      <View style={styles.facultyAvatar}>
+        <OptimizedImage
+          url={faculty.avatar_url || ''}
+          fallbackInitials={faculty.full_name}
+          style={{ width: '100%', height: '100%', borderRadius: moderateScale(24) }}
+          borderRadius={moderateScale(24)}
+          initialsStyle={{
+            backgroundColor: isSelected ? colors.accent : faculty.isBusy ? '#94A3B8' : colors.tealLight,
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}
+          initialsTextStyle={{
+            fontSize: normalizeFont(18),
+            fontWeight: '600',
+            color: '#FFF',
+          }}
+        />
+        {faculty.isBusy && (
+          <View style={{ position: 'absolute', bottom: -2, right: -2, backgroundColor: '#EF4444', width: scale(14), height: scale(14), borderRadius: scale(7), justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: colors.surface }}>
+            <Ionicons name="close" size={normalizeFont(8)} color="#FFF" />
+          </View>
+        )}
+      </View>
       <View style={styles.facultyInfo}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: scale(8) }}>
           <Text style={[styles.facultyName, { color: colors.textPrimary }]}>

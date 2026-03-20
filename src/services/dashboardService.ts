@@ -334,12 +334,32 @@ export async function getSwapsAndSubstitutions(
       .eq('status', 'accepted')
       .eq('substitute_faculty_id', facultyId);
 
+    // FIX: Enrich substitutions with start_time/end_time from master_timetables
+    // This is needed so the HomeScreen can properly determine live/upcoming status
+    const enrichedSubs = await Promise.all((subs || []).map(async (sub: any) => {
+      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const dayName = days[new Date(date).getDay()];
+
+      const { data: slotDetails } = await supabase
+        .from('master_timetables')
+        .select('start_time, end_time, room')
+        .eq('faculty_id', sub.original_faculty_id)
+        .eq('slot_id', sub.slot_id)
+        .eq('day', dayName)
+        .maybeSingle();
+
+      return {
+        ...sub,
+        subject: sub.subject,
+        start_time: slotDetails?.start_time || null,
+        end_time: slotDetails?.end_time || null,
+        room: slotDetails?.room || null,
+      };
+    }));
+
     return {
       swaps: enrichedSwaps as SwapInfo[],
-      substitutions: (subs || []).map((s: any) => ({
-        ...s,
-        subject: s.subject,
-      })),
+      substitutions: enrichedSubs as (SubstitutionInfo & { start_time?: string; end_time?: string; room?: string })[],
     };
   } catch (error) {
     log.error('Error fetching swaps/subs:', error);

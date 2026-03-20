@@ -15,7 +15,6 @@ import {
   Animated,
   Dimensions,
   TextInput,
-  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -207,7 +206,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            {/* Logo Section */}
+            {/* Branding Section */}
             <Animated.View
               style={[
                 styles.logoSection,
@@ -217,11 +216,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 },
               ]}
             >
-              <Image
-                source={require('@assets/icon.png')}
-                style={styles.logo}
-                resizeMode="contain"
-              />
               <Text style={styles.appName}>AttendMe</Text>
               <Text style={styles.tagline}>Your Attendance, Simplified</Text>
             </Animated.View>
@@ -380,11 +374,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: verticalScale(32),
   },
-  logo: {
-    width: scale(100),
-    height: scale(100),
-    borderRadius: moderateScale(20),
-  },
+
   appName: {
     fontSize: normalizeFont(32),
     fontWeight: '800',
