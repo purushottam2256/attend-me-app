@@ -162,7 +162,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         .select("*")
         .gte("date", new Date().toISOString())
         .order("date", { ascending: true })
-        .limit(5);
+        .limit(30);
 
       if (error) throw error;
 
@@ -645,16 +645,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               </View>
             ) : (
               <View>
-                {holidays?.map((h, i) => (
+                {/* Top 3 Vertical Events */}
+                {holidays?.slice(0, 3).map((h, i) => (
                   <View
-                    key={i}
+                    key={`v-${i}`}
                     style={{
                       flexDirection: "row",
                       alignItems: "center",
                       backgroundColor: isDark ? "#082020" : "#FFFFFF",
                       padding: scale(16),
                       borderRadius: moderateScale(16),
-                      marginBottom: i < holidays.length - 1 ? verticalScale(12) : 0,
+                      marginBottom: (i < Math.min(holidays.length, 3) - 1 || holidays.length > 3) ? verticalScale(12) : 0,
                       borderWidth: isDark ? 0 : 1,
                       borderColor: "#E2E8F0",
                     }}
@@ -674,7 +675,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                         style={{
                           fontSize: normalizeFont(18),
                           fontWeight: "800",
-                          color: h?.type === "holiday" ? "#EF4444" : h?.type === "exam" ? "#F59E0B" : "#3B82F6",
+                          color: h?.type === "holiday" ? "#EF4444" : h?.type === "exam" ? "#EAB308" : "#F59E0B",
                         }}
                       >
                         {h?.date ? new Date(h.date).getDate() : '--'}
@@ -684,7 +685,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                           fontSize: normalizeFont(9),
                           fontWeight: "700",
                           textTransform: "uppercase",
-                          color: h?.type === "holiday" ? "#EF4444" : h?.type === "exam" ? "#F59E0B" : "#3B82F6",
+                          color: h?.type === "holiday" ? "#EF4444" : h?.type === "exam" ? "#EAB308" : "#F59E0B",
                         }}
                       >
                         {h?.date ? new Date(h.date).toLocaleString("default", { month: "short" }) : 'UNK'}
@@ -705,6 +706,77 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                     </View>
                   </View>
                 ))}
+
+                {/* Remaining events in Horizontal ScrollView */}
+                {holidays && holidays.length > 3 && (
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ paddingRight: scale(16), paddingTop: verticalScale(4), paddingBottom: verticalScale(8) }}
+                  >
+                    {holidays.slice(3).map((h, i) => (
+                      <View
+                        key={`h-${i}`}
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          backgroundColor: isDark ? "#082020" : "#FFFFFF",
+                          padding: scale(16),
+                          borderRadius: moderateScale(16),
+                          borderWidth: isDark ? 0 : 1,
+                          borderColor: "#E2E8F0",
+                          width: scale(280), // Fixed width to enable swiping multiple cards
+                          marginRight: scale(12),
+                        }}
+                      >
+                        <View
+                          style={{
+                            width: scale(48),
+                            height: scale(48),
+                            borderRadius: moderateScale(12),
+                            backgroundColor: h?.type === "holiday" ? "rgba(239, 68, 68, 0.1)" : h?.type === "exam" ? "rgba(245, 158, 11, 0.1)" : "rgba(59, 130, 246, 0.1)",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            marginRight: scale(12),
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: normalizeFont(18),
+                              fontWeight: "800",
+                              color: h?.type === "holiday" ? "#EF4444" : h?.type === "exam" ? "#EAB308" : "#F59E0B",
+                            }}
+                          >
+                            {h?.date ? new Date(h.date).getDate() : '--'}
+                          </Text>
+                          <Text
+                            style={{
+                              fontSize: normalizeFont(9),
+                              fontWeight: "700",
+                              textTransform: "uppercase",
+                              color: h?.type === "holiday" ? "#EF4444" : h?.type === "exam" ? "#EAB308" : "#F59E0B",
+                            }}
+                          >
+                            {h?.date ? new Date(h.date).toLocaleString("default", { month: "short" }) : 'UNK'}
+                          </Text>
+                        </View>
+                        <View style={{ flex: 1, marginRight: scale(8) }}>
+                          <Text numberOfLines={1} style={{ color: isDark ? "#FFF" : "#0F172A", fontWeight: "700", fontSize: normalizeFont(14) }}>
+                            {h?.title || "Event"}
+                          </Text>
+                          <Text numberOfLines={1} style={{ color: isDark ? "#94A3B8" : "#64748B", fontSize: normalizeFont(12), marginTop: verticalScale(2) }}>
+                            {h?.description || "College Event"}
+                          </Text>
+                        </View>
+                        <View style={{ backgroundColor: isDark ? "#334155" : "#F1F5F9", paddingHorizontal: scale(8), paddingVertical: verticalScale(4), borderRadius: moderateScale(100) }}>
+                          <Text style={{ fontSize: normalizeFont(9), color: isDark ? "#CBD5E1" : "#475569", fontWeight: "600", textTransform: "uppercase" }}>
+                            {h?.type || 'EVENT'}
+                          </Text>
+                        </View>
+                      </View>
+                    ))}
+                  </ScrollView>
+                )}
               </View>
             )}
           </View>
@@ -726,7 +798,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               loadTimetable();
               loadHolidays();
             },
-            color: "#8B5CF6",
+            color: "#F59E0B",
           },
         ])}
 
@@ -737,7 +809,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             isToggle: true,
             toggleValue: isDark,
             onToggle: () => setTheme(isDark ? "light" : "dark"),
-            color: isDark ? "#8B5CF6" : "#F59E0B",
+            color: isDark ? "#F59E0B" : "#F59E0B",
           },
 
           {

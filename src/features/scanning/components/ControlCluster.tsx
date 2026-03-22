@@ -28,7 +28,6 @@ interface ControlClusterProps {
   onToggleScan: () => void;
   onRescan: () => void;
   onTimerPress: () => void;
-  onBatchPress: () => void;
 }
 
 export const ControlCluster: React.FC<ControlClusterProps> = ({
@@ -40,7 +39,6 @@ export const ControlCluster: React.FC<ControlClusterProps> = ({
   onToggleScan,
   onRescan,
   onTimerPress,
-  onBatchPress,
 }) => {
   const { isDark } = useTheme();
   const rotateAnim = useRef(new Animated.Value(0)).current;
@@ -123,15 +121,6 @@ export const ControlCluster: React.FC<ControlClusterProps> = ({
             />
           </Animated.View>
         </TouchableOpacity>
-
-        {/* Batch Selector */}
-        <TouchableOpacity 
-          style={styles.batchButton} 
-          onPress={onBatchPress}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.batchLabel}>{getBatchLabel()}</Text>
-        </TouchableOpacity>
       </View>
     </View>
   );
@@ -188,20 +177,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: moderateScale(14),
     elevation: 8,
-  },
-  batchButton: {
-    paddingHorizontal: scale(16),
-    paddingVertical: verticalScale(14),
-    borderRadius: moderateScale(24),
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  batchLabel: {
-    fontSize: normalizeFont(13),
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-    letterSpacing: 0.5,
   },
 });
 

@@ -35,7 +35,7 @@ export interface Student {
   full_name: string;
   bluetooth_uuid: string | null;
   batch?: number | null;
-  photo_url?: string | null;
+  avatar_url?: string | null;
   is_le?: boolean;
 }
 
@@ -447,7 +447,7 @@ export async function getStudentsForClass(
     log.info('[getStudentsForClass] Query:', { dept, year, section, batch });
     let query = supabase
       .from('students')
-      .select('id, roll_no, full_name, bluetooth_uuid, batch, photo_url, is_le')
+      .select('id, roll_no, full_name, bluetooth_uuid, batch, avatar_url, is_le')
       .eq('dept', dept)
       .eq('year', year)
       .eq('section', section)

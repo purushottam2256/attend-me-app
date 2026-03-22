@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Alert } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
 import { 
   getStudentsForClass, 
   createAttendanceSession, 
@@ -38,6 +39,7 @@ export interface AttendanceStudent {
   status: 'pending' | 'present' | 'absent' | 'od' | 'leave';
   detectedAt?: number;
   batch?: number | null;
+  isLE?: boolean;
 }
 
 // Re-export ClassData if needed or define locally
@@ -159,7 +161,7 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
               rollNo: s.roll_no,
               bleUUID: s.bluetooth_uuid || undefined,
               status: initialStatus,
-              photoUrl: s.photo_url || undefined,
+              photoUrl: s.avatar_url || undefined,
               batch: s.batch,
               isLE: s.is_le,
             };
@@ -200,87 +202,110 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
             return;
         }
 
-        const cachedRoster = await findCachedRoster(
-          classData.target_dept, 
-          classData.target_year, 
-          classData.target_section
-        );
-        
-        if (cachedRoster && (await isCacheValid())) {
-          log.info('Found cached roster, prompting user...');
+        // STRICT OFFLINE: Check actual network state before deciding what to show
+        const netState = await NetInfo.fetch();
+        const isTrulyOffline = !netState.isConnected || netState.isInternetReachable === false;
+
+        if (isTrulyOffline) {
+          // Device is truly disconnected — offer offline mode
+          const cachedRoster = await findCachedRoster(
+            classData.target_dept, 
+            classData.target_year, 
+            classData.target_section
+          );
           
-          const applyCache = async (roster: any) => {
-            let finalStudents: AttendanceStudent[] = roster.students.map((s: any) => ({
-              id: s.id,
-              name: s.name,
-              rollNo: s.rollNo,
-              bleUUID: s.bluetoothUUID || undefined,
-              status: 'pending' as const, 
-              photoUrl: undefined,
-              batch: s.batch,
-              isLE: s.isLE,
-            }));
+          if (cachedRoster && (await isCacheValid())) {
+            log.info('Truly offline + cached roster found, prompting user...');
             
-            if (batchNumber) {
-              finalStudents = finalStudents.filter((s: any) => {
-                if (s.batch !== undefined && s.batch !== null) {
-                  return s.batch === batchNumber;
-                }
-                const rollNum = parseInt(s.rollNo.replace(/\\D/g, '')) || 0;
-                return batchNumber === 1 ? rollNum % 2 === 1 : rollNum % 2 === 0;
-              });
-            }
+            const applyCache = async (roster: any) => {
+              let finalStudents: AttendanceStudent[] = roster.students.map((s: any) => ({
+                id: s.id,
+                name: s.name,
+                rollNo: s.rollNo,
+                bleUUID: s.bluetoothUUID || undefined,
+                status: 'pending' as const, 
+                photoUrl: undefined,
+                batch: s.batch,
+                isLE: s.isLE,
+              }));
+              
+              if (batchNumber) {
+                finalStudents = finalStudents.filter((s: any) => {
+                  if (s.batch !== undefined && s.batch !== null) {
+                    return s.batch === batchNumber;
+                  }
+                  const rollNum = parseInt(s.rollNo.replace(/\D/g, '')) || 0;
+                  return batchNumber === 1 ? rollNum % 2 === 1 : rollNum % 2 === 0;
+                });
+              }
 
-            // Check for saved draft (offline cache for active session)
-            if (classData?.slot_id) {
-                const draft = await getDraftAttendance(classData.slot_id);
-                if (draft && draft.length > 0) {
-                    log.info('Loaded draft attendance for slot:', classData.slot_id);
-                    const draftMap = new Map(draft.map((d: any) => [d.id, d]));
-                    finalStudents = finalStudents.map(s => {
-                        const draftStudent = draftMap.get(s.id);
-                        if (draftStudent && draftStudent.status !== 'pending') {
-                            return {
-                                ...s,
-                                status: draftStudent.status,
-                                detectedAt: draftStudent.timestamp
-                            };
-                        }
-                        return s;
-                    });
-                }
-            }
+              // Check for saved draft
+              if (classData?.slot_id) {
+                  const draft = await getDraftAttendance(classData.slot_id);
+                  if (draft && draft.length > 0) {
+                      log.info('Loaded draft attendance for slot:', classData.slot_id);
+                      const draftMap = new Map(draft.map((d: any) => [d.id, d]));
+                      finalStudents = finalStudents.map(s => {
+                          const draftStudent = draftMap.get(s.id);
+                          if (draftStudent && draftStudent.status !== 'pending') {
+                              return {
+                                  ...s,
+                                  status: draftStudent.status,
+                                  detectedAt: draftStudent.timestamp
+                              };
+                          }
+                          return s;
+                      });
+                  }
+              }
 
-            setStudents(finalStudents);
+              setStudents(finalStudents);
+              setIsOfflineMode(true);
+              setLoading(false);
+            };
+
+            if (!silent) {
+              isAwaitingPrompt = true;
+              Alert.alert(
+                "No Network Connection",
+                "You appear to be offline. Continue using cached data?",
+                [
+                  { text: "Retry", onPress: () => {
+                      setLoading(true);
+                      fetchStudents(signal, false);
+                  }},
+                  { text: "Use Offline Mode", isPreferred: true, onPress: () => applyCache(cachedRoster) }
+                ]
+              );
+              return;
+            } else {
+               return;
+            }
+          } else {
+            setError('Offline - No cached roster available');
             setIsOfflineMode(true);
-            setLoading(false);
-          };
-
+          }
+        } else {
+          // Network is connected but server failed — show retry, NOT offline
+          log.info('Network connected but Supabase failed. Showing server error.');
           if (!silent) {
             isAwaitingPrompt = true;
-            // Block and wait for user explicitly giving permission to downgrade to offline state
             Alert.alert(
-              "Connection Failed",
-              "Live roster couldn't be fetched. Continue in Offline Mode using cached data?",
+              "Server Error",
+              "Could not reach the server. Your internet is connected — this may be a temporary issue.",
               [
-                { text: "Retry Connection", onPress: () => {
+                { text: "Retry", isPreferred: true, onPress: () => {
                     setLoading(true);
                     fetchStudents(signal, false);
                 }},
-                { text: "Use Offline Mode", isPreferred: true, onPress: () => applyCache(cachedRoster) }
+                { text: "Cancel", style: 'cancel', onPress: () => {
+                    setError('Server unreachable. Please try again later.');
+                    setLoading(false);
+                }}
               ]
             );
-            return; // Exit fetch map and await User interaction to fire state resolvers
-          } else {
-             // For silent offline loop pings
-             return;
+            return;
           }
-        } else if (!isOnlineRef.current) {
-          setError('Offline - No cached roster available');
-          setIsOfflineMode(true);
-        } else {
-          // Online but fetch failed and no cache — show error so user knows
-          setError('Failed to load roster. Please try again.');
         }
       }
 
@@ -325,17 +350,16 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
     return () => controller.abort();
   }, [fetchStudents]);
 
-  // Background polling to recover from false-offline states (NetInfo says true, but Supabase failed)
-  // Replaces the purely reactive isOnline/isOfflineMode listener that deadlocked on timeouts.
+  // Background polling to recover when trapped in offline mode while network is back
   useEffect(() => {
     let interval: NodeJS.Timeout;
     
     if (isOnline && isOfflineMode) {
-      log.info('Network nominally online but trapped offline. Starting 5s background recovery ping...');
+      log.info('Network back online but still in offline mode. Starting 15s recovery ping...');
       interval = setInterval(() => {
         const controller = new AbortController();
         fetchStudents(controller.signal, true); // true = silent ping
-      }, 5000);
+      }, 15000);
     }
     
     return () => {

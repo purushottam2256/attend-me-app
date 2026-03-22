@@ -781,7 +781,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
           <View style={[styles.heroCard, { backgroundColor: isDark ? '#082020' : '#FFFFFF' }]}>
             <View style={styles.breakHeader}>
               <View style={styles.breakBadge}>
-                <Ionicons name="cafe-outline" size={16} color="#F59E0B" />
+                <Ionicons name="cafe-outline" size={16} color="#EAB308" />
                 <Text style={styles.breakBadgeText}>Break</Text>
               </View>
               <View style={styles.countdown}>
@@ -874,14 +874,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
 
       case 'HOLIDAY': {
         let iconName: any = "calendar";
-        let colorKey = "#F59E0B"; // Amber
-        let bgKey = isDark ? "rgba(245, 158, 11, 0.1)" : "#FEF3C7";
+        let colorKey = "#EAB308"; // Yellow
+        let bgKey = isDark ? "rgba(234, 179, 8, 0.1)" : "#FEF3C7";
         let defaultTitle = "Holiday";
 
         if (holiday?.type === "event") {
           iconName = "star";
-          colorKey = "#8B5CF6"; // Purple
-          bgKey = isDark ? "rgba(139, 92, 246, 0.1)" : "#EDE9FE";
+          colorKey = "#F59E0B"; // Amber
+          bgKey = isDark ? "rgba(245, 158, 11, 0.1)" : "#FEF3C7";
           defaultTitle = "Event Today";
         } else if (holiday?.type === "exam") {
           iconName = "document-text";
@@ -920,7 +920,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
       completed: '#9CA3AF',   // Gray - done
       incomplete: '#F59E0B',  // Light orange - warning
       upcoming: '#3B82F6',    // Blue - future
-      swapped: '#8B5CF6',     // Purple - swapped
+      swapped: '#F59E0B',     // Amber - swapped
       substitute: '#A78BFA',  // Light purple - substitute
     };
 
@@ -992,8 +992,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
               
               {/* Swap Badge */}
               {slot.isSwap && (
-                <View style={[styles.swapBadge, { backgroundColor: 'rgba(139, 92, 246, 0.2)' }]}>
-                  <Ionicons name="swap-horizontal" size={11} color="#8B5CF6" />
+                <View style={[styles.swapBadge, { backgroundColor: 'rgba(245, 158, 11, 0.2)' }]}>
+                  <Ionicons name="swap-horizontal" size={11} color="#F59E0B" />
                   <Text style={styles.swapBadgeText}>SWAP</Text>
                 </View>
               )}
@@ -1008,8 +1008,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
               
               {/* Lab Batch Tag */}
               {isLab && (
-                <View style={[styles.batchTag, { backgroundColor: isDark ? 'rgba(139, 92, 246, 0.2)' : 'rgba(139, 92, 246, 0.15)' }]}>
-                  <Ionicons name="people-outline" size={11} color="#8B5CF6" />
+                <View style={[styles.batchTag, { backgroundColor: isDark ? 'rgba(245, 158, 11, 0.2)' : 'rgba(245, 158, 11, 0.15)' }]}>
+                  <Ionicons name="people-outline" size={11} color="#F59E0B" />
                   <Text style={styles.batchTagText}>{batchLabel}</Text>
                 </View>
               )}
@@ -1613,7 +1613,7 @@ const styles = StyleSheet.create({
   swapBadgeText: {
     fontSize: normalizeFont(10),
     fontFamily: Fonts.family.bold,
-    color: '#8B5CF6',
+    color: '#F59E0B',
     letterSpacing: 0.5,
   },
   subBadge: {
@@ -1633,7 +1633,7 @@ const styles = StyleSheet.create({
   batchTagText: {
     fontSize: normalizeFont(11),
     fontFamily: Fonts.family.semiBold,
-    color: '#8B5CF6',
+    color: '#F59E0B',
   },
   periodBadge: {
     flexDirection: 'row',

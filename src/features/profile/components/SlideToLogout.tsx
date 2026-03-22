@@ -33,15 +33,16 @@ export const SlideToLogout: React.FC<SlideToLogoutProps> = ({ onLogout }) => {
         if (gestureState.dx > SWIPE_THRESHOLD) {
           // Success
           setCompleted(true);
-          Animated.spring(pan, {
-            toValue: BUTTON_WIDTH - BUTTON_HEIGHT - scale(4),
-            useNativeDriver: false,
-          }).start();
+          
+          // DO NOT run a JS-driven spring here. As the component will unmount soon, 
+          // a JS animation loop will crash React Native. Snap it directly or use native driver.
+          pan.setValue(BUTTON_WIDTH - BUTTON_HEIGHT - scale(4));
+          
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           
           setTimeout(() => {
             onLogout();
-          }, 300);
+          }, 50);
         } else {
           // Reset
           Animated.spring(pan, {

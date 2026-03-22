@@ -40,6 +40,7 @@ import { historyStyles as styles, DATE_TILE_WIDTH } from '../styles';
 import { scale, verticalScale, normalizeFont, moderateScale } from '../../../utils/responsive'; // Import responsive utils locally if needed for inline use or keep consistent with styles
 import { ZenToast } from '../../../components/ZenToast';
 import { PulsingDots } from '../../../components/ui/LoadingAnimation';
+import { formatShortRollNo } from '../../../utils/studentUtils';
 
 // Months for picker
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -61,6 +62,30 @@ export const HistoryScreen: React.FC = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editSession, setEditSession] = useState<AttendanceSession | null>(null);
   const [editStudents, setEditStudents] = useState<any[]>([]);
+
+  // Skeleton Animation Value
+  const skeletonAnim = useRef(new Animated.Value(0.3)).current;
+
+  useEffect(() => {
+    if (loading) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(skeletonAnim, {
+            toValue: 0.7,
+            duration: 800,
+            useNativeDriver: true,
+          }),
+          Animated.timing(skeletonAnim, {
+            toValue: 0.3,
+            duration: 800,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+    } else {
+      skeletonAnim.stopAnimation();
+    }
+  }, [loading, skeletonAnim]);
 
   // Filter state for year, section, period, and batch
   const [filterYear, setFilterYear] = useState<string>('all');
@@ -389,7 +414,8 @@ export const HistoryScreen: React.FC = () => {
           students:student_id (
             id,
             roll_no,
-            full_name
+            full_name,
+            is_le
           )
         `)
         .eq('session_id', session.id);
@@ -406,6 +432,7 @@ export const HistoryScreen: React.FC = () => {
           fullRollNumber: log.students?.roll_no || 'Unknown',
           name: log.students?.full_name || 'Unknown Student',
           status: log.status as 'present' | 'absent' | 'od' | 'leave',
+          isLE: !!log.students?.is_le,
         }));
         setEditStudents(students);
       } else {
@@ -448,8 +475,9 @@ export const HistoryScreen: React.FC = () => {
           status,
           students:student_id (
             id,
-            roll_number,
-            full_name
+            roll_no,
+            full_name,
+            is_le
           )
         `)
         .eq('session_id', session.id);
@@ -464,30 +492,23 @@ export const HistoryScreen: React.FC = () => {
       });
       const time = session.slot_id || '10:00 AM';
 
-      // Helper to get short roll number
-      const getShortRoll = (fullRoll: string): string => {
-        if (fullRoll?.toUpperCase().startsWith('LE')) {
-          // Format LE students as LE-XX (last two digits)
-          const lastTwo = fullRoll.slice(-2);
-          return `LE-${lastTwo}`;
-        }
-        return fullRoll?.slice(-2) || '??';
-      };
-
       // Process students
       let presentStudents: string[] = [];
       let absentStudents: string[] = [];
       let odStudents: string[] = [];
+      let leaveStudents: string[] = [];
 
       if (logs && logs.length > 0) {
         logs.forEach((log: any) => {
-          const shortRoll = getShortRoll(log.students?.roll_number);
+          const shortRoll = formatShortRollNo(log.students?.roll_no, log.students?.is_le);
           if (log.status === 'present') {
             presentStudents.push(shortRoll);
           } else if (log.status === 'absent') {
             absentStudents.push(shortRoll);
-          } else if (log.status === 'od' || log.status === 'leave') {
+          } else if (log.status === 'od') {
             odStudents.push(shortRoll);
+          } else if (log.status === 'leave') {
+            leaveStudents.push(shortRoll);
           }
         });
       } else {
@@ -509,7 +530,11 @@ export const HistoryScreen: React.FC = () => {
       text += `❌ Absent (${absentStudents.length}):\n${absentStudents.join(', ') || 'None'}`;
       
       if (odStudents.length > 0) {
-        text += `\n\n🔶 OD/Leave (${odStudents.length}):\n${odStudents.join(', ')}`;
+        text += `\n\n🔶 OD (${odStudents.length}):\n${odStudents.join(', ')}`;
+      }
+      
+      if (leaveStudents.length > 0) {
+        text += `\n\n📅 Leave (${leaveStudents.length}):\n${leaveStudents.join(', ')}`;
       }
 
       // Open share sheet directly
@@ -630,7 +655,7 @@ export const HistoryScreen: React.FC = () => {
     if (!holidayInfo) return null;
 
     const type = holidayInfo.type || 'holiday';
-    let bannerColor = '#F59E0B'; // default amber
+    let bannerColor = '#EAB308'; // default yellow for holiday/OD
     let bannerIcon: any = 'calendar';
     let bannerLabel = 'Holiday';
 
@@ -639,7 +664,7 @@ export const HistoryScreen: React.FC = () => {
       bannerIcon = 'document-text';
       bannerLabel = 'Exam';
     } else if (type === 'event') {
-      bannerColor = '#8B5CF6';
+      bannerColor = '#F59E0B'; // Amber for events/leave
       bannerIcon = 'star';
       bannerLabel = 'Event';
     }
@@ -666,6 +691,44 @@ export const HistoryScreen: React.FC = () => {
               {holidayInfo.description}
             </Text>
           ) : null}
+        </View>
+      </View>
+    );
+  };
+
+  // Render skeleton card
+  const renderSkeletonCard = (index: number) => {
+    return (
+      <View
+        key={`skeleton-${index}`}
+        style={[styles.sessionCard, { 
+          backgroundColor: colors.cardBg,
+          borderColor: colors.cardBorder,
+        }]}
+      >
+        <View style={[styles.healthStrip, { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]} />
+        <View style={styles.cardContent}>
+          <View style={styles.cardHeader}>
+            <View style={styles.subjectRow}>
+              <Animated.View style={{ height: normalizeFont(16), width: '60%', backgroundColor: isDark ? '#334155' : '#E2E8F0', borderRadius: 4, opacity: skeletonAnim }} />
+              <Animated.View style={{ height: normalizeFont(24), width: scale(40), backgroundColor: isDark ? '#334155' : '#E2E8F0', borderRadius: 12, opacity: skeletonAnim }} />
+            </View>
+            <Animated.View style={{ height: normalizeFont(12), width: '40%', backgroundColor: isDark ? '#334155' : '#E2E8F0', borderRadius: 4, marginTop: 8, opacity: skeletonAnim }} />
+          </View>
+          <View style={styles.statsGrid}>
+            <View style={[styles.statBox, { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}>
+               <Animated.View style={{ height: normalizeFont(20), width: scale(24), backgroundColor: isDark ? '#475569' : '#CBD5E1', borderRadius: 4, opacity: skeletonAnim }} />
+               <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Total</Text>
+            </View>
+            <View style={[styles.statBox, { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}>
+               <Animated.View style={{ height: normalizeFont(20), width: scale(24), backgroundColor: isDark ? '#475569' : '#CBD5E1', borderRadius: 4, opacity: skeletonAnim }} />
+               <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Present</Text>
+            </View>
+            <View style={[styles.statBox, { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}>
+               <Animated.View style={{ height: normalizeFont(20), width: scale(24), backgroundColor: isDark ? '#475569' : '#CBD5E1', borderRadius: 4, opacity: skeletonAnim }} />
+               <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Absent</Text>
+            </View>
+          </View>
         </View>
       </View>
     );
@@ -749,8 +812,8 @@ export const HistoryScreen: React.FC = () => {
                {/* Batch Badge for Lab Clarity */}
               {session.batch && (
                 <View style={styles.labBadge}>
-                  <Ionicons name="flask" size={normalizeFont(12)} color="#8B5CF6" />
-                  <Text style={[styles.labText, { color: '#8B5CF6' }]}>
+                  <Ionicons name="flask" size={normalizeFont(12)} color="#F59E0B" />
+                  <Text style={[styles.labText, { color: '#F59E0B' }]}>
                     Lab Session - Batch {session.batch}
                   </Text>
                 </View>
@@ -977,11 +1040,8 @@ export const HistoryScreen: React.FC = () => {
         {renderDateBanner()}
         
         {loading ? (
-          <View style={styles.loadingContainer}>
-            <PulsingDots size="large" color="#0D9488" />
-            <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-              Fetching records...
-            </Text>
+          <View style={{ paddingTop: verticalScale(8) }}>
+            {[1, 2, 3].map((i) => renderSkeletonCard(i))}
           </View>
         ) : sessions.length > 0 ? (
           sessions

@@ -13,6 +13,7 @@ import {
   ActivityIndicator,
   Platform,
   PermissionsAndroid,
+  Alert,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
@@ -55,6 +56,7 @@ export const DigitalIdCard: React.FC<DigitalIdCardProps> = ({
   const [imageError, setImageError] = React.useState(false);
   const [isQRModalVisible, setIsQRModalVisible] = React.useState(false);
   const [isLocationModalVisible, setIsLocationModalVisible] = React.useState(false);
+  const [isGPSErrorModalVisible, setIsGPSErrorModalVisible] = React.useState(false);
   const [isUpdatingLocation, setIsUpdatingLocation] = React.useState(false);
 
   const fetchAndSaveLocation = async () => {
@@ -89,11 +91,14 @@ export const DigitalIdCard: React.FC<DigitalIdCardProps> = ({
           })
           .eq('id', user.userId);
       }
+
+      // ONLY show QR if we successfully got and saved location
+      setIsQRModalVisible(true);
     } catch (error) {
       console.error("Error fetching or saving location:", error);
+      setIsGPSErrorModalVisible(true);
     } finally {
       setIsUpdatingLocation(false);
-      setIsQRModalVisible(true);
     }
   };
 
@@ -370,6 +375,57 @@ export const DigitalIdCard: React.FC<DigitalIdCardProps> = ({
         onGrant={handleGrantLocation}
         onDeny={() => setIsLocationModalVisible(false)}
       />
+
+      <Modal
+        visible={isGPSErrorModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setIsGPSErrorModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableWithoutFeedback onPress={() => setIsGPSErrorModalVisible(false)}>
+            <View style={StyleSheet.absoluteFillObject} />
+          </TouchableWithoutFeedback>
+          <View style={[styles.modalContent, { backgroundColor: isDark ? '#1E293B' : '#FFFFFF', paddingBottom: verticalScale(32) }]}>
+            <View style={{
+                width: scale(64),
+                height: scale(64),
+                borderRadius: moderateScale(32),
+                backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                justifyContent: 'center',
+                alignItems: 'center',
+                marginBottom: verticalScale(16)
+            }}>
+              <Ionicons name="location-outline" size={scale(32)} color="#EF4444" />
+            </View>
+            <Text style={[styles.modalTitle, { color: isDark ? '#FFF' : '#0F172A', textAlign: 'center', marginBottom: verticalScale(8) }]}>
+              Location Required
+            </Text>
+            <Text style={[styles.modalSubtitle, { color: isDark ? '#94A3B8' : '#64748B', textAlign: 'center', marginBottom: verticalScale(24), lineHeight: 22 }]}>
+              Unable to access GPS to load your QR Profile. Please ensure location services are enabled on your device.
+            </Text>
+            <TouchableOpacity 
+              onPress={() => setIsGPSErrorModalVisible(false)}
+              activeOpacity={0.8}
+              style={{
+                backgroundColor: '#3DDC97',
+                paddingVertical: verticalScale(14),
+                paddingHorizontal: scale(32),
+                borderRadius: moderateScale(12),
+                width: '100%',
+                alignItems: 'center',
+                shadowColor: '#3DDC97',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.3,
+                shadowRadius: 8,
+                elevation: 4
+              }}
+            >
+              <Text style={{ color: '#0F172A', fontSize: normalizeFont(16), fontWeight: '700' }}>Okay</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -27,9 +27,52 @@ import { useAttendance } from '../hooks/useAttendance';
 import { checkExistingSession } from '@services/dashboardService';
 import { supabase } from '@config/supabase';
 import { ZenToast } from '@components/ZenToast';
-import { scale, verticalScale, moderateScale, normalizeFont } from '@utils/responsive';
+import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive';
 import { isLateralEntry } from '../../../utils/studentUtils';
 import { getFallbackAvatar } from '@utils/avatars';
+
+// ============================================================================
+// Skeleton Grid Component
+// Extracted to module level to prevent re-mounting on every parent render
+// ============================================================================
+const SkeletonGrid = React.memo(() => {
+  const { width } = Dimensions.get('window');
+  const dummyItems = Array.from({ length: 12 }).map((_, i) => i);
+  
+  // Use Animated for smooth, performant pulsing that automatically cleans up
+  const opacityAnim = useRef(new Animated.Value(0.3)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacityAnim, {
+          toValue: 0.6,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacityAnim, {
+          toValue: 0.3,
+          duration: 600,
+          useNativeDriver: true,
+        })
+      ])
+    ).start();
+  }, [opacityAnim]);
+
+  return (
+    <View style={{ padding: scale(16), flexDirection: 'row', flexWrap: 'wrap', gap: scale(12), justifyContent: 'space-between' }}>
+      {dummyItems.map((item) => (
+        <Animated.View key={item} style={{
+          width: (width - scale(44)) / 3, // 3 columns
+          height: (width - scale(44)) / 3,
+          backgroundColor: 'rgba(255,255,255, 1)',
+          borderRadius: moderateScale(10),
+          opacity: opacityAnim,
+        }} />
+      ))}
+    </View>
+  );
+});
 
 // Stats Component
 const StatsBar = ({ counts, onBulkAction }: { 
@@ -106,7 +149,7 @@ export const ManualEntryScreen: React.FC = () => {
     updateStudentStatus,
     submitAttendance,
     isOfflineMode,
-  } = useAttendance({ classData, batchOverride: 'full' });
+  } = useAttendance({ classData });
 
   // Filter Logic
   const filteredStudents = students;
@@ -187,36 +230,6 @@ export const ManualEntryScreen: React.FC = () => {
       bgGradient: ['#0D4A4A', '#1A6B6B', '#0F3D3D'],
       accent: '#3DDC97',
       text: '#FFF'
-  };
-
-  // Skeleton Grid Component
-  const SkeletonGrid = () => {
-    const { width } = Dimensions.get('window');
-    // Generate 12 dummy items for skeleton
-    const dummyItems = Array.from({ length: 12 }).map((_, i) => i);
-    
-    // Quick pulsing animation using a simple interval hook to toggle opacity if Reanimated isn't available
-    const [opacity, setOpacity] = useState(0.3);
-    useEffect(() => {
-      const interval = setInterval(() => {
-        setOpacity(prev => prev === 0.3 ? 0.6 : 0.3);
-      }, 600);
-      return () => clearInterval(interval);
-    }, []);
-
-    return (
-      <View style={{ padding: scale(16), flexDirection: 'row', flexWrap: 'wrap', gap: scale(12), justifyContent: 'space-between' }}>
-        {dummyItems.map((item) => (
-          <View key={item} style={{
-            width: (width - scale(44)) / 3, // Match 3 columns
-            height: (width - scale(44)) / 3,
-            backgroundColor: `rgba(255,255,255, ${opacity})`,
-            borderRadius: moderateScale(10),
-            opacity: 0.8
-          }} />
-        ))}
-      </View>
-    );
   };
 
   return (
@@ -347,17 +360,18 @@ export const ManualEntryScreen: React.FC = () => {
                             </View>
                         )}
                     </View>
+
+                    <Text style={[styles.modalInfo, { marginBottom: verticalScale(16) }]}>Batch: {selectedStudent.batch || 'N/A'}</Text>
+
+                    {/* Status Badge */}
                     <View style={[styles.modalStatusBadge, { 
                         backgroundColor: 
                             selectedStudent.status === 'present' ? '#10B981' : 
                             selectedStudent.status === 'absent' ? '#EF4444' : 
-                            selectedStudent.status === 'od' ? '#F59E0B' : '#8B5CF6' 
+                            selectedStudent.status === 'od' ? '#EAB308' : '#F59E0B' // Yellow for OD, Amber for Leave
                     }]}>
                         <Text style={styles.modalStatusText}>{selectedStudent.status.toUpperCase()}</Text>
                     </View>
-
-                    <Text style={styles.modalInfo}>Batch: {selectedStudent.batch || 'N/A'}</Text>
-                    <Text style={styles.modalInfo}>BLE UUID: {selectedStudent.bleUUID || 'Not Registered'}</Text>
                 </View>
             )}
           </BlurView>

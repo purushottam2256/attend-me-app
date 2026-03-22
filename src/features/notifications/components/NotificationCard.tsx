@@ -76,11 +76,11 @@ export const NotificationCard = React.memo(({
   // Type icon colors
   const getIconColor = () => {
     switch (type) {
-      case 'request': return '#8B5CF6'; // Purple (Swapped/Sub)
+      case 'request': return '#F59E0B'; // Amber (Swapped/Sub)
       case 'alert': return '#F59E0B';   // Orange (Incomplete/Alert)
       case 'info': return '#10B981';    // Green (Live/Active)
-      case 'leave': return '#EC4899';   // Pink (Leave)
-      case 'swap': return '#8B5CF6';    // Purple (Same as request)
+      case 'leave': return '#F59E0B';   // Amber (Leave)
+      case 'swap': return '#F59E0B';    // Amber (Same as request)
       default: return '#3B82F6';        // Blue (Upcoming/Info)
     }
   };

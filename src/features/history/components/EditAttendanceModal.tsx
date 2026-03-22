@@ -25,6 +25,7 @@ import { useTheme } from '../../../contexts';
 import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive';
 import { supabase } from '../../../config/supabase';
 import { ZenToast } from '../../../components/ZenToast';
+import { formatShortRollNo, isLateralEntry } from '../../../utils/studentUtils';
 
 // Types
 interface Student {
@@ -33,6 +34,7 @@ interface Student {
   fullRollNumber: string; // e.g., 22Q91A6612
   name: string;
   status: 'present' | 'absent' | 'od' | 'leave';
+  isLE?: boolean;
 }
 
 interface SessionInfo {
@@ -100,19 +102,14 @@ export const EditAttendanceModal: React.FC<EditAttendanceModalProps> = ({
     inputBg: isDark ? 'rgba(255,255,255,0.08)' : '#F1F5F9',
     present: '#22C55E',
     absent: '#EF4444',
-    od: '#F59E0B',
-    leave: '#8B5CF6',
+    od: '#EAB308',
+    leave: '#F59E0B',
     accent: '#3DDC97',
   };
 
-  // Extract short roll number
-  const getShortRoll = (fullRoll: string): string => {
-    // 22Q91A6612 -> 12, LE2301CSM045 -> LE-45
-    if (fullRoll?.toUpperCase().startsWith('LE')) {
-      const lastTwo = fullRoll.slice(-2);
-      return `LE-${lastTwo}`;
-    }
-    return fullRoll.slice(-2);
+  // Extract short roll number (uses DB is_le flag via formatShortRollNo)
+  const getShortRoll = (fullRoll: string, isLE?: boolean): string => {
+    return formatShortRollNo(fullRoll, isLE);
   };
 
   // Toggle student status - Faculty can only toggle Present/Absent
@@ -173,7 +170,7 @@ export const EditAttendanceModal: React.FC<EditAttendanceModalProps> = ({
 
     const presentStudents = students
       .filter(s => s.status === 'present')
-      .map(s => getShortRoll(s.fullRollNumber))
+      .map(s => getShortRoll(s.fullRollNumber, s.isLE))
       .sort((a, b) => {
         // Sort LE students after regular students
         if (a.startsWith('LE') && !b.startsWith('LE')) return 1;
@@ -184,7 +181,7 @@ export const EditAttendanceModal: React.FC<EditAttendanceModalProps> = ({
 
     const absentStudents = students
       .filter(s => s.status === 'absent')
-      .map(s => getShortRoll(s.fullRollNumber))
+      .map(s => getShortRoll(s.fullRollNumber, s.isLE))
       .sort((a, b) => {
         if (a.startsWith('LE') && !b.startsWith('LE')) return 1;
         if (!a.startsWith('LE') && b.startsWith('LE')) return -1;
@@ -194,7 +191,12 @@ export const EditAttendanceModal: React.FC<EditAttendanceModalProps> = ({
 
     const odStudents = students
       .filter(s => s.status === 'od')
-      .map(s => getShortRoll(s.fullRollNumber))
+      .map(s => getShortRoll(s.fullRollNumber, s.isLE))
+      .join(', ');
+
+    const leaveStudents = students
+      .filter(s => s.status === 'leave')
+      .map(s => getShortRoll(s.fullRollNumber, s.isLE))
       .join(', ');
 
     let text = `📚 ${session.section} Attendance\n`;
@@ -206,6 +208,10 @@ export const EditAttendanceModal: React.FC<EditAttendanceModalProps> = ({
     
     if (odStudents) {
       text += `\n\n🔶 OD (${counts.od}):\n${odStudents}`;
+    }
+
+    if (leaveStudents) {
+      text += `\n\n📅 Leave (${counts.leave}):\n${leaveStudents}`;
     }
 
     return text;
@@ -330,12 +336,19 @@ export const EditAttendanceModal: React.FC<EditAttendanceModalProps> = ({
         
         <View style={styles.studentInfo}>
           <Text style={[styles.rollNumber, { color: colors.textPrimary }]}>
-            {getShortRoll(item.fullRollNumber)}
+            {getShortRoll(item.fullRollNumber, item.isLE)}
           </Text>
           <View style={styles.studentDetails}>
-            <Text style={[styles.studentName, { color: colors.textPrimary }]} numberOfLines={1}>
-              {item.name}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={[styles.studentName, { color: colors.textPrimary }]} numberOfLines={1}>
+                {item.name}
+              </Text>
+              {isLateralEntry(item.fullRollNumber, item.isLE) && (
+                <View style={{ backgroundColor: 'rgba(56, 189, 248, 0.2)', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                  <Text style={{ fontSize: normalizeFont(9), color: isDark ? '#38BDF8' : '#0284C7', fontWeight: 'bold' }}>LE</Text>
+                </View>
+              )}
+            </View>
             <Text style={[styles.fullRoll, { color: colors.textMuted }]}>
               {item.fullRollNumber}
             </Text>

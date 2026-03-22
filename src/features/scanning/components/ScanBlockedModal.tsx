@@ -96,7 +96,7 @@ const getReasonConfig = (reason: BlockReason, holidayName?: string, eventName?: 
     case 'event':
       return {
         icon: 'megaphone-outline' as const,
-        iconColor: '#8B5CF6',
+        iconColor: '#F59E0B',
         title: eventName || 'Special Event',
         subtitle: 'Regular classes are suspended for today\'s event.',
         suggestion: 'Attendance is not required.',

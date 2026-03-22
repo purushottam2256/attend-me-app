@@ -52,7 +52,7 @@ export const BatchSplitterModal: React.FC<BatchSplitterModalProps> = ({
       icon: 'person' as const,
       label: 'Batch 2 Only',
       description: 'Students in batch 2',
-      color: '#8B5CF6',
+      color: '#F59E0B',
     },
   ];
 

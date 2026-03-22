@@ -42,8 +42,9 @@ export const useConnectionStatus = (): UseConnectionStatusReturn => {
     }
   }, []);
 
-  const updateStatus = useCallback(async (connected: boolean) => {
-    setIsConnected(connected);
+  const updateStatus = useCallback(async (state: NetInfoState) => {
+    const connected = state.isConnected && state.isInternetReachable !== false;
+    setIsConnected(!!connected);
     
     if (!connected) {
       setStatus('offline');
@@ -59,7 +60,7 @@ export const useConnectionStatus = (): UseConnectionStatusReturn => {
 
   const refresh = useCallback(async () => {
     const state = await NetInfo.fetch();
-    await updateStatus(state.isConnected ?? true);
+    await updateStatus(state);
   }, [updateStatus]);
 
   useEffect(() => {
@@ -68,7 +69,7 @@ export const useConnectionStatus = (): UseConnectionStatusReturn => {
 
     // Subscribe to network changes
     const unsubscribe = NetInfo.addEventListener((state: NetInfoState) => {
-      updateStatus(state.isConnected ?? true);
+      updateStatus(state);
     });
 
     // Check queue periodically (just for badge count, not status)

@@ -17,7 +17,12 @@ const { width } = Dimensions.get('window');
 export const AppPermissionsGate: React.FC<Props> = ({ onPermissionsGranted, onLogout }) => {
   const [checking, setChecking] = useState(true);
   const [missingPermissions, setMissingPermissions] = useState<string[]>([]);
-  const manager = React.useMemo(() => new BleManager(), []);
+  // Use a ref to ensure we only create one manager and can destroy it on unmount
+  const managerRef = useRef<BleManager | null>(null);
+  if (!managerRef.current) {
+    managerRef.current = new BleManager();
+  }
+  const manager = managerRef.current;
   const insets = useSafeAreaInsets();
   
   // Animation for the toast
@@ -82,6 +87,10 @@ export const AppPermissionsGate: React.FC<Props> = ({ onPermissionsGranted, onLo
 
     return () => {
       subscription.remove();
+      if (managerRef.current) {
+        managerRef.current.destroy();
+        managerRef.current = null;
+      }
     };
   }, []);
 

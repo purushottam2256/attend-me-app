@@ -67,7 +67,7 @@ const TIMER_PRESETS = [60, 180, 300, 600]; // 1, 3, 5, 10 minutes
 
 import { useAttendance, type AttendanceStudent } from "../hooks";
 import { useBLE } from "../hooks/useBLE";
-import { isBLEReady } from "@services/bleService";
+import bleService, { isBLEReady, enableBluetooth } from "@services/bleService";
 import {
   Gradients,
   Primary,
@@ -254,8 +254,7 @@ export const ScanScreen: React.FC = () => {
   }, [routeClassData]);
 
   const subjectName = classData?.subject?.name || "Loading...";
-  const [batchOverride, setBatchOverride] = useState<'full' | null>(null);
-  const effectiveBatch = batchOverride === 'full' ? null : (classData?.batch ?? null);
+  const effectiveBatch = classData?.batch ?? null;
   const batchLabel = effectiveBatch === 1 ? 'B1' : effectiveBatch === 2 ? 'B2' : 'All';
 
   // Stable identifier for focus effect (excludes batch)
@@ -326,24 +325,24 @@ export const ScanScreen: React.FC = () => {
   const [retryTrigger, setRetryTrigger] = useState(0);
 
   const handleBleRetry = async () => {
-    // 1. Re-check immediately
-    const bleCheck = await isBLEReady();
-
-    if (bleCheck.ready) {
-
+    // Attempt auto-enable first if the error was "Bluetooth Off"
+    if (bleError.title === "Bluetooth Off") {
+        await enableBluetooth();
+    }
+    
+    const check = await isBLEReady();
+    if (check.ready) {
       setShowBleModal(false);
-      // Force handshake restart
-      handshakeProgress.setValue(0);
-      handshakeRotation.setValue(0);
+      setScanState("HANDSHAKE"); // restart process
       setRetryTrigger((prev) => prev + 1);
     } else {
-
+      setToast({ visible: true, message: 'Bluetooth is still not ready. Did you enable it?', type: 'error' });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setBleError({
         title: "Still Unavailable",
         message:
-          bleCheck.reason === "poweredOff" ||
-          bleCheck.reason === "bluetooth_off"
+          check.reason === "poweredOff" ||
+          check.reason === "bluetooth_off"
             ? "Bluetooth is turned off. Please enable it in Control Center."
             : "Permission is denied. Please enable in Settings.",
       });
@@ -370,7 +369,7 @@ export const ScanScreen: React.FC = () => {
     submitAttendance: submitToSupabase,
     refreshStudents,
     isOfflineMode,
-  } = useAttendance({ classData, batchOverride });
+  } = useAttendance({ classData });
 
   // Animations
   const handshakeRotation = useRef(new Animated.Value(0)).current;
@@ -501,7 +500,7 @@ export const ScanScreen: React.FC = () => {
      if (scanState !== 'SUBMITTING' && scanState !== 'SUCCESS') {
         checkPrevious();
      }
-  }, [batchOverride, classKey]);
+  }, [classKey]);
 
   // Handshake phase animation (waits for override decision and validation)
   useEffect(() => {
@@ -560,6 +559,16 @@ export const ScanScreen: React.FC = () => {
             bleCheck.reason === "bluetooth_off" ||
             bleCheck.reason === "poweredOff"
           ) {
+            // Attempt auto-enable on Android
+            const enabled = await enableBluetooth();
+            if (enabled) {
+                // If it successfully enabled, restart the handshake checks
+                setTimeout(() => {
+                    setScanState("HANDSHAKE"); // Re-trigger the effect
+                }, 500);
+                return;
+            }
+            
             title = "Bluetooth Off";
             message = "Please turn on Bluetooth to scan for student devices.";
           } else if (
@@ -1137,11 +1146,6 @@ export const ScanScreen: React.FC = () => {
           onToggleScan={handleToggleScan}
           onRescan={handleRescan}
           onTimerPress={handleTimerPress}
-          onBatchPress={() => {
-            // Toggle between scheduled batch and full class
-            setBatchOverride(prev => prev === 'full' ? null : 'full');
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          }}
         />
       </View>
 

@@ -130,6 +130,38 @@ export const isBLEReady = async (): Promise<{ ready: boolean; reason?: string }>
   return { ready: true };
 };
 
+// Enable Bluetooth programmatically (Android only)
+export const enableBluetooth = async (): Promise<boolean> => {
+  try {
+    if (Platform.OS !== 'android') {
+      log.info('enableBluetooth: Not supported on iOS');
+      return false;
+    }
+    
+    const manager = initBLE();
+    const state = await manager.state();
+    
+    if (state === State.PoweredOn) {
+      log.info('enableBluetooth: Already enabled');
+      return true;
+    }
+    
+    log.info('enableBluetooth: Attempting to enable Bluetooth...');
+    await manager.enable();
+    
+    // Wait briefly for state change to propagate
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    const newState = await manager.state();
+    const success = newState === State.PoweredOn;
+    log.info('enableBluetooth:', success ? 'SUCCESS' : 'FAILED (user denied or error)');
+    return success;
+  } catch (err: any) {
+    log.error('enableBluetooth: Error:', err?.message || err);
+    return false;
+  }
+};
+
 // Check if scanning is active
 export const isScanningActive = (): boolean => {
   return isCurrentlyScanning;
@@ -351,6 +383,7 @@ export default {
   normalizeUUID,
   requestBLEPermissions,
   isBLEReady,
+  enableBluetooth,
   isScanningActive,
   startScanning,
   stopScanning,

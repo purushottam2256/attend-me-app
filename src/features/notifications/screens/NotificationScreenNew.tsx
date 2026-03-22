@@ -168,7 +168,7 @@ export const NotificationScreen = ({ navigation }: any) => {
   const [loadingMore, setLoadingMore] = useState(false);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
-  const NOTIFICATIONS_PER_PAGE = 20;
+  const NOTIFICATIONS_PER_PAGE = 10;
 
   // Selection Mode
   const [selectionMode, setSelectionMode] = useState(false);
@@ -273,101 +273,109 @@ export const NotificationScreen = ({ navigation }: any) => {
         }
       }
 
-      // 2. Fetch Requests, Swaps, Leaves (ONLY on first page)
-      // LIMIT all to 20 recent items to avoid massive fetches. 
-      // Infinite scroll usually drives the 'notifications' list, but users can see all by clearing filters or we can add specific pagination later.
-      if (pageNum === 0) {
-        const LIMIT = 20;
-
-        // ... Substitutions ...
-        const { data: pendingSubsToMe } = await supabase
-          .from('substitutions')
-          .select(`*, original_faculty:profiles!substitutions_original_faculty_id_fkey(full_name), subject:subjects!substitutions_subject_id_fkey(name, code)`)
-          .eq('substitute_faculty_id', user.id)
-          .order('requested_at', { ascending: false })
-          .limit(LIMIT);
-
-        const { data: respondedSubsFromMe } = await supabase
-          .from('substitutions')
-          .select(`*, original_faculty:profiles!substitutions_original_faculty_id_fkey(full_name), subject:subjects!substitutions_subject_id_fkey(name, code)`)
-          .eq('original_faculty_id', user.id)
-          .order('requested_at', { ascending: false })
-          .limit(LIMIT);
-
-        const allSubs = [...(pendingSubsToMe || []), ...(respondedSubsFromMe || [])]
-          .filter((r: any) => !hiddenSet.has(r.id));
-        setRequests(allSubs);
-
-        // ... Swaps ...
-        const { data: pendingSwapsToMe } = await supabase
-          .from('class_swaps')
-          .select(`*, faculty_a:profiles!class_swaps_faculty_a_id_fkey(full_name), faculty_b:profiles!class_swaps_faculty_b_id_fkey(full_name)`)
-          .eq('faculty_b_id', user.id)
-          .order('requested_at', { ascending: false })
-          .limit(LIMIT);
-
-        const { data: respondedSwapsFromMe } = await supabase
-          .from('class_swaps')
-          .select(`*, faculty_a:profiles!class_swaps_faculty_a_id_fkey(full_name), faculty_b:profiles!class_swaps_faculty_b_id_fkey(full_name)`)
-          .eq('faculty_a_id', user.id)
-          .order('requested_at', { ascending: false })
-          .limit(LIMIT);
-
-        const allSwaps = [...(pendingSwapsToMe || []), ...(respondedSwapsFromMe || [])]
-          .filter((s: any) => !hiddenSet.has(s.id));
-
-        // Enrich Swaps
-        const enrichedSwaps = await Promise.all(allSwaps.map(async (swap: any) => {
-            const { data: slotA } = await supabase.from('master_timetables').select('subjects:subject_id(name, code), target_dept, target_year, target_section, start_time, end_time').eq('faculty_id', swap.faculty_a_id).eq('slot_id', swap.slot_a_id).maybeSingle();
-            const { data: slotB } = await supabase.from('master_timetables').select('subjects:subject_id(name, code), target_dept, target_year, target_section, start_time, end_time').eq('faculty_id', swap.faculty_b_id).eq('slot_id', swap.slot_b_id).maybeSingle();
-            return { ...swap, slot_a_details: slotA, slot_b_details: slotB };
-        }));
-        setSwaps(enrichedSwaps);
-
-        // ... Leaves ...
-        const { data: leaveData } = await supabase
-          .from('leaves')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(LIMIT);
-        
-        if (leaveData) {
-          setLeaves(leaveData.filter((l: any) => !hiddenSet.has(l.id)));
-        }
-      }
-
-      // 3. Fetch Notifications (Paginated)
+      // 2. Fetch All Items (Paginated)
       const from = pageNum * NOTIFICATIONS_PER_PAGE;
       const to = from + NOTIFICATIONS_PER_PAGE - 1;
 
-      const { data: notifData } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .range(from, to);
+      const [subsResponse, swapsResponse, leavesResponse, notifsResponse] = await Promise.all([
+          supabase
+              .from('substitutions')
+              .select(`*, original_faculty:profiles!substitutions_original_faculty_id_fkey(full_name), subject:subjects!substitutions_subject_id_fkey(name, code)`)
+              .or(`substitute_faculty_id.eq.${user.id},original_faculty_id.eq.${user.id}`)
+              .order('requested_at', { ascending: false })
+              .range(from, to),
+          supabase
+              .from('class_swaps')
+              .select(`*, faculty_a:profiles!class_swaps_faculty_a_id_fkey(full_name), faculty_b:profiles!class_swaps_faculty_b_id_fkey(full_name)`)
+              .or(`faculty_a_id.eq.${user.id},faculty_b_id.eq.${user.id}`)
+              .order('requested_at', { ascending: false })
+              .range(from, to),
+          supabase
+              .from('leaves')
+              .select('*')
+              .eq('user_id', user.id)
+              .order('created_at', { ascending: false })
+              .range(from, to),
+          supabase
+              .from('notifications')
+              .select('*')
+              .eq('user_id', user.id)
+              .order('created_at', { ascending: false })
+              .range(from, to)
+      ]);
 
-      if (notifData) {
-        // Filter out locally deleted ones
-        const visibleNotifs = notifData.filter((n: any) => !hiddenSet.has(n.id));
-        
-        if (pageNum === 0) {
-          setNotifications(visibleNotifs);
-        } else {
-          setNotifications(prev => [...prev, ...visibleNotifs]);
-        }
+      const allSubs = (subsResponse.data || []).filter((r: any) => !hiddenSet.has(r.id));
+      const allSwaps = (swapsResponse.data || []).filter((s: any) => !hiddenSet.has(s.id));
+      const leaveData = (leavesResponse.data || []).filter((l: any) => !hiddenSet.has(l.id));
+      const notifData = (notifsResponse.data || []).filter((n: any) => !hiddenSet.has(n.id));
 
-        if (notifData.length < NOTIFICATIONS_PER_PAGE) {
-            setHasMore(false);
-        } else {
-            setHasMore(true);
-        }
-      } else {
-        setHasMore(false);
+      // 3. Enrich Swaps Efficiently
+      let enrichedSwaps = allSwaps;
+      if (allSwaps.length > 0) {
+          // Use a Set to avoid redundant condition strings
+          const conditionSet = new Set<string>();
+          allSwaps.forEach(s => {
+              if (s.faculty_a_id && s.slot_a_id) conditionSet.add(`and(faculty_id.eq.${s.faculty_a_id},slot_id.eq.${s.slot_a_id})`);
+              if (s.faculty_b_id && s.slot_b_id) conditionSet.add(`and(faculty_id.eq.${s.faculty_b_id},slot_id.eq.${s.slot_b_id})`);
+          });
+
+          if (conditionSet.size > 0) {
+              try {
+                  const { data: allSlots } = await supabase
+                      .from('master_timetables')
+                      .select('faculty_id, slot_id, subjects:subject_id(name, code), target_dept, target_year, target_section, start_time, end_time')
+                      .or(Array.from(conditionSet).join(','));
+
+                  if (allSlots) {
+                      enrichedSwaps = allSwaps.map(swap => {
+                          const slotA = allSlots.find(s => s.faculty_id === swap.faculty_a_id && s.slot_id === swap.slot_a_id);
+                          const slotB = allSlots.find(s => s.faculty_id === swap.faculty_b_id && s.slot_id === swap.slot_b_id);
+                          return { ...swap, slot_a_details: slotA, slot_b_details: slotB };
+                      });
+                  }
+              } catch(e) {
+                  console.log('Error enriching slots efficiently', e);
+              }
+          }
       }
 
-      if (pageNum === 0) await refreshNotifications();
+      const hasMoreData = 
+          (subsResponse.data?.length === NOTIFICATIONS_PER_PAGE) ||
+          (swapsResponse.data?.length === NOTIFICATIONS_PER_PAGE) ||
+          (leavesResponse.data?.length === NOTIFICATIONS_PER_PAGE) ||
+          (notifsResponse.data?.length === NOTIFICATIONS_PER_PAGE);
+
+      setHasMore(hasMoreData);
+
+      if (pageNum === 0) {
+          setRequests(allSubs);
+          setSwaps(enrichedSwaps);
+          setLeaves(leaveData);
+          setNotifications(notifData);
+          await refreshNotifications();
+      } else {
+          setRequests(prev => {
+             // Avoid appending duplicates
+             const newIds = new Set(prev.map(p => p.id));
+             const toAdd = allSubs.filter(r => !newIds.has(r.id));
+             return [...prev, ...toAdd];
+          });
+          setSwaps(prev => {
+             const newIds = new Set(prev.map(p => p.id));
+             const toAdd = enrichedSwaps.filter(s => !newIds.has(s.id));
+             return [...prev, ...toAdd];
+          });
+          setLeaves(prev => {
+             const newIds = new Set(prev.map(p => p.id));
+             const toAdd = leaveData.filter(l => !newIds.has(l.id));
+             return [...prev, ...toAdd];
+          });
+          setNotifications(prev => {
+             const newIds = new Set(prev.map(p => p.id));
+             const toAdd = notifData.filter(n => !newIds.has(n.id));
+             return [...prev, ...toAdd];
+          });
+      }
 
     } catch (e: any) {
       console.log('Notification fetch error:', e);

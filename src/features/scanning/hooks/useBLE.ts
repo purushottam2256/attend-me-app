@@ -77,6 +77,14 @@ export const useBLE = ({
   const stopScanRef = useRef<(() => void) | null>(null);
   const detectedUUIDsRef = useRef<Set<string>>(new Set());
   const isStartingRef = useRef(false);
+  const isMounted = useRef(true);
+  
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
   
   // === FIX: Use refs to hold latest values for stable callbacks ===
   const studentsRef = useRef(students);
@@ -203,6 +211,8 @@ export const useBLE = ({
     try {
       // Check if BLE is ready
       const { ready, reason } = await isBLEReady();
+      if (!isMounted.current) return;
+
       if (!ready) {
         console.error('[useBLE] ❌ BLE not ready:', reason);
         setError(reason || 'BLE not ready');
@@ -243,7 +253,9 @@ export const useBLE = ({
       });
       
       stopScanRef.current = stop;
-      setIsScanning(true);
+      if (isMounted.current) {
+        setIsScanning(true);
+      }
       console.log('[useBLE] ✅ Scan started');
     } finally {
       isStartingRef.current = false;
