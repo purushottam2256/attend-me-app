@@ -2,10 +2,20 @@
  * ProgressRing - Pure React Native Circular Progress Indicator
  * Uses View-based approach without react-native-svg
  * Apple-inspired design with smooth animations
+ * Offloaded to Native UI Thread via Reanimated
  */
 
-import React, { useEffect, useRef } from 'react';
-import { View, StyleSheet, Animated, Easing } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, StyleSheet } from 'react-native';
+import Animated, { 
+  useSharedValue, 
+  useAnimatedStyle, 
+  withTiming, 
+  withRepeat, 
+  Easing,
+  interpolate,
+  cancelAnimation
+} from 'react-native-reanimated';
 import { scale, moderateScale } from '../utils/responsive';
 
 interface ProgressRingProps {
@@ -25,39 +35,47 @@ export const ProgressRing: React.FC<ProgressRingProps> = ({
   progressColor = '#3DDC97',
   children,
 }) => {
-  const animatedValue = useRef(new Animated.Value(0)).current;
-  const rotation = useRef(new Animated.Value(0)).current;
+  const animatedValue = useSharedValue(0);
+  const rotation = useSharedValue(0);
 
   useEffect(() => {
-    Animated.timing(animatedValue, {
-      toValue: progress,
+    animatedValue.value = withTiming(progress, {
       duration: 800,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start();
+      easing: Easing.out(Easing.cubic)
+    });
   }, [progress, animatedValue]);
 
   // Create a rotating effect for visual progress
   useEffect(() => {
-    Animated.loop(
-      Animated.timing(rotation, {
-        toValue: 1,
+    rotation.value = 0;
+    rotation.value = withRepeat(
+      withTiming(1, {
         duration: 2000,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      })
-    ).start();
+        easing: Easing.linear
+      }),
+      -1,
+      false
+    );
+    
+    return () => cancelAnimation(rotation);
   }, [rotation]);
 
-  const spin = rotation.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
+  const spinStyle = useAnimatedStyle(() => {
+    return {
+      transform: [
+        { rotate: `${rotation.value * 360}deg` }
+      ]
+    };
   });
 
-  // Calculate the clip angle based on progress
-  const progressAngle = animatedValue.interpolate({
-    inputRange: [0, 100],
-    outputRange: [0, 360],
+  const glowStyle = useAnimatedStyle(() => {
+    return {
+      opacity: interpolate(
+        animatedValue.value,
+        [0, 50, 100],
+        [0.2, 0.4, 0.6]
+      )
+    };
   });
 
   return (
@@ -83,8 +101,8 @@ export const ProgressRing: React.FC<ProgressRingProps> = ({
           {
             width: size,
             height: size,
-            transform: [{ rotate: spin }],
           },
+          spinStyle
         ]}
       >
         {/* Progress indicator dots */}
@@ -122,11 +140,8 @@ export const ProgressRing: React.FC<ProgressRingProps> = ({
             borderRadius: (size + scale(8)) / 2,
             borderWidth: 2,
             borderColor: progressColor,
-            opacity: animatedValue.interpolate({
-              inputRange: [0, 50, 100],
-              outputRange: [0.2, 0.4, 0.6],
-            }),
           },
+          glowStyle
         ]}
       />
       

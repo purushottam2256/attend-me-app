@@ -85,25 +85,20 @@ export const requestBLEPermissions = async (): Promise<boolean> => {
       const results = await PermissionsAndroid.requestMultiple([
         PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
         PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
       ]);
       
       const granted = (
         results[PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN] === 'granted' &&
-        results[PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT] === 'granted' &&
-        results[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] === 'granted'
+        results[PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT] === 'granted'
       );
       
       log.info('Android 12+ permissions:', granted ? 'GRANTED' : 'DENIED');
       return granted;
     } else {
       // Android < 12
-      const result = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
-      );
-      const granted = result === 'granted';
-      log.info('Android < 12 permission:', granted ? 'GRANTED' : 'DENIED');
-      return granted;
+      // Location removed per user request. Fallback to basic BLE access (if allowed without location).
+      log.info('Android < 12 Location permission bypassed');
+      return true;
     }
   }
   

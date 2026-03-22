@@ -11,3 +11,4 @@ export { StudentCard } from './StudentCard';
 export { StudentList } from './StudentList';
 export { OverrideModal } from './OverrideModal';
 export { ScanBlockedModal, type BlockReason } from './ScanBlockedModal';
+export { BluetoothRequiredModal } from './BluetoothRequiredModal';

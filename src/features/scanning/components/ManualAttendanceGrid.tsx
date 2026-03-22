@@ -7,11 +7,13 @@ import {
   Dimensions,
   FlatList,
   Animated,
+  Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive';
+import { getFallbackAvatar } from '../../../utils/avatars';
 
 interface Student {
   id: string;
@@ -20,6 +22,7 @@ interface Student {
   status: 'pending' | 'present' | 'absent' | 'od' | 'leave';
   batch?: number | null;
   photoUrl?: string;
+  isLE?: boolean;
 }
 
 interface ManualAttendanceGridProps {
@@ -52,11 +55,11 @@ const StatusConfig = {
     overlay: 'rgba(5,150,105,0.15)', // Minimal overlay = vivid/colored
   },
   absent: {
-    gradient: ['#64748B', '#475569'] as const,
+    gradient: ['#EF4444', '#B91C1C'] as const,
     icon: 'close-circle' as const,
-    iconColor: 'rgba(239,68,68,0.9)',
+    iconColor: '#FFF',
     label: '',
-    overlay: 'rgba(71,85,105,0.85)', // Strong gray = absent
+    overlay: 'rgba(185,28,28,0.15)', // Minimal overlay for red
   },
   od: {
     gradient: ['#F59E0B', '#D97706'] as const,
@@ -73,6 +76,8 @@ const StatusConfig = {
     overlay: 'rgba(234,88,12,0.2)',
   },
 };
+
+import { isLateralEntry } from '../../../utils/studentUtils';
 
 const SquareItem = React.memo(({ item, onTap, onLongPress }: { 
     item: Student; 
@@ -92,6 +97,7 @@ const SquareItem = React.memo(({ item, onTap, onLongPress }: {
   const isInteractive = item.status !== 'od' && item.status !== 'leave';
   const isMarkedPresent = item.status === 'present';
   const isAbsentOrPending = item.status === 'absent' || item.status === 'pending';
+  const isLE = isLateralEntry(item.rollNo, item.isLE);
 
   const handlePress = () => {
     Animated.sequence([
@@ -126,14 +132,29 @@ const SquareItem = React.memo(({ item, onTap, onLongPress }: {
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
         >
-          {/* Large initials as background watermark */}
-          <Text style={[
-            styles.initialsWatermark,
-            isAbsentOrPending && { opacity: 0.15 },
-            isMarkedPresent && { opacity: 0.25 },
-          ]}>
-            {initials}
-          </Text>
+          {/* Avatar Background */}
+          <View style={[StyleSheet.absoluteFillObject, { padding: scale(10) }]}>
+            <Image
+              source={item.photoUrl ? { uri: item.photoUrl } : getFallbackAvatar(item.id)}
+              style={[
+                { width: '100%', height: '100%', opacity: 0.35 },
+                isAbsentOrPending && { opacity: 0.15 },
+                isMarkedPresent && { opacity: 0.45 },
+              ]}
+              resizeMode="contain"
+            />
+          </View>
+
+          {/* LE Badge */}
+          {isLE && (
+            <View style={[styles.lockedBadge, { 
+              backgroundColor: 'rgba(56, 189, 248, 0.6)', 
+              left: scale(3), 
+              right: undefined, 
+            }]}>
+              <Text style={styles.lockedBadgeText}>LE</Text>
+            </View>
+          )}
 
           {/* Status indicator dot */}
           {isMarkedPresent && (
@@ -145,7 +166,7 @@ const SquareItem = React.memo(({ item, onTap, onLongPress }: {
           {/* OD/Leave locked badge */}
           {(item.status === 'od' || item.status === 'leave') && (
             <View style={[styles.lockedBadge, { 
-              backgroundColor: item.status === 'od' ? 'rgba(245,158,11,0.3)' : 'rgba(249,115,22,0.3)' 
+              backgroundColor: item.status === 'od' ? 'rgba(245,158,11,0.5)' : 'rgba(249,115,22,0.5)' 
             }]}>
               <Ionicons name={config.icon} size={normalizeFont(8)} color="#FFF" />
               <Text style={styles.lockedBadgeText}>{config.label}</Text>

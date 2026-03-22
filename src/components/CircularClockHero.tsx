@@ -6,6 +6,8 @@
  * - Large centered time display
  * - Class info below
  * - Slide-to-start action
+ * 
+ * Offloaded to Native UI Thread via Reanimated & Gesture Handler
  */
 
 import React, { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
@@ -13,17 +15,28 @@ import {
   View,
   Text,
   StyleSheet,
-  Animated,
-  Easing,
   TouchableOpacity,
   Dimensions,
-  PanResponder,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle, Defs, LinearGradient as SvgGradient, Stop } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 import { useIsFocused } from '@react-navigation/native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withRepeat,
+  withSequence,
+  withSpring,
+  Easing,
+  interpolate,
+  Extrapolation,
+  runOnJS,
+  cancelAnimation
+} from 'react-native-reanimated';
 import { useTheme } from '../contexts';
 import { scale, verticalScale, moderateScale, normalizeFont } from '../utils/responsive';
 
@@ -58,21 +71,26 @@ export const CircularClockHero = forwardRef<CircularClockHeroRef, CircularClockH
 }, ref) => {
   const { isDark } = useTheme();
   const isFocused = useIsFocused();
-  const glowAnim = useRef(new Animated.Value(0)).current;
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const [currentTime, setCurrentTime] = useState(new Date());
   
-  // Slider state
-  const sliderX = useRef(new Animated.Value(0)).current;
+  // Reanimated shared values
+  const glowAnim = useSharedValue(0);
+  const pulseAnim = useSharedValue(1);
+  const sliderX = useSharedValue(0);
+  const startX = useSharedValue(0);
+  
   const [sliderCompleted, setSliderCompleted] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
   const [sliderMaxWidth, setSliderMaxWidth] = useState(scale(200));
+  
+  const hasTriggeredHaptic = useRef(false);
   const thumbWidth = scale(48);
   const maxSlide = sliderMaxWidth - thumbWidth - 8;
 
   useImperativeHandle(ref, () => ({
     reset: () => {
-      sliderX.setValue(0);
+      sliderX.value = withSpring(0, { damping: 15, stiffness: 100 });
       setSliderCompleted(false);
+      resetHapticState();
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     },
   }));
@@ -87,97 +105,117 @@ export const CircularClockHero = forwardRef<CircularClockHeroRef, CircularClockH
 
   // Subtle glow pulse (only when focused)
   useEffect(() => {
-    let anim: Animated.CompositeAnimation;
     if (isFocused) {
-      anim = Animated.loop(
-        Animated.sequence([
-          Animated.timing(glowAnim, {
-            toValue: 1,
-            duration: 2000,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
-          }),
-          Animated.timing(glowAnim, {
-            toValue: 0,
-            duration: 2000,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
-          }),
-        ])
+      glowAnim.value = withRepeat(
+        withSequence(
+          withTiming(1, { duration: 2000, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0, { duration: 2000, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        false
       );
-      anim.start();
     } else {
-      glowAnim.setValue(0); // Reset
+      cancelAnimation(glowAnim);
+      glowAnim.value = 0;
     }
-    return () => anim?.stop();
-  }, [glowAnim, isFocused]);
+    return () => cancelAnimation(glowAnim);
+  }, [isFocused, glowAnim]);
 
   // Subtle pulse animation for clock ring (only when focused)
   useEffect(() => {
-    let anim: Animated.CompositeAnimation;
     if (isFocused) {
-      anim = Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 1.03,
-            duration: 1500,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 1500,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
-          }),
-        ])
+      pulseAnim.value = withRepeat(
+        withSequence(
+          withTiming(1.03, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
+          withTiming(1, { duration: 1500, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        false
       );
-      anim.start();
     } else {
-      pulseAnim.setValue(1); // Reset
+      cancelAnimation(pulseAnim);
+      pulseAnim.value = 1;
     }
-    return () => anim?.stop();
-  }, [pulseAnim, isFocused]);
+    return () => cancelAnimation(pulseAnim);
+  }, [isFocused, pulseAnim]);
 
   const strokeDashoffset = CIRCUMFERENCE - (progress / 100) * CIRCUMFERENCE;
 
-  // Slider handling
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => !sliderCompleted,
-      onMoveShouldSetPanResponder: () => !sliderCompleted,
-      onPanResponderGrant: () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      },
-      onPanResponderMove: (_, gestureState) => {
-        const newX = Math.max(0, Math.min(gestureState.dx, maxSlide));
-        sliderX.setValue(newX);
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dx >= maxSlide * 0.85) {
-          Animated.spring(sliderX, {
-            toValue: maxSlide,
-            useNativeDriver: false,
-          }).start(() => {
-            setSliderCompleted(true);
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            onSlideComplete();
-          });
-        } else {
-          Animated.spring(sliderX, {
-            toValue: 0,
-            useNativeDriver: false,
-            friction: 5,
-          }).start();
-        }
-      },
-    })
-  ).current;
+  // JS Functions for Worklets
+  const playLightHaptic = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  const playMediumHaptic = () => {
+    if (!hasTriggeredHaptic.current) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      hasTriggeredHaptic.current = true;
+    }
+  };
+  const handleSuccess = () => {
+    setSliderCompleted(true);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    onSlideComplete();
+  };
+  const resetHapticState = () => {
+    hasTriggeredHaptic.current = false;
+  };
 
-  const sliderTextOpacity = sliderX.interpolate({
-    inputRange: [0, maxSlide * 0.3],
-    outputRange: [1, 0],
-    extrapolate: 'clamp',
+  // Safe gesture pan responder running entirely on UI Thread
+  const panGesture = Gesture.Pan()
+    .enabled(!sliderCompleted)
+    .onStart(() => {
+      runOnJS(playLightHaptic)();
+      runOnJS(resetHapticState)();
+      startX.value = sliderX.value;
+    })
+    .onUpdate((e) => {
+      const newX = Math.max(0, Math.min(e.translationX + startX.value, maxSlide));
+      sliderX.value = newX;
+
+      if (newX >= maxSlide * 0.5) {
+        runOnJS(playMediumHaptic)();
+      }
+    })
+    .onEnd(() => {
+      if (sliderX.value >= maxSlide * 0.85) {
+        sliderX.value = withSpring(maxSlide, { damping: 15, stiffness: 100 });
+        runOnJS(handleSuccess)();
+      } else {
+        sliderX.value = withSpring(0, { damping: 15, stiffness: 100 });
+        runOnJS(resetHapticState)();
+      }
+    });
+
+  // Animated Styles
+  const sliderTextAnimatedStyle = useAnimatedStyle(() => {
+    return {
+      opacity: interpolate(
+        sliderX.value,
+        [0, maxSlide * 0.3],
+        [1, 0],
+        Extrapolation.CLAMP
+      )
+    };
+  });
+
+  const sliderThumbAnimatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ translateX: sliderX.value }]
+    };
+  });
+
+  const ringAnimatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ scale: pulseAnim.value }]
+    };
+  });
+
+  const glowAnimatedStyle = useAnimatedStyle(() => {
+    return {
+      opacity: interpolate(
+        glowAnim.value,
+        [0, 1],
+        [0.3, 0.6]
+      )
+    };
   });
 
   const formatTime = (date: Date) => {
@@ -204,11 +242,6 @@ export const CircularClockHero = forwardRef<CircularClockHeroRef, CircularClockH
     glow: 'rgba(61, 220, 151, 0.4)',
   };
 
-  const glowOpacity = glowAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.3, 0.6],
-  });
-
   return (
     <View style={styles.container}>
       {/* Main Card */}
@@ -232,13 +265,14 @@ export const CircularClockHero = forwardRef<CircularClockHeroRef, CircularClockH
         {/* Clock Circle */}
         <View style={styles.clockSection}>
           {/* Glow effect */}
-          <Animated.View style={[styles.glowRing, { 
-            opacity: glowOpacity,
-            borderColor: colors.glow,
-          }]} />
+          <Animated.View style={[
+            styles.glowRing, 
+            { borderColor: colors.glow },
+            glowAnimatedStyle
+          ]} />
           
           {/* SVG Ring with pulse */}
-          <Animated.View style={[styles.ringContainer, { transform: [{ scale: pulseAnim }] }]}>
+          <Animated.View style={[styles.ringContainer, ringAnimatedStyle]}>
             <Svg width={RING_SIZE} height={RING_SIZE}>
               <Defs>
                 <SvgGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -299,26 +333,26 @@ export const CircularClockHero = forwardRef<CircularClockHeroRef, CircularClockH
             style={[styles.slider, { backgroundColor: colors.sliderBg }]}
             onLayout={(e) => setSliderMaxWidth(e.nativeEvent.layout.width)}
           >
-            <Animated.Text style={[styles.sliderText, { 
-              color: colors.textMuted,
-              opacity: sliderTextOpacity,
-            }]}>
+            <Animated.Text style={[
+              styles.sliderText, 
+              { color: colors.textMuted },
+              sliderTextAnimatedStyle
+            ]}>
               Slide to Scan
             </Animated.Text>
             
-            <Animated.View
-              style={[styles.sliderThumb, { transform: [{ translateX: sliderX }] }]}
-              {...panResponder.panHandlers}
-            >
-              <LinearGradient
-                colors={['#3DDC97', '#0D9488']}
-                style={styles.thumbGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-              >
-              <Ionicons name="chevron-forward" size={normalizeFont(24)} color="#FFF" />
-              </LinearGradient>
-            </Animated.View>
+            <GestureDetector gesture={panGesture}>
+              <Animated.View style={[styles.sliderThumb, sliderThumbAnimatedStyle]}>
+                <LinearGradient
+                  colors={['#3DDC97', '#0D9488']}
+                  style={styles.thumbGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                >
+                <Ionicons name="chevron-forward" size={normalizeFont(24)} color="#FFF" />
+                </LinearGradient>
+              </Animated.View>
+            </GestureDetector>
           </View>
 
           {/* Manual Entry */}

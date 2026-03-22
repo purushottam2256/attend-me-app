@@ -28,6 +28,8 @@ import { checkExistingSession } from '@services/dashboardService';
 import { supabase } from '@config/supabase';
 import { ZenToast } from '@components/ZenToast';
 import { scale, verticalScale, moderateScale, normalizeFont } from '@utils/responsive';
+import { isLateralEntry } from '../../../utils/studentUtils';
+import { getFallbackAvatar } from '@utils/avatars';
 
 // Stats Component
 const StatsBar = ({ counts, onBulkAction }: { 
@@ -187,14 +189,35 @@ export const ManualEntryScreen: React.FC = () => {
       text: '#FFF'
   };
 
-  if (loading) {
-      return (
-          <View style={[styles.center, { backgroundColor: '#0D4A4A', flex: 1, alignItems:'center', justifyContent:'center' }]}>
-              <ActivityIndicator size="large" color={colors.accent} />
-              <Text style={{ color: colors.text, marginTop: verticalScale(10) }}>Loading Class Roster...</Text>
-          </View>
-      );
-  }
+  // Skeleton Grid Component
+  const SkeletonGrid = () => {
+    const { width } = Dimensions.get('window');
+    // Generate 12 dummy items for skeleton
+    const dummyItems = Array.from({ length: 12 }).map((_, i) => i);
+    
+    // Quick pulsing animation using a simple interval hook to toggle opacity if Reanimated isn't available
+    const [opacity, setOpacity] = useState(0.3);
+    useEffect(() => {
+      const interval = setInterval(() => {
+        setOpacity(prev => prev === 0.3 ? 0.6 : 0.3);
+      }, 600);
+      return () => clearInterval(interval);
+    }, []);
+
+    return (
+      <View style={{ padding: scale(16), flexDirection: 'row', flexWrap: 'wrap', gap: scale(12), justifyContent: 'space-between' }}>
+        {dummyItems.map((item) => (
+          <View key={item} style={{
+            width: (width - scale(44)) / 3, // Match 3 columns
+            height: (width - scale(44)) / 3,
+            backgroundColor: `rgba(255,255,255, ${opacity})`,
+            borderRadius: moderateScale(10),
+            opacity: 0.8
+          }} />
+        ))}
+      </View>
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -256,12 +279,16 @@ export const ManualEntryScreen: React.FC = () => {
         }}>
           <Ionicons name="grid" size={120} color="#FFF" />
         </View>
-        <ManualAttendanceGrid
-          students={students}
-          onToggleStatus={handleToggle}
-          onLongPress={setSelectedStudent}
-          isDark={true}
-        />
+        {loading ? (
+            <SkeletonGrid />
+        ) : (
+            <ManualAttendanceGrid
+              students={students}
+              onToggleStatus={handleToggle}
+              onLongPress={setSelectedStudent}
+              isDark={true}
+            />
+        )}
       </View>
 
       {/* Floating Save Button */}
@@ -302,13 +329,24 @@ export const ManualEntryScreen: React.FC = () => {
                         {selectedStudent.photoUrl ? (
                             <Image source={{ uri: selectedStudent.photoUrl }} style={{ width: scale(64), height: scale(64), borderRadius: moderateScale(32) }} />
                         ) : (
-                            <Text style={styles.modalAvatarText}>{selectedStudent.name[0]}</Text>
+                            <Image 
+                                source={getFallbackAvatar(selectedStudent.id)} 
+                                style={{ width: scale(64), height: scale(64), borderRadius: moderateScale(32) }} 
+                                resizeMode="cover" 
+                            />
                         )}
                     </View>
                     
                     <Text style={styles.modalName}>{selectedStudent.name}</Text>
-                    <Text style={styles.modalRoll}>{selectedStudent.rollNo}</Text>
                     
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                        <Text style={[styles.modalRoll, { marginBottom: 0 }]}>{selectedStudent.rollNo}</Text>
+                        {isLateralEntry(selectedStudent.rollNo) && (
+                            <View style={{ backgroundColor: 'rgba(56, 189, 248, 0.4)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                                <Text style={{ fontSize: normalizeFont(10), color: '#38BDF8', fontWeight: 'bold' }}>LE</Text>
+                            </View>
+                        )}
+                    </View>
                     <View style={[styles.modalStatusBadge, { 
                         backgroundColor: 
                             selectedStudent.status === 'present' ? '#10B981' : 

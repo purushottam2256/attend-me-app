@@ -152,6 +152,13 @@ export async function syncPendingSubmissions(): Promise<SyncResult> {
          throw new Error(`Missing Subject ID for ${submission.classData.subjectName} and could not resolve it.`);
       }
 
+      // Determine correct section letter ("A" instead of "CSE-3-A")
+      let finalSection = submission.classData.sectionLetter;
+      if (!finalSection && submission.classData.section) {
+         const parts = submission.classData.section.split("-");
+         finalSection = parts[parts.length - 1]; // e.g. "A"
+      }
+
       // INSERT
       const { data: session, error: sessionError } = await supabase
         .from("attendance_sessions")
@@ -161,7 +168,7 @@ export async function syncPendingSubmissions(): Promise<SyncResult> {
           slot_id: slotId || '0', // fallback to '0' string if somehow null
           subject_id: finalSubjectId,
           target_dept: submission.classData.dept || submission.classData.classId?.split("-")[0],
-          target_section: submission.classData.section,
+          target_section: finalSection || submission.classData.section,
           target_year: submission.classData.year || 1,
           batch: submission.classData.batch,
           present_count: presentCount,
@@ -308,7 +315,7 @@ export async function syncRosters(
 
       const { data: students, error } = await supabase
         .from("students")
-        .select("id, name:full_name, roll_number:roll_no, bluetooth_uuid, batch")
+        .select("id, name:full_name, roll_number:roll_no, bluetooth_uuid, batch, is_le")
         .eq("dept", cls.target_dept)
         .eq("year", cls.target_year)
         .eq("section", cls.target_section)
@@ -334,6 +341,7 @@ export async function syncRosters(
           rollNo: s.roll_number,
           bluetoothUUID: s.bluetooth_uuid,
           batch: s.batch,
+          isLE: !!s.is_le,
         })),
         cachedAt: new Date().toISOString(),
       });

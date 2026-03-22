@@ -37,6 +37,7 @@ export interface CachedStudent {
   rollNo: string;
   bluetoothUUID: string | null;
   batch?: number;
+  isLE?: boolean;
 }
 
 export interface CachedRoster {

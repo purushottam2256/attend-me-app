@@ -25,6 +25,7 @@ interface Student {
   rollNo: string;
   status: StudentStatus;
   detectedAt?: number;
+  isLE?: boolean;
 }
 
 interface StudentListProps {
@@ -157,6 +158,7 @@ export const StudentList: React.FC<StudentListProps> = ({
                 name={student.name}
                 rollNo={student.rollNo}
                 status={student.status}
+                isLE={student.isLE}
                 onStatusChange={(newStatus) => onStatusChange(student.id, newStatus)}
               />
             ))}
@@ -178,6 +180,7 @@ export const StudentList: React.FC<StudentListProps> = ({
                 name={student.name}
                 rollNo={student.rollNo}
                 status={student.status}
+                isLE={student.isLE}
                 onStatusChange={(newStatus) => onStatusChange(student.id, newStatus)}
               />
             ))}

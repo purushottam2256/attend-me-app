@@ -36,6 +36,7 @@ export interface Student {
   bluetooth_uuid: string | null;
   batch?: number | null;
   photo_url?: string | null;
+  is_le?: boolean;
 }
 
 export interface AttendanceSession {
@@ -443,9 +444,10 @@ export async function getStudentsForClass(
   batch?: number | null
 ): Promise<Student[]> {
   try {
+    log.info('[getStudentsForClass] Query:', { dept, year, section, batch });
     let query = supabase
       .from('students')
-      .select('id, roll_no, full_name, bluetooth_uuid, batch, photo_url')
+      .select('id, roll_no, full_name, bluetooth_uuid, batch, photo_url, is_le')
       .eq('dept', dept)
       .eq('year', year)
       .eq('section', section)
@@ -459,14 +461,15 @@ export async function getStudentsForClass(
     const { data, error } = await query;
 
     if (error) {
-      log.error('Error fetching students:', error);
-      return [];
+      log.error('[getStudentsForClass] Supabase error:', error.message, error.code, error.details);
+      throw error;
     }
 
+    log.info('[getStudentsForClass] Success, returned', (data || []).length, 'students');
     return data || [];
-  } catch (error) {
-    log.error('Students fetch error:', error);
-    return [];
+  } catch (error: any) {
+    log.error('[getStudentsForClass] THROW:', error?.message || error);
+    throw error;
   }
 }
 

@@ -214,10 +214,10 @@ export const getKeyPeriodAttendance = async (
 ): Promise<{ p1: PeriodAttendance | null; p4: PeriodAttendance | null }> => {
   const today = getLocalDate();
   
-  // Fetch all sessions for today only
-  const { data, error } = await supabase
+  // Fetch all sessions for today
+  let { data, error } = await supabase
     .from('attendance_sessions')
-    .select(`slot_id, present_count, total_students`)
+    .select(`slot_id, present_count, total_students, date`)
     .eq('target_dept', dept)
     .eq('target_year', year)
     .eq('target_section', section)
@@ -226,6 +226,40 @@ export const getKeyPeriodAttendance = async (
   if (error) {
     console.error('[InchargeService] Error fetching period attendance:', error);
     throw error;
+  }
+
+  // MERGE OFFLINE PENDING DATA
+  data = data || [];
+  try {
+    const { getPendingSubmissions } = require('../../../services/offlineService');
+    const pending = await getPendingSubmissions();
+    if (pending && pending.length > 0) {
+      pending.forEach((sub: any) => {
+        const subDate = sub.submittedAt.split('T')[0];
+        const subSection = sub.classData.sectionLetter || sub.classData.section?.split('-').pop(); // Handle 'A' or 'CSE-3-A'
+        
+        if (
+          subDate === today &&
+          sub.classData.dept === dept &&
+          sub.classData.year === year &&
+          subSection === section
+        ) {
+          // Check if it already exists in online data, if so remove the old one
+          data = (data as any[]).filter((d: any) => d.slot_id !== sub.classData.slotId);
+          
+          // Push the offline session
+          (data as any[]).push({
+            slot_id: sub.classData.slotId,
+            present_count: sub.attendance.filter((a: any) => a.status === 'present').length,
+            total_students: sub.attendance.length,
+            date: subDate
+          });
+          console.log(`[InchargeService] Merged OFFLINE pending submission for slot ${sub.classData.slotId}`);
+        }
+      });
+    }
+  } catch (e) {
+    console.error('[InchargeService] Error merging pending submissions:', e);
   }
 
   const normalize = (id: string | null | undefined) => {
@@ -267,9 +301,9 @@ export const getAllPeriodAttendance = async (
 ): Promise<PeriodAttendance[]> => {
   const today = getLocalDate();
   
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('attendance_sessions')
-    .select(`slot_id, present_count, total_students`)
+    .select(`slot_id, present_count, total_students, date`)
     .eq('target_dept', dept)
     .eq('target_year', year)
     .eq('target_section', section)
@@ -279,6 +313,40 @@ export const getAllPeriodAttendance = async (
   if (error) {
     console.error('[InchargeService] Error fetching all period attendance:', error);
     return [];
+  }
+
+  data = data || [];
+  // MERGE OFFLINE PENDING DATA
+  try {
+    const { getPendingSubmissions } = require('../../../services/offlineService');
+    const pending = await getPendingSubmissions();
+    if (pending && pending.length > 0) {
+      pending.forEach((sub: any) => {
+        const subDate = sub.submittedAt.split('T')[0];
+        const subSection = sub.classData.sectionLetter || sub.classData.section?.split('-').pop();
+        
+        if (
+          subDate === today &&
+          sub.classData.dept === dept &&
+          sub.classData.year === year &&
+          subSection === section
+        ) {
+          // Check if it already exists in online data, if so remove the old one
+          data = (data as any[]).filter((d: any) => d.slot_id !== sub.classData.slotId);
+          
+          // Push the offline session
+          (data as any[]).push({
+            slot_id: sub.classData.slotId,
+            present_count: sub.attendance.filter((a: any) => a.status === 'present').length,
+            total_students: sub.attendance.length,
+            date: subDate
+          });
+          console.log(`[InchargeService] Merged OFFLINE pending submission to all periods for slot ${sub.classData.slotId}`);
+        }
+      });
+    }
+  } catch (e) {
+    console.error('[InchargeService] Error merging pending submissions in all periods:', e);
   }
 
   return (data || []).map(s => ({
@@ -305,7 +373,7 @@ export const getClassTrends = async (
   if (range === 'day') {
     // Today's periods
     const todayStr = getLocalDate();
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('attendance_sessions')
       .select('slot_id, present_count, total_students')
       .eq('target_dept', dept)
@@ -318,7 +386,34 @@ export const getClassTrends = async (
        console.error('[InchargeService] Error fetching day trends:', error);
        return [];
     }
-    
+
+    // MERGE OFFLINE PENDING DATA
+    data = data || [];
+    try {
+      const { getPendingSubmissions } = require('../../../services/offlineService');
+      const pending = await getPendingSubmissions();
+      if (pending && pending.length > 0) {
+        pending.forEach((sub: any) => {
+          const subDate = sub.submittedAt.split('T')[0];
+          const subSection = sub.classData.sectionLetter || sub.classData.section?.split('-').pop();
+          if (
+            subDate === todayStr &&
+            sub.classData.dept === dept &&
+            sub.classData.year === year &&
+            subSection === section
+          ) {
+            data = (data as any[]).filter((d: any) => d.slot_id !== sub.classData.slotId);
+            (data as any[]).push({
+              slot_id: sub.classData.slotId,
+              present_count: sub.attendance.filter((a: any) => a.status === 'present').length,
+              total_students: sub.attendance.length,
+            });
+            console.log(`[InchargeService] Trend: Merged OFFLINE slot ${sub.classData.slotId}`);
+          }
+        });
+      }
+    } catch (e) { console.error('[InchargeService] Trend merge error:', e); }
+
     // Normalization Map
     const slotMap: Record<string, string> = {
         '1': 'P1', 'p1': 'P1', '09:00': 'P1', '9:00': 'P1',
@@ -343,7 +438,7 @@ export const getClassTrends = async (
   } else if (range === 'month') {
     // Last 4 weeks (grouped by week)
     startDate.setDate(endDate.getDate() - 28);
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('attendance_sessions')
       .select('date, present_count, total_students')
       .eq('target_dept', dept)
@@ -356,6 +451,33 @@ export const getClassTrends = async (
        console.error('[InchargeService] Error fetching month trends:', error);
        return [];
      }
+
+    // MERGE OFFLINE PENDING DATA
+    data = data || [];
+    try {
+      const { getPendingSubmissions } = require('../../../services/offlineService');
+      const pending = await getPendingSubmissions();
+      if (pending && pending.length > 0) {
+        pending.forEach((sub: any) => {
+          const subDate = sub.submittedAt.split('T')[0];
+          const subSection = sub.classData.sectionLetter || sub.classData.section?.split('-').pop();
+          const pDate = new Date(subDate);
+          
+          if (
+            pDate >= startDate && pDate <= endDate &&
+            sub.classData.dept === dept &&
+            sub.classData.year === year &&
+            subSection === section
+          ) {
+            (data as any[]).push({
+              date: subDate,
+              present_count: sub.attendance.filter((a: any) => a.status === 'present').length,
+              total_students: sub.attendance.length,
+            });
+          }
+        });
+      }
+    } catch (e) { console.error('[InchargeService] Trend merge error:', e); }
 
      // Group by Week (Simple 4 buckets of 7 days)
      // Or just group by week number
@@ -384,7 +506,7 @@ export const getClassTrends = async (
   } else {
     // Default: Week (Daily for last 7 days)
     startDate.setDate(endDate.getDate() - 6);
-    const { data, error } = await supabase
+    let { data, error } = await supabase
         .from('attendance_sessions')
         .select('date, present_count, total_students')
         .eq('target_dept', dept)
@@ -395,6 +517,34 @@ export const getClassTrends = async (
         .order('date');
 
     if (error) return [];
+
+    // MERGE OFFLINE PENDING DATA
+    data = data || [];
+    try {
+      const { getPendingSubmissions } = require('../../../services/offlineService');
+      const pending = await getPendingSubmissions();
+      if (pending && pending.length > 0) {
+        pending.forEach((sub: any) => {
+          const subDate = sub.submittedAt.split('T')[0];
+          const subSection = sub.classData.sectionLetter || sub.classData.section?.split('-').pop();
+          const pDate = new Date(subDate);
+          
+          if (
+            pDate >= startDate && pDate <= endDate &&
+            sub.classData.dept === dept &&
+            sub.classData.year === year &&
+            subSection === section
+          ) {
+            (data as any[]).push({
+              date: subDate,
+              present_count: sub.attendance.filter((a: any) => a.status === 'present').length,
+              total_students: sub.attendance.length,
+            });
+            console.log(`[InchargeService] Trend: Merged OFFLINE slot for week: ${subDate}`);
+          }
+        });
+      }
+    } catch (e) { console.error('[InchargeService] Trend merge error:', e); }
 
     const dailyStats: Record<string, { present: number; total: number }> = {};
     data?.forEach(s => {

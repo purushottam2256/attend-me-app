@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { Alert } from 'react-native';
 import { 
   getStudentsForClass, 
   createAttendanceSession, 
@@ -100,14 +101,18 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
   const totalCount = students.length;
 
   // Fetch students for the class (with offline fallback)
-  const fetchStudents = useCallback(async (signal?: AbortSignal) => {
+  const fetchStudents = useCallback(async (signal?: AbortSignal, silent = false) => {
     if (!classData) {
-      setLoading(false);
+      if (!silent) setLoading(false);
       return;
     }
 
-    setLoading(true);
-    setError(null);
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
+
+    let isAwaitingPrompt = false;
 
     try {
       const { target_dept, target_year, target_section } = classData;
@@ -120,45 +125,81 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
       
       // Always TRY the online path first, regardless of cached isOnline state.
       // This prevents the false-offline bug caused by stale state.
-      try {
-        const fetchedStudents = await getStudentsForClass(
-          target_dept,
-          target_year,
-          target_section,
-          batchNumber
-        );
+      const attemptOnlineFetch = async (): Promise<boolean> => {
+        try {
+          log.info('[ONLINE] Fetching students for:', target_dept, target_year, target_section, 'batch:', batchNumber);
+          const fetchedStudents = await getStudentsForClass(
+            target_dept,
+            target_year,
+            target_section,
+            batchNumber
+          );
 
-        if (signal?.aborted) return;
+          if (signal?.aborted) return false;
+          log.info('[ONLINE] Students fetched successfully, count:', fetchedStudents.length);
 
-        const permissions = await getClassPermissions(fetchedStudents.map(s => s.id));
-        const permissionMap = new Map(permissions.map(p => [p.student_id, p.type]));
+          // getClassPermissions has its own try/catch, so it won't throw up
+          let permissions: { student_id: string; type: string }[] = [];
+          if (fetchedStudents.length > 0) {
+            log.info('[ONLINE] Fetching permissions for', fetchedStudents.length, 'students...');
+            permissions = await getClassPermissions(fetchedStudents.map(s => s.id));
+            log.info('[ONLINE] Permissions fetched, count:', permissions.length);
+          }
+          const permissionMap = new Map(permissions.map(p => [p.student_id, p.type]));
 
-        mappedStudents = fetchedStudents.map(s => {
-          const permissionType = permissionMap.get(s.id);
-          const initialStatus = permissionType 
-            ? permissionType as 'od' | 'leave'
-            : 'pending';
+          mappedStudents = fetchedStudents.map(s => {
+            const permissionType = permissionMap.get(s.id);
+            const initialStatus = permissionType 
+              ? permissionType as 'od' | 'leave'
+              : 'pending';
 
-          return {
-            id: s.id,
-            name: s.full_name,
-            rollNo: s.roll_no,
-            bleUUID: s.bluetooth_uuid || undefined,
-            status: initialStatus,
-            photoUrl: s.photo_url || undefined,
-            batch: s.batch,
-          };
-        });
-        
-        fetchedOnline = true;
+            return {
+              id: s.id,
+              name: s.full_name,
+              rollNo: s.roll_no,
+              bleUUID: s.bluetooth_uuid || undefined,
+              status: initialStatus,
+              photoUrl: s.photo_url || undefined,
+              batch: s.batch,
+              isLE: s.is_le,
+            };
+          });
+          
+          log.info('[ONLINE] SUCCESS - mapped', mappedStudents.length, 'students');
+          return true;
+        } catch (onlineErr: any) {
+          if (signal?.aborted) return false;
+          log.error('[ONLINE] Attempt FAILED:', onlineErr?.message || onlineErr);
+          return false;
+        }
+      };
+
+      // Attempt 1
+      fetchedOnline = await attemptOnlineFetch();
+      
+      // If first attempt failed and we think we're online, retry once after a short delay
+      if (!fetchedOnline && !signal?.aborted && isOnlineRef.current) {
+        log.info('[ONLINE] First attempt failed. Retrying in 2s...');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        if (!signal?.aborted) {
+          fetchedOnline = await attemptOnlineFetch();
+        }
+      }
+
+      if (fetchedOnline) {
         setIsOfflineMode(false);
-      } catch (onlineErr: any) {
-        if (signal?.aborted) return;
-        log.error('Online fetch failed:', onlineErr?.message || onlineErr);
       }
       
-      // Only fall back to cache if the online fetch genuinely failed
-      if (!fetchedOnline && mappedStudents.length === 0 && !signal?.aborted) {
+      // Fall back to cache ONLY if online fetch genuinely threw an error/failed.
+      // Do not fall back just because mappedStudents is empty (e.g., 0 enrolled students)
+      if (!fetchedOnline && !signal?.aborted) {
+        
+        // If this is a silent background ping and we already have offline data loaded, 
+        // silently abort rather than re-querying SQLite and causing UI frame drops.
+        if (silent && isOfflineMode) {
+            return;
+        }
+
         const cachedRoster = await findCachedRoster(
           classData.target_dept, 
           classData.target_year, 
@@ -166,28 +207,74 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
         );
         
         if (cachedRoster && (await isCacheValid())) {
-          log.info('Using cached roster');
-          mappedStudents = cachedRoster.students.map(s => ({
-            id: s.id,
-            name: s.name,
-            rollNo: s.rollNo,
-            bleUUID: s.bluetoothUUID || undefined,
-            status: 'pending' as const, 
-            photoUrl: undefined,
-            batch: s.batch,
-          }));
+          log.info('Found cached roster, prompting user...');
           
-          if (batchNumber) {
-            mappedStudents = mappedStudents.filter(s => {
-              if (s.batch !== undefined && s.batch !== null) {
-                return s.batch === batchNumber;
-              }
-              const rollNum = parseInt(s.rollNo.replace(/\D/g, '')) || 0;
-              return batchNumber === 1 ? rollNum % 2 === 1 : rollNum % 2 === 0;
-            });
+          const applyCache = async (roster: any) => {
+            let finalStudents: AttendanceStudent[] = roster.students.map((s: any) => ({
+              id: s.id,
+              name: s.name,
+              rollNo: s.rollNo,
+              bleUUID: s.bluetoothUUID || undefined,
+              status: 'pending' as const, 
+              photoUrl: undefined,
+              batch: s.batch,
+              isLE: s.isLE,
+            }));
+            
+            if (batchNumber) {
+              finalStudents = finalStudents.filter((s: any) => {
+                if (s.batch !== undefined && s.batch !== null) {
+                  return s.batch === batchNumber;
+                }
+                const rollNum = parseInt(s.rollNo.replace(/\\D/g, '')) || 0;
+                return batchNumber === 1 ? rollNum % 2 === 1 : rollNum % 2 === 0;
+              });
+            }
+
+            // Check for saved draft (offline cache for active session)
+            if (classData?.slot_id) {
+                const draft = await getDraftAttendance(classData.slot_id);
+                if (draft && draft.length > 0) {
+                    log.info('Loaded draft attendance for slot:', classData.slot_id);
+                    const draftMap = new Map(draft.map((d: any) => [d.id, d]));
+                    finalStudents = finalStudents.map(s => {
+                        const draftStudent = draftMap.get(s.id);
+                        if (draftStudent && draftStudent.status !== 'pending') {
+                            return {
+                                ...s,
+                                status: draftStudent.status,
+                                detectedAt: draftStudent.timestamp
+                            };
+                        }
+                        return s;
+                    });
+                }
+            }
+
+            setStudents(finalStudents);
+            setIsOfflineMode(true);
+            setLoading(false);
+          };
+
+          if (!silent) {
+            isAwaitingPrompt = true;
+            // Block and wait for user explicitly giving permission to downgrade to offline state
+            Alert.alert(
+              "Connection Failed",
+              "Live roster couldn't be fetched. Continue in Offline Mode using cached data?",
+              [
+                { text: "Retry Connection", onPress: () => {
+                    setLoading(true);
+                    fetchStudents(signal, false);
+                }},
+                { text: "Use Offline Mode", isPreferred: true, onPress: () => applyCache(cachedRoster) }
+              ]
+            );
+            return; // Exit fetch map and await User interaction to fire state resolvers
+          } else {
+             // For silent offline loop pings
+             return;
           }
-          
-          setIsOfflineMode(true);
         } else if (!isOnlineRef.current) {
           setError('Offline - No cached roster available');
           setIsOfflineMode(true);
@@ -197,40 +284,39 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
         }
       }
 
-        // Check for saved draft (offline cache for active session)
-        if (classData.slot_id) {
-            const draft = await getDraftAttendance(classData.slot_id);
-            if (draft && draft.length > 0) {
-                log.info('Loaded draft attendance for slot:', classData.slot_id);
-                // Merge draft statuses
-                const draftMap = new Map(draft.map((d: any) => [d.id, d]));
-                mappedStudents = mappedStudents.map(s => {
-                    const draftStudent = draftMap.get(s.id);
-                    if (draftStudent && draftStudent.status !== 'pending') {
-                        return {
-                            ...s,
-                            status: draftStudent.status,
-                            detectedAt: draftStudent.timestamp
-                        };
-                    }
-                    return s;
-                });
-            }
-        }
-
-        setStudents(mappedStudents);
+      // If mappedStudents were resolved successfully from ONLINE db, attach draft drafts if required
+      if (mappedStudents.length > 0) {
+          if (classData.slot_id) {
+              const draft = await getDraftAttendance(classData.slot_id);
+              if (draft && draft.length > 0) {
+                  const draftMap = new Map(draft.map((d: any) => [d.id, d]));
+                  mappedStudents = mappedStudents.map(s => {
+                      const draftStudent = draftMap.get(s.id);
+                      if (draftStudent && draftStudent.status !== 'pending') {
+                          return {
+                              ...s,
+                              status: draftStudent.status,
+                              detectedAt: draftStudent.timestamp
+                          };
+                      }
+                      return s;
+                  });
+              }
+          }
+          setStudents(mappedStudents);
+      }
 
     } catch (err) {
       if (!signal?.aborted) {
         log.error('Error fetching students:', err);
-        setError('Failed to load students');
+        if (!silent) setError('Failed to load students');
       }
     } finally {
-      if (!signal?.aborted) {
+      if (!signal?.aborted && !silent && !isAwaitingPrompt) {
         setLoading(false);
       }
     }
-  }, [classData, batchOverride]); // REMOVED isOnline from deps to prevent re-fetch race
+  }, [classData, batchOverride, isOfflineMode]); // Added isOfflineMode so the silent check captures it locally.
 
   // Fetch on mount and when class/batch changes
   useEffect(() => {
@@ -239,12 +325,23 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
     return () => controller.abort();
   }, [fetchStudents]);
 
-  // Reset offline mode when network comes back online
+  // Background polling to recover from false-offline states (NetInfo says true, but Supabase failed)
+  // Replaces the purely reactive isOnline/isOfflineMode listener that deadlocked on timeouts.
   useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
     if (isOnline && isOfflineMode) {
-      setIsOfflineMode(false);
+      log.info('Network nominally online but trapped offline. Starting 5s background recovery ping...');
+      interval = setInterval(() => {
+        const controller = new AbortController();
+        fetchStudents(controller.signal, true); // true = silent ping
+      }, 5000);
     }
-  }, [isOnline]);
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isOnline, isOfflineMode, fetchStudents]);
 
 
   // Update a single student's status

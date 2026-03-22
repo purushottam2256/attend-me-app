@@ -185,6 +185,7 @@ CREATE TABLE public.students (
     face_id_data TEXT, -- Encrypted face recognition data
     avatar_url TEXT, -- Student profile photo URL
     is_active BOOLEAN DEFAULT TRUE,
+    is_le BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT unique_roll_dept_section UNIQUE (roll_no, dept, section, year)
@@ -2958,6 +2959,42 @@ CREATE POLICY "management_read_holidays" ON public.holidays FOR SELECT USING (pu
 CREATE POLICY "management_read_students" ON public.students FOR SELECT USING (public.is_management_user());
 CREATE POLICY "management_read_notifications" ON public.notifications FOR SELECT USING (public.is_management_user());
 CREATE POLICY "management_read_faculty_logs" ON public.faculty_attendance_logs FOR SELECT USING (public.is_management_user());
+
+-- ============================================================================
+-- 33. STUDENT BATCH AUTO-ASSIGNMENT TRIGGER
+-- ============================================================================
+-- Automatically parses and assigns the Lab Batch (1 or 2) when a student is 
+-- created or updated with a NULL batch value, ensuring database consistency.
+
+CREATE OR REPLACE FUNCTION public.auto_assign_student_batch()
+RETURNS TRIGGER AS $$
+DECLARE
+    numeric_roll BIGINT;
+BEGIN
+    -- Only auto-assign if batch is NOT explicitly provided
+    IF NEW.batch IS NULL AND NEW.roll_no IS NOT NULL THEN
+        numeric_roll := COALESCE(
+                            NULLIF(regexp_replace(NEW.roll_no, '\D', '', 'g'), '')::BIGINT, 
+                            0
+                        );
+        
+        IF numeric_roll % 2 = 1 THEN
+            NEW.batch := 1;
+        ELSE
+            NEW.batch := 2;
+        END IF;
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS on_student_insert_batch ON public.students;
+
+CREATE TRIGGER on_student_insert_batch
+    BEFORE INSERT OR UPDATE ON public.students
+    FOR EACH ROW
+    EXECUTE FUNCTION public.auto_assign_student_batch();
 
 -- ============================================================================
 -- END OF SCHEMA

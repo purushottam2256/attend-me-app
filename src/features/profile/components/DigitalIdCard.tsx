@@ -10,12 +10,19 @@ import {
   Easing,
   Modal,
   TouchableWithoutFeedback,
+  ActivityIndicator,
+  Platform,
+  PermissionsAndroid,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import QRCode from 'react-native-qrcode-svg';
+import * as Location from 'expo-location';
+import { supabase } from '../../../config/supabase';
 
 import { useTheme } from "@contexts";
+import { getFallbackAvatar } from '../../../utils/avatars';
+import { LocationPermissionModal } from './LocationPermissionModal';
 import {
   scale,
   verticalScale,
@@ -47,32 +54,72 @@ export const DigitalIdCard: React.FC<DigitalIdCardProps> = ({
   const { isDark } = useTheme();
   const [imageError, setImageError] = React.useState(false);
   const [isQRModalVisible, setIsQRModalVisible] = React.useState(false);
+  const [isLocationModalVisible, setIsLocationModalVisible] = React.useState(false);
+  const [isUpdatingLocation, setIsUpdatingLocation] = React.useState(false);
 
-  // Shimmer animation
-  const shimmerAnim = useRef(new Animated.Value(0)).current;
+  const fetchAndSaveLocation = async () => {
+    try {
+      setIsUpdatingLocation(true);
+      
+      let hasPermission = false;
+      if (Platform.OS === 'android') {
+        hasPermission = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
+      } else {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        hasPermission = status === 'granted';
+      }
 
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.timing(shimmerAnim, {
-        toValue: 1,
-        duration: 3000,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      })
-    );
-    loop.start();
-    return () => loop.stop();
-  }, []);
+      if (!hasPermission) {
+        setIsLocationModalVisible(true);
+        setIsUpdatingLocation(false);
+        return;
+      }
 
-  // Reset error if url changes
-  useEffect(() => {
-    setImageError(false);
-  }, [user.photoUrl]);
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
 
-  const shimmerTranslate = shimmerAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-CARD_WIDTH, CARD_WIDTH * 2],
-  });
+      if (user.userId) {
+        await supabase
+          .from('profiles')
+          .update({
+            last_lat: location.coords.latitude,
+            last_lng: location.coords.longitude,
+            last_location_at: new Date().toISOString(),
+          })
+          .eq('id', user.userId);
+      }
+    } catch (error) {
+      console.error("Error fetching or saving location:", error);
+    } finally {
+      setIsUpdatingLocation(false);
+      setIsQRModalVisible(true);
+    }
+  };
+
+  const handleQRClick = async () => {
+    if (!user.userId) return;
+    await fetchAndSaveLocation();
+  };
+
+  const handleGrantLocation = async () => {
+    setIsLocationModalVisible(false);
+    if (Platform.OS === 'android') {
+      try {
+        const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
+        if (result === 'granted') {
+          await fetchAndSaveLocation();
+        }
+      } catch (e) {
+        console.error("Error requesting location permission:", e);
+      }
+    } else {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        await fetchAndSaveLocation();
+      }
+    }
+  };
 
   const formatRole = (role: string) => {
     switch (role?.toLowerCase()) {
@@ -254,7 +301,7 @@ export const DigitalIdCard: React.FC<DigitalIdCardProps> = ({
             {/* Real QR Code */}
             <TouchableOpacity 
               activeOpacity={0.8}
-              onPress={() => setIsQRModalVisible(true)}
+              onPress={handleQRClick}
               style={{
                 width: scale(46),
                 height: scale(46),
@@ -266,12 +313,16 @@ export const DigitalIdCard: React.FC<DigitalIdCardProps> = ({
                 borderColor: 'rgba(61,220,151,0.25)',
                 overflow: 'hidden',
               }}>
-              <QRCode 
-                value={user.userId || user.email || 'placeholder'} 
-                size={scale(40)} 
-                color="#000" 
-                backgroundColor="#FFF" 
-              />
+              {isUpdatingLocation || !user.userId ? (
+                <ActivityIndicator color="#000" size="small" />
+              ) : (
+                <QRCode 
+                  value={user.userId} 
+                  size={scale(40)} 
+                  color="#000" 
+                  backgroundColor="#FFF" 
+                />
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -290,6 +341,8 @@ export const DigitalIdCard: React.FC<DigitalIdCardProps> = ({
               <View style={[styles.modalContent, { backgroundColor: isDark ? '#1E293B' : '#FFFFFF' }]}>
                 <View style={styles.modalHeader}>
                   <Text style={[styles.modalTitle, { color: isDark ? '#FFF' : '#0F172A' }]}>Scan ID</Text>
+
+
                   <TouchableOpacity onPress={() => setIsQRModalVisible(false)} style={styles.closeButton}>
                     <Ionicons name="close" size={normalizeFont(24)} color={isDark ? '#94A3B8' : '#64748B'} />
                   </TouchableOpacity>
@@ -297,7 +350,7 @@ export const DigitalIdCard: React.FC<DigitalIdCardProps> = ({
                 
                 <View style={styles.largeQRContainer}>
                   <QRCode 
-                    value={user.userId || user.email || 'placeholder'} 
+                    value={user.userId || 'placeholder'} 
                     size={scale(200)} 
                     color="#000" 
                     backgroundColor="#FFF" 
@@ -311,6 +364,12 @@ export const DigitalIdCard: React.FC<DigitalIdCardProps> = ({
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
+      <LocationPermissionModal
+        visible={isLocationModalVisible}
+        onGrant={handleGrantLocation}
+        onDeny={() => setIsLocationModalVisible(false)}
+      />
     </View>
   );
 };
@@ -407,20 +466,6 @@ const styles = StyleSheet.create({
     height: CARD_WIDTH * 0.4,
     borderRadius: CARD_WIDTH * 0.2,
     backgroundColor: "rgba(255,255,255,0.03)",
-  },
-  // Shimmer
-  shimmerStrip: {
-    ...StyleSheet.absoluteFillObject,
-    overflow: "hidden",
-    zIndex: 3,
-    pointerEvents: "none",
-  },
-  shimmerBar: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    width: CARD_WIDTH * 0.5,
-    height: "100%",
   },
   content: {
     flex: 1,

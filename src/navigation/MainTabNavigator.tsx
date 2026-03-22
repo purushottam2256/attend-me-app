@@ -32,6 +32,7 @@ const SafeScanScreen = withSafeScreen(ScanScreen, 'ScanScreen');
 const SafeSwapScreen = withSafeScreen(SwapScreen, 'SwapScreen');
 const SafeHistoryScreen = withSafeScreen(HistoryScreen, 'HistoryScreen');
 const SafeMyClassHubScreen = withSafeScreen(MyClassHubScreen, 'MyClassHubScreen');
+const SafeProfileScreen = withSafeScreen(ProfileScreen, 'ProfileScreen');
 
 export type MainTabParamList = {
   Home: undefined;
@@ -317,7 +318,7 @@ export const MainTabNavigator: React.FC<MainTabNavigatorProps> = ({ userName, us
           tabBarButton: showMyClass ? () => null : undefined, 
         }}
       >
-        {() => <ProfileScreen userName={userName} onLogout={onLogout} />}
+        {() => <SafeProfileScreen userName={userName} onLogout={onLogout} />}
       </Tab.Screen>
     </Tab.Navigator>
   );

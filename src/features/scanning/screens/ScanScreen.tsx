@@ -49,6 +49,7 @@ import {
   StudentList,
   OverrideModal,
   ScanBlockedModal,
+  BluetoothRequiredModal,
   type BlockReason,
 } from "../components";
 import { ZenToast } from "@components/ZenToast";
@@ -78,6 +79,7 @@ import {
   getTodaySchedule,
   type TimetableSlot,
 } from "@services/dashboardService";
+import { getCachedTodaySchedule } from "@services/offlineService";
 import { supabase } from "@config/supabase";
 import { useTheme } from "@contexts";
 
@@ -214,25 +216,35 @@ export const ScanScreen: React.FC = () => {
 
         const schedule = await getTodaySchedule(user.id);
 
-        // Find the current live class
-        const now = new Date();
-        const currentTimeStr = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+        const findLiveClass = (scheduleList: TimetableSlot[]) => {
+          const now = new Date();
+          const currentTimeStr = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+          return scheduleList.find((slot) => {
+            return currentTimeStr >= slot.start_time && currentTimeStr <= slot.end_time;
+          });
+        };
 
-        const liveClass = schedule.find((slot) => {
-          return (
-            currentTimeStr >= slot.start_time && currentTimeStr <= slot.end_time
-          );
-        });
+        const liveClass = findLiveClass(schedule);
 
         if (liveClass) {
-
           setLiveClassData(liveClass);
         } else {
           setNoLiveClassError("No live class right now");
         }
       } catch (err) {
         console.error("[ScanScreen] Error fetching live class:", err);
-        setNoLiveClassError("Failed to load schedule");
+        const cached = await getCachedTodaySchedule();
+        if (cached && cached.length > 0) {
+          const now = new Date();
+          const currentTimeStr = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+          const liveClass = cached.find((slot: any) => {
+            return currentTimeStr >= slot.start_time && currentTimeStr <= slot.end_time;
+          });
+          if (liveClass) setLiveClassData(liveClass as any);
+          else setNoLiveClassError("No live class right now");
+        } else {
+          setNoLiveClassError("Failed to load schedule");
+        }
       } finally {
         setLoadingLiveClass(false);
       }
@@ -507,14 +519,15 @@ export const ScanScreen: React.FC = () => {
       }));
 
       // Rotation animation
-      Animated.loop(
+      const handshakeAnim = Animated.loop(
         Animated.timing(handshakeRotation, {
           toValue: 1,
           duration: 1200,
           easing: Easing.linear,
           useNativeDriver: true,
         }),
-      ).start();
+      );
+      handshakeAnim.start();
 
       // Progress animation
       Animated.timing(handshakeProgress, {
@@ -528,7 +541,7 @@ export const ScanScreen: React.FC = () => {
       const timeout = setTimeout(async () => {
         // 1. Check if break time (no live class)
         if (noLiveClassError || !classData) {
-          handshakeRotation.stopAnimation();
+          handshakeAnim.stop();
           setBlockReason("no_class");
           setShowBlocked(true);
           return;
@@ -537,9 +550,8 @@ export const ScanScreen: React.FC = () => {
         // 2. Check BLE/Bluetooth status using bleService directly
         const bleCheck = await isBLEReady();
 
-
         if (!bleCheck.ready) {
-          handshakeRotation.stopAnimation();
+          handshakeAnim.stop();
 
           let title = "Bluetooth Required";
           let message = "Please enable Bluetooth to continue.";
@@ -571,15 +583,13 @@ export const ScanScreen: React.FC = () => {
         }
 
         if (students.length === 0) {
-          handshakeRotation.stopAnimation();
-          handshakeRotation.stopAnimation();
+          handshakeAnim.stop();
           setToast({ visible: true, message: 'Could not load student roster. Please try again.', type: 'error' });
-          return;
           return;
         }
 
         // All checks passed - proceed to scanning
-        handshakeRotation.stopAnimation();
+        handshakeAnim.stop();
 
         const hideInstructions = await AsyncStorage.getItem(
           "@attend_me/hide_scan_instructions",
@@ -606,7 +616,10 @@ export const ScanScreen: React.FC = () => {
         ]).start();
       }, 2500);
 
-      return () => clearTimeout(timeout);
+      return () => {
+        clearTimeout(timeout);
+        handshakeAnim.stop();
+      };
     }
   }, [
     scanState,
@@ -691,6 +704,18 @@ export const ScanScreen: React.FC = () => {
       !noLiveClassError,
   });
 
+  // Listen for BLE Hook Errors mid-scan
+  useEffect(() => {
+    if (bleHookError && isScanning) {
+      setIsScanning(false);
+      setBleError({
+        title: "Bluetooth Error",
+        message: bleHookError,
+      });
+      setShowBleModal(true);
+    }
+  }, [bleHookError, isScanning]);
+
   // BLE scanning is controlled by the `enabled` prop in useBLE hook
   // No manual sync needed - just toggle isScanning state
 
@@ -755,20 +780,29 @@ export const ScanScreen: React.FC = () => {
         return;
       }
 
-      // Check if Bluetooth is definitely off (allow 'on', 'unknown', 'resetting')
       if (
         bleState === "off" ||
         bleState === "unauthorized" ||
         bleState === "unsupported"
       ) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        const msg =
-          bleState === "unauthorized"
-            ? "Please grant Bluetooth permission."
-            : bleState === "unsupported"
-              ? "Bluetooth is not supported."
-              : "Please turn on Bluetooth.";
-        setToast({ visible: true, message: msg, type: "error" });
+        
+        let title = "Bluetooth Required";
+        let message = "Please enable Bluetooth to continue scanning.";
+        
+        if (bleState === "off") {
+          title = "Bluetooth Off";
+          message = "Please turn on Bluetooth to scan for student devices.";
+        } else if (bleState === "unauthorized") {
+          title = "Permission Denied";
+          message = "Please grant Bluetooth permissions in your device settings.";
+        } else if (bleState === "unsupported") {
+          title = "Unsupported";
+          message = "Bluetooth is not supported on this device.";
+        }
+        
+        setBleError({ title, message });
+        setShowBleModal(true);
         return;
       }
 
@@ -1262,74 +1296,13 @@ export const ScanScreen: React.FC = () => {
       />
 
       {/* BLE Error Modal */}
-      <Modal
+      <BluetoothRequiredModal
         visible={showBleModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {}}
-      >
-        <BlurView intensity={90} tint="dark" style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View
-              style={[
-                styles.modalAvatarPlaceholder,
-                {
-                  backgroundColor: "rgba(245, 158, 11, 0.15)",
-                  marginBottom: verticalScale(24),
-                },
-              ]}
-            >
-              <Ionicons name="bluetooth" size={normalizeFont(32)} color="#F59E0B" />
-            </View>
-
-            <Text style={styles.modalName}>
-              {bleError.title || "Bluetooth Issue"}
-            </Text>
-            <Text
-              style={[
-                styles.modalRoll,
-                { textAlign: "center", marginBottom: verticalScale(24) },
-              ]}
-            >
-              {bleError.message || "Please enable Bluetooth."}
-            </Text>
-
-            <View style={{ flexDirection: "row", gap: scale(12), width: "100%" }}>
-              <TouchableOpacity
-                style={[
-                  styles.bulkButton,
-                  {
-                    backgroundColor: "transparent",
-                    borderColor: "rgba(255,255,255,0.2)",
-                    borderWidth: 1,
-                  },
-                ]}
-                onPress={() => navigation.navigate("Home" as never)}
-              >
-                <Text style={[styles.bulkText, { color: "#FFF" }]}>
-                  Go Back
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.bulkButton,
-                  {
-                    backgroundColor: "#3DDC97",
-                    borderColor: "#3DDC97",
-                    flex: 1.5,
-                  },
-                ]}
-                onPress={handleBleRetry}
-              >
-                <Text style={[styles.bulkText, { color: "#0D4A4A" }]}>
-                  Retry
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </BlurView>
-      </Modal>
+        errorTitle={bleError.title}
+        errorMessage={bleError.message}
+        onGoBack={() => navigation.navigate("Home" as never)}
+        onRetry={handleBleRetry}
+      />
 
       <ZenToast
         visible={toast.visible}

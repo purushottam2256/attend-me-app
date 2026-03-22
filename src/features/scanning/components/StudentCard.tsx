@@ -3,23 +3,30 @@
  * Refined swipeable cards with elegant status colors
  */
 
-import React, { useRef } from 'react';
+import React from 'react';
 import { 
   View, 
   Text, 
   StyleSheet, 
-  Animated, 
-  PanResponder,
   Image,
   TouchableOpacity,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import AnimatedRe, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  runOnJS,
+  interpolate,
+  Extrapolation,
+} from 'react-native-reanimated';
 import { useTheme } from '../../../contexts';
 import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive';
+import { isLateralEntry } from '../../../utils/studentUtils';
 
 const SWIPE_THRESHOLD = scale(50);
-
 
 type StudentStatus = 'pending' | 'present' | 'absent' | 'od' | 'leave';
 
@@ -28,6 +35,7 @@ interface StudentCardProps {
   rollNo: string;
   photoUrl?: string;
   status: StudentStatus;
+  isLE?: boolean;
   onStatusChange: (newStatus: StudentStatus) => void;
 }
 
@@ -36,69 +44,39 @@ export const StudentCard: React.FC<StudentCardProps> = ({
   rollNo,
   photoUrl,
   status,
+  isLE,
   onStatusChange,
 }) => {
   const { isDark } = useTheme();
-  const translateX = useRef(new Animated.Value(0)).current;
-  const isSwipingRef = useRef(false);
+  
+  const translateX = useSharedValue(0);
 
-  /* Helper to get initials */
-  const getInitials = (name: string) => {
-    return name
-      .split(' ')
-      .map(n => n[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2);
+  const handleStatusChange = (newStatus: StudentStatus) => {
+    onStatusChange(newStatus);
   };
 
-  /* PanResponder for Swipe Gestures */
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        // LOCK: Disable swipe for OD/Leave
-        if (status === 'od' || status === 'leave') return false;
+  const handleNotification = (type: Haptics.NotificationFeedbackType) => {
+    Haptics.notificationAsync(type);
+  };
 
-        const isHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 2;
-        return isHorizontal && Math.abs(gestureState.dx) > 12;
-      },
-      onPanResponderGrant: () => {
-        isSwipingRef.current = true;
-      },
-      onPanResponderMove: (_, gestureState) => {
-        if (isSwipingRef.current) {
-          translateX.setValue(gestureState.dx * 0.7);
-        }
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        isSwipingRef.current = false;
-        
-        if (gestureState.dx > SWIPE_THRESHOLD) {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          onStatusChange('present');
-        } else if (gestureState.dx < -SWIPE_THRESHOLD) {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-          onStatusChange('absent');
-        }
-        
-        Animated.spring(translateX, {
-          toValue: 0,
-          useNativeDriver: true,
-          friction: 8,
-          tension: 90,
-        }).start();
-      },
-      onPanResponderTerminate: () => {
-        isSwipingRef.current = false;
-        Animated.spring(translateX, {
-          toValue: 0,
-          useNativeDriver: true,
-          friction: 8,
-        }).start();
-      },
+  const panGesture = Gesture.Pan()
+    .enabled(status !== 'od' && status !== 'leave')
+    .activeOffsetX([-12, 12]) // Replaces the math threshold logic
+    .onUpdate((event) => {
+      translateX.value = event.translationX * 0.7;
     })
-  ).current;
+    .onEnd((event) => {
+      if (event.translationX > SWIPE_THRESHOLD) {
+        runOnJS(handleNotification)(Haptics.NotificationFeedbackType.Success);
+        runOnJS(handleStatusChange)('present');
+      } else if (event.translationX < -SWIPE_THRESHOLD) {
+        runOnJS(handleNotification)(Haptics.NotificationFeedbackType.Warning);
+        runOnJS(handleStatusChange)('absent');
+      }
+      
+      translateX.value = withSpring(0, { mass: 1, damping: 15, stiffness: 150 });
+    });
+
   const getStatusStyle = () => {
     switch (status) {
       case 'present':
@@ -138,51 +116,74 @@ export const StudentCard: React.FC<StudentCardProps> = ({
     rollNo: status === 'od' ? '#A855F7' : (isDark ? 'rgba(255,255,255,0.5)' : '#8E8E93'),
   };
 
-  // Background reveal
-  const leftBgOpacity = translateX.interpolate({
-    inputRange: [-SWIPE_THRESHOLD, 0],
-    outputRange: [1, 0],
-    extrapolate: 'clamp',
+  // Reanimated Background reveal styles
+  const leftBgAnimatedStyle = useAnimatedStyle(() => {
+    return {
+      opacity: interpolate(
+        translateX.value,
+        [-SWIPE_THRESHOLD, 0],
+        [1, 0],
+        Extrapolation.CLAMP
+      ),
+    };
   });
 
-  const rightBgOpacity = translateX.interpolate({
-    inputRange: [0, SWIPE_THRESHOLD],
-    outputRange: [0, 1],
-    extrapolate: 'clamp',
+  const rightBgAnimatedStyle = useAnimatedStyle(() => {
+    return {
+      opacity: interpolate(
+        translateX.value,
+        [0, SWIPE_THRESHOLD],
+        [0, 1],
+        Extrapolation.CLAMP
+      ),
+    };
+  });
+
+  const cardAnimatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ translateX: translateX.value }],
+    };
   });
 
 // Tap gestures removed to enforce swipe-only
   return (
     <View style={styles.container}>
       {/* Background reveal - Absent */}
-      <Animated.View style={[styles.bgReveal, styles.bgRevealLeft, { opacity: leftBgOpacity }]}>
+      <AnimatedRe.View style={[styles.bgReveal, styles.bgRevealLeft, leftBgAnimatedStyle]}>
         <Ionicons name="close" size={normalizeFont(18)} color="#FFFFFF" />
-      </Animated.View>
+      </AnimatedRe.View>
 
       {/* Background reveal - Present */}
-      <Animated.View style={[styles.bgReveal, styles.bgRevealRight, { opacity: rightBgOpacity }]}>
+      <AnimatedRe.View style={[styles.bgReveal, styles.bgRevealRight, rightBgAnimatedStyle]}>
         <Ionicons name="checkmark" size={normalizeFont(18)} color="#FFFFFF" />
-      </Animated.View>
+      </AnimatedRe.View>
 
       {/* Card */}
-      <Animated.View
-        {...panResponder.panHandlers}
-        style={[
-          styles.card,
-          { 
-            backgroundColor: statusStyle.bg,
-            borderColor: statusStyle.border,
-            transform: [{ translateX }],
-          },
-        ]}
-      >
-        <View style={styles.cardContent}>
+      <GestureDetector gesture={panGesture}>
+        <AnimatedRe.View
+          style={[
+            styles.card,
+            { 
+              backgroundColor: statusStyle.bg,
+              borderColor: statusStyle.border,
+            },
+            cardAnimatedStyle
+          ]}
+        >
+          <View style={styles.cardContent}>
           {/* Avatar Removed */}
 
           {/* Info */}
           <View style={styles.info}>
             <Text style={[styles.name, { color: textColors.name }]} numberOfLines={1}>{name}</Text>
-            <Text style={[styles.rollNo, { color: textColors.rollNo }]}>{rollNo}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={[styles.rollNo, { color: textColors.rollNo, marginBottom: 0 }]}>{rollNo}</Text>
+              {isLateralEntry(rollNo, isLE) && (
+                  <View style={{ backgroundColor: 'rgba(56, 189, 248, 0.2)', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 4 }}>
+                      <Text style={{ fontSize: 9, color: textColors.name === '#FFFFFF' ? '#38BDF8' : '#0284C7', fontWeight: 'bold' }}>LE</Text>
+                  </View>
+              )}
+            </View>
           </View>
 
           {/* Status Indicator / Tag */}
@@ -200,7 +201,8 @@ export const StudentCard: React.FC<StudentCardProps> = ({
             </View>
           )}
         </View>
-      </Animated.View>
+        </AnimatedRe.View>
+      </GestureDetector>
     </View>
   );
 };

@@ -1,10 +1,22 @@
 /**
  * RadarAnimation - Apple Zen Mode Premium Design
  * Minimal, elegant pulsing radar with refined animations
+ * Offloaded to Native UI Thread via Reanimated
  */
 
-import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Easing, Image } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, Text, StyleSheet, Image } from 'react-native';
+import Animated, { 
+  useSharedValue, 
+  useAnimatedStyle, 
+  withTiming, 
+  withRepeat, 
+  withSequence, 
+  withDelay, 
+  Easing,
+  interpolate,
+  cancelAnimation
+} from 'react-native-reanimated';
 import { useTheme } from '../../../contexts';
 import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive';
 
@@ -28,10 +40,12 @@ export const RadarAnimation: React.FC<RadarAnimationProps> = ({
   themeColor,
 }) => {
   const { isDark } = useTheme();
-  const pulse1 = useRef(new Animated.Value(0)).current;
-  const pulse2 = useRef(new Animated.Value(0)).current;
-  const pulse3 = useRef(new Animated.Value(0)).current;
-  const glowPulse = useRef(new Animated.Value(0)).current;
+
+  // Reanimated shared values
+  const pulse1 = useSharedValue(0);
+  const pulse2 = useSharedValue(0);
+  const pulse3 = useSharedValue(0);
+  const glowPulse = useSharedValue(0);
 
   // Mint Green accent (matches home page) or custom themeColor
   const effectiveAccent = themeColor || '#3DDC97';
@@ -50,60 +64,56 @@ export const RadarAnimation: React.FC<RadarAnimationProps> = ({
 
   useEffect(() => {
     if (!isScanning) {
-      pulse1.setValue(0);
-      pulse2.setValue(0);
-      pulse3.setValue(0);
+      cancelAnimation(pulse1);
+      cancelAnimation(pulse2);
+      cancelAnimation(pulse3);
+      cancelAnimation(glowPulse);
+      pulse1.value = 0;
+      pulse2.value = 0;
+      pulse3.value = 0;
+      glowPulse.value = 0;
       return;
     }
 
     const duration = isAutoPilot ? 3500 : 2500;
 
-    const createPulse = (anim: Animated.Value, delay: number) => {
-      return Animated.loop(
-        Animated.sequence([
-          Animated.delay(delay),
-          Animated.timing(anim, {
-            toValue: 1,
-            duration,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }),
-          Animated.timing(anim, {
-            toValue: 0,
-            duration: 0,
-            useNativeDriver: true,
-          }),
-        ])
+    const createPulse = (sharedVal: any, delay: number) => {
+      sharedVal.value = 0;
+      sharedVal.value = withDelay(
+        delay,
+        withRepeat(
+          withSequence(
+            withTiming(1, { duration, easing: Easing.out(Easing.cubic) }),
+            withTiming(0, { duration: 0 }) // Instant reset back to 0
+          ),
+          -1, // Infinite
+          false
+        )
       );
     };
 
     // Subtle glow animation
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(glowPulse, {
-          toValue: 1,
-          duration: 2000,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(glowPulse, {
-          toValue: 0,
-          duration: 2000,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
+    glowPulse.value = 0;
+    glowPulse.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 2000, easing: Easing.inOut(Easing.ease) }),
+        withTiming(0, { duration: 2000, easing: Easing.inOut(Easing.ease) })
+      ),
+      -1,
+      false
+    );
 
-    const animations = Animated.parallel([
-      createPulse(pulse1, 0),
-      createPulse(pulse2, duration / 3),
-      createPulse(pulse3, (duration * 2) / 3),
-    ]);
+    // Staggered pulsing rings
+    createPulse(pulse1, 0);
+    createPulse(pulse2, duration / 3);
+    createPulse(pulse3, (duration * 2) / 3);
 
-    animations.start();
-
-    return () => animations.stop();
+    return () => {
+      cancelAnimation(pulse1);
+      cancelAnimation(pulse2);
+      cancelAnimation(pulse3);
+      cancelAnimation(glowPulse);
+    };
   }, [isScanning, isAutoPilot, pulse1, pulse2, pulse3, glowPulse]);
 
   const size = propSize || 200; // Default size if not provided
@@ -117,7 +127,7 @@ export const RadarAnimation: React.FC<RadarAnimationProps> = ({
     container: {
       width: size,
       height: size,
-      alignItems: 'center' as const, // Fix type inference
+      alignItems: 'center' as const,
       justifyContent: 'center' as const,
     },
     glow: {
@@ -147,43 +157,45 @@ export const RadarAnimation: React.FC<RadarAnimationProps> = ({
     },
   };
 
-  const createRingStyle = (anim: Animated.Value, baseSize: number) => ({
-    width: baseSize,
-    height: baseSize,
-    borderRadius: baseSize / 2,
-    borderColor: colors.accent,
-    opacity: anim.interpolate({
-      inputRange: [0, 0.5, 1],
-      outputRange: [0.6, 0.25, 0],
-    }),
-    transform: [
-      {
-        scale: anim.interpolate({
-          inputRange: [0, 1],
-          outputRange: [0.5, 1.3],
-        }),
-      },
-    ],
+  const useRingStyle = (progress: any) => {
+    return useAnimatedStyle(() => {
+      return {
+        width: ringSize,
+        height: ringSize,
+        borderRadius: ringSize / 2,
+        borderColor: colors.accent,
+        opacity: interpolate(progress.value, [0, 0.5, 1], [0.6, 0.25, 0]),
+        transform: [
+          { scale: interpolate(progress.value, [0, 1], [0.5, 1.3]) }
+        ]
+      };
+    });
+  };
+
+  const ringStyle1 = useRingStyle(pulse1);
+  const ringStyle2 = useRingStyle(pulse2);
+  const ringStyle3 = useRingStyle(pulse3);
+
+  const glowAnimatedStyle = useAnimatedStyle(() => {
+    return {
+      opacity: interpolate(glowPulse.value, [0, 1], [0.15, 0.35])
+    };
   });
 
   const percentage = total > 0 ? Math.round((detected / total) * 100) : 0;
 
-  const glowOpacity = glowPulse.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.15, 0.35],
-  });
-
   return (
     <View style={dynamicStyles.container}>
       {/* Pulsing rings - more refined/subtle */}
-      <Animated.View style={[styles.ring, createRingStyle(pulse1, ringSize)]} />
-      <Animated.View style={[styles.ring, createRingStyle(pulse2, ringSize)]} />
-      <Animated.View style={[styles.ring, createRingStyle(pulse3, ringSize)]} />
+      <Animated.View style={[styles.ring, ringStyle1]} />
+      <Animated.View style={[styles.ring, ringStyle2]} />
+      <Animated.View style={[styles.ring, ringStyle3]} />
 
       {/* Subtle glow */}
       <Animated.View style={[
         dynamicStyles.glow, 
-        { backgroundColor: colors.accentSubtle, opacity: glowOpacity }
+        { backgroundColor: colors.accentSubtle },
+        glowAnimatedStyle
       ]} />
 
       {/* Center circle - Apple-style glass effect */}
@@ -253,7 +265,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: scale(12),
     paddingVertical: verticalScale(5),
     borderRadius: moderateScale(12),
-
   },
   statusDot: {
     width: scale(5),

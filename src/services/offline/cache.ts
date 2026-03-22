@@ -130,7 +130,8 @@ export async function getCachedRostersMap(): Promise<Record<string, CachedRoster
               name: s.name,
               rollNo: s.roll_no,
               bluetoothUUID: s.bluetooth_uuid,
-              batch: s.batch
+              batch: s.batch,
+              isLE: s.is_le === 1
            });
        }
     }
@@ -154,9 +155,9 @@ export async function cacheRoster(roster: CachedRoster): Promise<void> {
        const students = roster.students;
        for (let i = 0; i < students.length; i += 50) {
           const chunk = students.slice(i, i + 50);
-          const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?)').join(', ');
-          const values = chunk.flatMap(s => [s.id, roster.classId, s.name, s.rollNo, s.bluetoothUUID || null, s.batch || null]);
-          await db.runAsync(`INSERT INTO students (id, class_id, name, roll_no, bluetooth_uuid, batch) VALUES ${placeholders}`, values);
+          const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', ');
+          const values = chunk.flatMap(s => [s.id, roster.classId, s.name, s.rollNo, s.bluetoothUUID || null, s.batch || null, s.isLE ? 1 : 0]);
+          await db.runAsync(`INSERT INTO students (id, class_id, name, roll_no, bluetooth_uuid, batch, is_le) VALUES ${placeholders}`, values);
        }
     });
 
@@ -201,12 +202,12 @@ export async function cacheAllRosters(rosters: CachedRoster[] | Record<string, C
         const students = r.students;
         for (let i = 0; i < students.length; i += 50) {
           const chunk = students.slice(i, i + 50);
-          const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?)').join(', ');
+          const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', ');
           const values = chunk.flatMap(s => [
-            s.id, r.classId, s.name, s.rollNo, s.bluetoothUUID || null, s.batch || null
+            s.id, r.classId, s.name, s.rollNo, s.bluetoothUUID || null, s.batch || null, s.isLE ? 1 : 0
           ]);
           await db.runAsync(
-            `INSERT INTO students (id, class_id, name, roll_no, bluetooth_uuid, batch) VALUES ${placeholders}`,
+            `INSERT INTO students (id, class_id, name, roll_no, bluetooth_uuid, batch, is_le) VALUES ${placeholders}`,
             values
           );
         }
@@ -255,8 +256,9 @@ export async function getCachedRosterResponse(classId: string): Promise<CachedRo
             name: s.name,
             rollNo: s.roll_no,
             bluetoothUUID: s.bluetooth_uuid,
-            batch: s.batch
-         }))
+            batch: s.batch,
+            isLE: s.is_le === 1
+         })),
      };
   } catch (e) {
      return undefined;
