@@ -9,10 +9,18 @@ const log = createLogger('Database');
  * Prevents "Database Locked" and "Stop-The-World" Native thread GC panics
  * by ensuring only ONE connection to the SQLite database is ever opened
  * across the entire application (WAL mode concurrency).
+ * 
+ * Features:
+ * - Serialized write queue (prevents parallel writes / DB locking)
+ * - Auto-retry on transient DB failures
+ * - Single connection pool
  */
 class DatabaseConnection {
   private static instance: DatabaseConnection;
   private dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
+  
+  // Write queue: ensures only ONE write operation runs at a time
+  private writeQueue: Promise<any> = Promise.resolve();
 
   private constructor() {}
 
@@ -33,6 +41,62 @@ class DatabaseConnection {
       this.dbPromise = this.initDb();
     }
     return this.dbPromise;
+  }
+
+  /**
+   * Serialized write queue — ensures only ONE write operation runs at a time.
+   * Prevents "database is locked" errors from parallel writes.
+   * 
+   * Usage:
+   *   await dbPool.runSerialized(async (db) => {
+   *     await db.runAsync('INSERT INTO ...', [...]);
+   *   });
+   */
+  public async runSerialized<T>(fn: (db: SQLite.SQLiteDatabase) => Promise<T>): Promise<T> {
+    // Chain onto the write queue so operations execute one-by-one
+    const result = this.writeQueue.then(async () => {
+      const db = await this.getDb();
+      return fn(db);
+    });
+    
+    // Update the queue tail — catch errors so one failure doesn't stall the entire queue
+    this.writeQueue = result.catch((err) => {
+      log.error('Serialized write failed (queue continues):', err);
+    });
+    
+    return result;
+  }
+
+  /**
+   * Execute a DB operation with automatic retry on transient failures.
+   * Falls back gracefully instead of crashing.
+   */
+  public async withRetry<T>(
+    fn: (db: SQLite.SQLiteDatabase) => Promise<T>,
+    fallback: T,
+    maxRetries: number = 2
+  ): Promise<T> {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const db = await this.getDb();
+        return await fn(db);
+      } catch (error: any) {
+        const isLastAttempt = attempt === maxRetries;
+        log.error(`DB operation failed (attempt ${attempt + 1}/${maxRetries + 1}):`, error);
+        
+        if (isLastAttempt) {
+          return fallback;
+        }
+        
+        // If DB connection itself failed, reset and retry
+        if (error?.message?.includes('database') || error?.message?.includes('SQLite')) {
+          this.dbPromise = null;
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+    }
+    return fallback;
   }
 
   private async initDb(): Promise<SQLite.SQLiteDatabase> {
@@ -132,7 +196,10 @@ class DatabaseConnection {
            data TEXT,
            slot_id TEXT,
            date TEXT,
-           created_at TEXT
+           created_at TEXT,
+           status TEXT DEFAULT 'pending',
+           retry_count INTEGER DEFAULT 0,
+           last_error TEXT
         );
       `);
 

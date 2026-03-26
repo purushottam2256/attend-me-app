@@ -217,7 +217,7 @@ export const MyClassHubScreen: React.FC = () => {
         console.log('[MyClassHub] Offline mode - loading from cache');
         const cachedWatchlistData = await getCachedWatchlist();
         if (cachedWatchlistData && cachedWatchlistData.length > 0) {
-          setWatchlist(cachedWatchlistData as StudentAggregate[]);
+          setWatchlist(cachedWatchlistData as unknown as StudentAggregate[]);
           setIsOfflineData(true);
         }
         setLoading(false);
@@ -365,30 +365,6 @@ export const MyClassHubScreen: React.FC = () => {
     accent: '#34C759', // Apple Green
     border: isDark ? '#38383A' : '#E5E5EA',
   };
-
-  // Premium Loading Animation
-  const spinValue = React.useRef(new Animated.Value(0)).current;
-  const pulseValue = React.useRef(new Animated.Value(1)).current;
-
-  React.useEffect(() => {
-    if (loading) {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseValue, { toValue: 1.2, duration: 1000, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
-          Animated.timing(pulseValue, { toValue: 1, duration: 1000, useNativeDriver: true, easing: Easing.inOut(Easing.ease) })
-        ])
-      ).start();
-      
-      Animated.loop(
-        Animated.timing(spinValue, { toValue: 1, duration: 3000, useNativeDriver: true, easing: Easing.linear })
-      ).start();
-    }
-  }, [loading]);
-
-  const spin = spinValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg']
-  });
 
   if (loading) {
     return (
@@ -609,6 +585,17 @@ export const MyClassHubScreen: React.FC = () => {
               <Text style={[styles.actionSubtitle, { color: colors.textSecondary }]}>Manage Class Fees</Text>
             </TouchableOpacity>
 
+            <TouchableOpacity 
+              style={[styles.actionCard, { backgroundColor: colors.surface }]}
+              activeOpacity={0.7}
+              onPress={() => classInfo && (navigation as any).navigate('CumulativeAttendance', { classInfo })}
+            >
+              <View style={[styles.iconCircle, { backgroundColor: 'rgba(99, 102, 241, 0.1)' }]}>
+                <Ionicons name="bar-chart" size={normalizeFont(28)} color="#6366F1" />
+              </View>
+              <Text style={[styles.actionTitle, { color: colors.textPrimary }]}>Cumulative</Text>
+              <Text style={[styles.actionSubtitle, { color: colors.textSecondary }]}>Attendance Report</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -955,9 +942,9 @@ const styles = StyleSheet.create({
   filterPill: { paddingHorizontal: scale(12), paddingVertical: verticalScale(6), borderRadius: moderateScale(20) },
   filterText: { fontSize: normalizeFont(13), fontFamily: Fonts.family.semiBold, textTransform: 'capitalize' },
 
-  // Action Cards
-  actionGrid: { flexDirection: 'row', gap: scale(12) },
-  actionCard: { flex: 1, padding: scale(20), borderRadius: moderateScale(20), shadowColor: "#000", shadowOffset: {width: 0, height: verticalScale(4)}, shadowOpacity: 0.05, shadowRadius: moderateScale(12), elevation: 2 },
+  // Action Cards - 2x2 Grid
+  actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: scale(12) },
+  actionCard: { width: '47%', padding: scale(20), borderRadius: moderateScale(20), shadowColor: "#000", shadowOffset: {width: 0, height: verticalScale(4)}, shadowOpacity: 0.05, shadowRadius: moderateScale(12), elevation: 2 },
   iconCircle: { width: scale(44), height: scale(44), borderRadius: moderateScale(22), alignItems: 'center', justifyContent: 'center', marginBottom: verticalScale(12) },
   actionTitle: { fontSize: normalizeFont(16), fontFamily: Fonts.family.semiBold, marginBottom: verticalScale(2) },
   actionSubtitle: { fontSize: normalizeFont(13) },

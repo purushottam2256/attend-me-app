@@ -4,11 +4,12 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, StyleSheet, Text, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, Text, TouchableOpacity, AppState as RNAppState } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { navigationRef } from './navigationRef';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as SplashScreenExpo from 'expo-splash-screen';
+import { supabase } from '../config/supabase';
 import {
   useFonts,
   Inter_400Regular,
@@ -28,6 +29,7 @@ import {
   PermissionScreen,
   ManagePermissionsScreen,
   ProjectFeesScreen,
+  CumulativeAttendanceScreen,
 } from '@features/incharge/screens';
 import { ManualEntryScreen } from '@features/scanning/screens/ManualEntryScreen';
 import { BeaconDoctorScreen } from '@features/diagnostics/screens/BeaconDoctorScreen';
@@ -46,6 +48,7 @@ const SafeSwapHistory = withSafeScreen(SwapHistoryScreen, 'SwapHistoryScreen');
 const SafePermission = withSafeScreen(PermissionScreen, 'PermissionScreen');
 const SafeManagePerms = withSafeScreen(ManagePermissionsScreen, 'ManagePermissionsScreen');
 const SafeProjectFees = withSafeScreen(ProjectFeesScreen, 'ProjectFeesScreen');
+const SafeCumulativeAttendance = withSafeScreen(CumulativeAttendanceScreen, 'CumulativeAttendanceScreen');
 // Keep native splash screen visible
 SplashScreenExpo.preventAutoHideAsync();
 
@@ -62,6 +65,7 @@ export type RootStackParamList = {
   Permission: undefined;
   ManagePermissions: undefined;
   ProjectFees: undefined;
+  CumulativeAttendance: { classInfo: any };
   ManualEntry: { 
     classData: {
       id?: string;
@@ -137,6 +141,19 @@ export const RootNavigator: React.FC = () => {
       setAppState('SPLASH');
     }
   }, [fontsLoaded]);
+
+  // #2 Audit: Refresh Supabase session when app returns from background
+  // Prevents silent 401 errors after extended background periods
+  useEffect(() => {
+    const subscription = RNAppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        supabase.auth.startAutoRefresh();
+      } else {
+        supabase.auth.stopAutoRefresh();
+      }
+    });
+    return () => subscription.remove();
+  }, []);
 
   const onLayoutRootView = useCallback(async () => {
     if (fontsLoaded) {
@@ -252,6 +269,11 @@ export const RootNavigator: React.FC = () => {
           <RootStack.Screen 
             name="ProjectFees" 
             component={SafeProjectFees}
+            options={{ headerShown: false, animation: 'slide_from_right' }}
+          />
+          <RootStack.Screen 
+            name="CumulativeAttendance" 
+            component={SafeCumulativeAttendance}
             options={{ headerShown: false, animation: 'slide_from_right' }}
           />
           <RootStack.Screen 

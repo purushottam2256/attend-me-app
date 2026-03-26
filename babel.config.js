@@ -26,6 +26,8 @@ module.exports = function(api) {
         },
       ],
       'react-native-reanimated/plugin',
+      // #4 Audit: Strip console.* calls in production builds for performance + security
+      ...(process.env.NODE_ENV === 'production' ? ['transform-remove-console'] : []),
     ],
   };
 };

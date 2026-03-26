@@ -150,45 +150,36 @@ export const useBLE = ({
   
   // === FIX: Stable handleDeviceDetected that reads from refs ===
   const handleDeviceDetected = useCallback((device: DetectedStudent) => {
-    const uuid = normalizeUUID(device.uuid);
-    
-    console.log('[useBLE] Device callback:', { 
-      uuid: uuid.substring(0, 12) + '...', 
-      name: device.deviceName, 
-      rssi: device.rssi 
-    });
-    
-    // Check if already detected
-    if (detectedUUIDsRef.current.has(uuid)) {
-      console.log('[useBLE] Already detected, skipping');
-      return;
-    }
-    
-    // Check if matches a student
-    const mapSize = uuidToStudentMap.current.size;
-    console.log('[useBLE] Looking up in map with', mapSize, 'entries');
-    
-    const studentId = uuidToStudentMap.current.get(uuid);
-    
-    if (studentId) {
-      console.log('[useBLE] ✅ MATCH FOUND! UUID → StudentID:', studentId);
+    try {
+      const uuid = normalizeUUID(device.uuid);
       
-      // Mark as detected
-      detectedUUIDsRef.current.add(uuid);
-      setDetectedCount(prev => prev + 1);
-      setLastDetected(uuid);
-      
-      // Haptic feedback
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      
-      // Notify parent (use ref for latest callback)
-      onStudentDetectedRef.current(studentId);
-    } else {
-      console.log('[useBLE] ❌ No match for UUID:', uuid.substring(0, 12) + '...');
-      const availableUUIDs = Array.from(uuidToStudentMap.current.keys()).slice(0, 3);
-      if (availableUUIDs.length > 0) {
-        console.log('[useBLE] Available UUIDs (first 3):', availableUUIDs.map(u => u.substring(0, 12) + '...'));
+      // Check if already detected
+      if (detectedUUIDsRef.current.has(uuid)) {
+        return;
       }
+      
+      // Check if matches a student
+      const studentId = uuidToStudentMap.current.get(uuid);
+      
+      if (studentId) {
+        // Mark as detected
+        detectedUUIDsRef.current.add(uuid);
+        if (isMounted.current) {
+          setDetectedCount(prev => prev + 1);
+          setLastDetected(uuid);
+        }
+        
+        // Haptic feedback — wrapped in try-catch (can fail on some devices)
+        try {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } catch {}
+        
+        // Notify parent (use ref for latest callback)
+        onStudentDetectedRef.current(studentId);
+      }
+    } catch (err) {
+      // CRITICAL: Never let a BLE callback crash the app
+      console.warn('[useBLE] handleDeviceDetected error (swallowed):', err);
     }
   }, []); // === FIX: Empty deps — uses refs internally, never gets stale ===
   
@@ -264,18 +255,21 @@ export const useBLE = ({
   
   // Stop scanning
   const stopBLEScan = useCallback(() => {
-    console.log('[useBLE] Stopping scan...');
-    
-    if (stopScanRef.current) {
-      stopScanRef.current();
-      stopScanRef.current = null;
+    try {
+      if (stopScanRef.current) {
+        stopScanRef.current();
+        stopScanRef.current = null;
+      }
+      
+      // Also call global stop to be sure
+      stopScanning();
+      
+      if (isMounted.current) {
+        setIsScanning(false);
+      }
+    } catch (err) {
+      console.warn('[useBLE] stopBLEScan error (swallowed):', err);
     }
-    
-    // Also call global stop to be sure
-    stopScanning();
-    
-    setIsScanning(false);
-    console.log('[useBLE] Scan stopped');
   }, []);
 
   // Reset detected UUIDs (used by rescan to re-detect all beacons)
@@ -290,42 +284,50 @@ export const useBLE = ({
   useEffect(() => {
     if (!enabled) return;
     
-    initBLE();
-    let previousState: BLEState = 'unknown';
-    
-    // Get initial state
-    getBLEState().then(state => {
-      console.log('[useBLE] Initial BLE state:', state);
-      setBLEState(state);
-      previousState = state;
-    });
-    
-    // Subscribe to state changes with auto-resume
-    const unsubscribe = onBLEStateChange((state) => {
-      console.log('[useBLE] BLE state changed:', previousState, '→', state);
-      setBLEState(state);
+    let unsubscribe: (() => void) | undefined;
+
+    try {
+      initBLE();
+      let previousState: BLEState = 'unknown';
       
-      // Auto-resume: if Bluetooth was off and is now on, restart scan
-      if (previousState === 'off' && state === 'on') {
-        console.log('[useBLE] 🔄 Bluetooth enabled! Auto-resuming scan...');
-        setError(null);
-        
-        setTimeout(() => {
-          if (!isScanningActive()) {
-            console.log('[useBLE] Starting scan after BLE enabled...');
-            startBLEScan().catch(err => {
-              console.error('[useBLE] Auto-resume failed:', err);
-            });
+      // Get initial state
+      getBLEState().then(state => {
+        if (isMounted.current) {
+          setBLEState(state);
+          previousState = state;
+        }
+      }).catch(() => {});
+      
+      // Subscribe to state changes with auto-resume
+      unsubscribe = onBLEStateChange((state) => {
+        try {
+          if (!isMounted.current) return;
+          setBLEState(state);
+          
+          // Auto-resume: if Bluetooth was off and is now on, restart scan
+          if (previousState === 'off' && state === 'on') {
+            setError(null);
+            setTimeout(() => {
+              if (!isScanningActive() && isMounted.current) {
+                startBLEScan().catch(() => {});
+              }
+            }, 500);
           }
-        }, 500);
-      }
-      
-      previousState = state;
-    });
+          
+          previousState = state;
+        } catch (err) {
+          console.warn('[useBLE] BLE state change handler error (swallowed):', err);
+        }
+      });
+    } catch (err) {
+      console.warn('[useBLE] BLE init error (swallowed):', err);
+    }
     
     return () => {
-      unsubscribe();
-      stopScanning();
+      try {
+        if (unsubscribe) unsubscribe();
+        stopScanning();
+      } catch {}
     };
   }, [enabled, startBLEScan]); // Safe now because startBLEScan is stable
   
@@ -341,21 +343,23 @@ export const useBLE = ({
   useEffect(() => {
     if (enabled) {
       const requestAllPermissions = async () => {
-        // 1. Request BLE permissions directly (Location removed per user request)
-        const granted = await requestBLEPermissions();
-        setPermissionsGranted(granted);
-        if (granted) {
-          console.log('[useBLE] All permissions granted - starting scan');
-          startBLEScan();
-        } else {
-          console.log('[useBLE] BLE Permissions denied');
-          setError('Bluetooth permissions denied');
+        try {
+          const granted = await requestBLEPermissions();
+          if (!isMounted.current) return;
+          setPermissionsGranted(granted);
+          if (granted) {
+            startBLEScan().catch(() => {});
+          } else {
+            setError('Bluetooth permissions denied');
+          }
+        } catch (err) {
+          console.warn('[useBLE] Permission request error (swallowed):', err);
+          if (isMounted.current) setError('Failed to request permissions');
         }
       };
       
       requestAllPermissions();
     } else {
-      console.log('[useBLE] Enabled=false - stopping scan');
       stopBLEScan();
     }
   }, [enabled, startBLEScan, stopBLEScan]); // === FIX: Safe deps — all stable ===

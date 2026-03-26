@@ -9,7 +9,7 @@
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
-import { InteractionManager } from 'react-native';
+import { InteractionManager, AppState, AppStateStatus } from 'react-native';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import {
   cacheAllRosters,
@@ -58,6 +58,10 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
   const [lastError, setLastError] = useState<string | null>(null);
   const [lastSyncAge, setLastSyncAge] = useState('Never synced');
   const bgSyncRegistered = useRef(false);
+  
+  // MUTEX: Prevents multiple sync processes from running simultaneously
+  // Using ref (not state) because it must be checked synchronously
+  const syncMutex = useRef(false);
 
   // Refresh sync status
   const refreshStatus = useCallback(async () => {
@@ -102,13 +106,19 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
   // Auto-sync rosters on launch (once per session)
 
 
-  // Sync rosters (Smart Sync)
+  // Sync rosters (Smart Sync) — protected by mutex
   const syncRosters = useCallback(async () => {
     if (!isOnline) {
       setLastError('No internet connection');
       return { success: false, count: 0 };
     }
 
+    // MUTEX GUARD: Only one sync at a time
+    if (syncMutex.current) {
+      log.info('Sync already in progress (mutex locked), skipping');
+      return { success: false, count: 0 };
+    }
+    syncMutex.current = true;
     setIsSyncing(true);
     setLastError(null);
 
@@ -133,6 +143,7 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
       setLastError(message);
       return { success: false, count: 0 };
     } finally {
+      syncMutex.current = false;
       setIsSyncing(false);
     }
   }, [isOnline, refreshStatus]);
@@ -150,12 +161,18 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
     }
   }, [isOnline, hasInitialSynced, syncRosters]);
 
-  // Sync pending submissions
+  // Sync pending submissions — protected by mutex
   const syncPending = useCallback(async () => {
     if (!isOnline) {
       return { synced: 0, failed: 0 };
     }
 
+    // MUTEX GUARD: Only one sync at a time
+    if (syncMutex.current) {
+      log.info('Sync already in progress (mutex locked), skipping pending sync');
+      return { synced: 0, failed: 0 };
+    }
+    syncMutex.current = true;
     setIsSyncing(true);
     setLastError(null);
 
@@ -168,6 +185,7 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
       setLastError(message);
       return { synced: 0, failed: 0 };
     } finally {
+      syncMutex.current = false;
       setIsSyncing(false);
     }
   }, [isOnline, refreshStatus]);
@@ -184,6 +202,31 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
 
     return () => clearInterval(interval);
   }, [syncStatus.pendingCount, refreshStatus]);
+
+  // ─── AppState: Lightweight sync on foreground resume ─────────────
+  useEffect(() => {
+    const handleAppState = (nextState: AppStateStatus) => {
+      if (nextState === 'active' && isOnline) {
+        // Lightweight check — just refresh status, don't run full roster sync
+        InteractionManager.runAfterInteractions(async () => {
+          try {
+            await refreshStatus();
+            // If there are pending submissions, sync them
+            const count = await getPendingCount();
+            if (count > 0 && !syncMutex.current) {
+              log.info('Foreground resume: syncing', count, 'pending submissions');
+              await syncPending();
+            }
+          } catch (error) {
+            log.error('Foreground sync check failed:', error);
+          }
+        });
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppState);
+    return () => subscription.remove();
+  }, [isOnline, refreshStatus, syncPending]);
 
   return (
     <OfflineSyncContext.Provider

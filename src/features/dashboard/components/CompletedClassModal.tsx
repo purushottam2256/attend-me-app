@@ -234,8 +234,8 @@ export const CompletedClassModal = ({
                 </View>
 
                 <View style={styles.detailRow}>
-                  <View style={[styles.detailIcon, { backgroundColor: isDark ? 'rgba(59, 130, 246, 0.1)' : '#DBEAFE' }]}>
-                    <Ionicons name="time" size={18} color="#3B82F6" />
+                  <View style={[styles.detailIcon, { backgroundColor: isDark ? 'rgba(52, 199, 89, 0.1)' : '#DCFCE7' }]}>
+                    <Ionicons name="time" size={18} color="#34C759" />
                   </View>
                   <View style={styles.detailTextContainer}>
                     <Text style={[styles.detailLabel, isDark && { color: '#94A3B8' }]}>Time</Text>
@@ -247,8 +247,8 @@ export const CompletedClassModal = ({
 
                 {classData?.room && (
                   <View style={styles.detailRow}>
-                    <View style={[styles.detailIcon, { backgroundColor: isDark ? 'rgba(168, 85, 247, 0.1)' : '#F3E8FF' }]}>
-                      <Ionicons name="location" size={18} color="#A855F7" />
+                    <View style={[styles.detailIcon, { backgroundColor: isDark ? 'rgba(52, 199, 89, 0.1)' : '#DCFCE7' }]}>
+                      <Ionicons name="location" size={18} color="#34C759" />
                     </View>
                     <View style={styles.detailTextContainer}>
                       <Text style={[styles.detailLabel, isDark && { color: '#94A3B8' }]}>Room</Text>

@@ -14,7 +14,25 @@ import { NotificationProvider } from '@contexts/NotificationContext';
 import { OfflineBanner } from '@components/ui/OfflineBanner';
 import ErrorBoundary from '@components/ErrorBoundary';
 
+import { QueryClient } from '@tanstack/react-query';
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
+import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 2,
+      staleTime: 1000 * 60 * 5, // 5 minutes fresh by default
+      gcTime: 1000 * 60 * 60 * 24, // 24 hours garbage collection (was cacheTime)
+    },
+  },
+});
+
+const asyncStoragePersister = createAsyncStoragePersister({
+  storage: AsyncStorage,
+});
+
 import * as SQLite from 'expo-sqlite';
 import { initOffline } from '@services/offline';
 import createLogger from '@utils/logger';
@@ -76,25 +94,27 @@ function App() {
   }
 
   return (
-    <ErrorBoundary>
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <SafeAreaProvider>
-          <ThemeProvider>
-            <AuthProvider>
-              <NetworkProvider>
-                <OfflineSyncProvider>
-                  <NotificationProvider>
-                    <StatusBar style="auto" />
-                    <OfflineBanner />
-                    <RootNavigator />
-                  </NotificationProvider>
-                </OfflineSyncProvider>
-              </NetworkProvider>
-            </AuthProvider>
-          </ThemeProvider>
-        </SafeAreaProvider>
-      </GestureHandlerRootView>
-    </ErrorBoundary>
+    <PersistQueryClientProvider client={queryClient} persistOptions={{ persister: asyncStoragePersister }}>
+      <ErrorBoundary>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <SafeAreaProvider>
+            <ThemeProvider>
+              <AuthProvider>
+                <NetworkProvider>
+                  <OfflineSyncProvider>
+                    <NotificationProvider>
+                      <StatusBar style="auto" />
+                      <OfflineBanner />
+                      <RootNavigator />
+                    </NotificationProvider>
+                  </OfflineSyncProvider>
+                </NetworkProvider>
+              </AuthProvider>
+            </ThemeProvider>
+          </SafeAreaProvider>
+        </GestureHandlerRootView>
+      </ErrorBoundary>
+    </PersistQueryClientProvider>
   );
 }
 

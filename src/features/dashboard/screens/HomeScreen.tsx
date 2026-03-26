@@ -50,18 +50,20 @@ import {
   isCacheStale 
 } from '../../../services/offlineService';
 import { SlideToStart, BellIcon, ZenToast } from '../../../components';
+import { Skeleton } from '../../../components/ui/Skeleton';
 import { CircularClockHero, CircularClockHeroRef } from '../../../components/CircularClockHero';
 import { NoClassesHero } from '../../../components/NoClassesHero';
 import { useConnectionStatus } from '../../../hooks';
 import { useOfflineSync } from '../../../contexts/OfflineSyncContext';
 import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive';
 import { OffHoursScanModal, type OffHoursReason } from '../components';
+import { ScheduleCard } from '../components/ScheduleCard';
 import { safeJsonParse } from '../../../utils/safeUtils';
 
 
 type HeroState = 'CLASS_NOW' | 'BREAK' | 'DONE' | 'LOADING' | 'NO_CLASSES' | 'HOLIDAY' | 'LEAVE';
 
-interface ScheduleSlot extends TimetableSlot {
+export interface ScheduleSlot extends TimetableSlot {
   status: 'live' | 'completed' | 'incomplete' | 'upcoming';
   isSwap?: boolean;
   isSubstitute?: boolean;
@@ -504,7 +506,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
     } catch (error: any) {
       console.error('Error loading schedule:', error);
       
-      // Senior Dev: Graceful degradation fallback
+      // dev: Graceful degradation fallback
       try {
          const cachedSchedule = await getCachedTodaySchedule();
          if (cachedSchedule && cachedSchedule.length > 0) {
@@ -746,9 +748,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
     switch (heroState) {
       case 'LOADING':
         return (
-          <View style={[styles.heroCard, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' }]}>
-            <PulsingDots size="large" color="#0D9488" />
-            <Text style={[styles.loadingText, { color: isDark ? '#94A3B8' : '#64748B' }]}>Loading schedule...</Text>
+          <View style={[styles.heroCard, { backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', padding: 0, overflow: 'hidden' }]}>
+            <Skeleton width="100%" height={180} borderRadius={24} />
           </View>
         );
 
@@ -913,129 +914,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
     }
   };
 
-  const renderScheduleItem = (slot: ScheduleSlot, index: number) => {
-    // Status colors
-    const colors = {
-      live: '#10B981',        // Emerald green - active
-      completed: '#9CA3AF',   // Gray - done
-      incomplete: '#F59E0B',  // Light orange - warning
-      upcoming: '#3B82F6',    // Blue - future
-      swapped: '#F59E0B',     // Amber - swapped
-      substitute: '#A78BFA',  // Light purple - substitute
-    };
-
-    const statusLabels = {
-      live: 'Live',
-      completed: 'Completed',
-      incomplete: 'Incomplete',
-      upcoming: 'Upcoming',
-    };
-
-    // Check if it's a lab class
-    const isLab = slot.subject?.name?.toLowerCase().includes('lab');
-    // Get batch info from slot (default to 'full' if not specified)
-    const batchLabel = slot.batch === 1 ? 'Batch 1' : slot.batch === 2 ? 'Batch 2' : 'Full Class';
-
-    return (
-      <TouchableOpacity
-        key={slot.id || index}
-        style={[
-          styles.scheduleCard,
-          { backgroundColor: isDark ? '#082020' : '#FFFFFF' },
-        ]}
-        onPress={() => handleScheduleCardPress(slot)}
-        activeOpacity={0.8}
-      >
-        {/* Left gradient accent */}
-        <LinearGradient
-          colors={[`${colors[slot.status]}40`, `${colors[slot.status]}00`]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={styles.cardGradient}
-        />
-        
-        {/* Left colored bar */}
-        <View style={[styles.cardAccent, { backgroundColor: colors[slot.status] }]} />
-
-        <View style={styles.cardContent}>
-          {/* Time Column */}
-          <View style={styles.scheduleTime}>
-            <Text style={[styles.timeStart, { color: isDark ? '#FFFFFF' : '#0F172A' }]}>
-              {formatTime(slot.start_time)}
-            </Text>
-            <Text style={[styles.timeEnd, { color: isDark ? 'rgba(255,255,255,0.6)' : '#64748B' }]}>
-              {formatTime(slot.end_time)}
-            </Text>
-          </View>
-
-          {/* Info Column */}
-          <View style={styles.scheduleInfo}>
-            <Text style={[styles.scheduleSubject, { color: isDark ? '#FFFFFF' : '#0F172A' }]} numberOfLines={1}>
-              {slot.subject?.name || 'N/A'}
-            </Text>
-            
-            <View style={styles.scheduleMetaRow}>
-              <Text style={[styles.scheduleSectionText, { color: isDark ? 'rgba(255,255,255,0.6)' : '#64748B' }]}>
-                {slot.target_dept} • Year {slot.target_year} • {slot.target_section}{slot.batch ? ` • B${slot.batch}` : ''}{slot.room ? ` • ${slot.room}` : ''}
-              </Text>
-            </View>
-            
-            {/* Tags Row */}
-            <View style={styles.tagsRow}>
-              {/* Status Badge */}
-              <View style={[styles.statusBadge, { backgroundColor: `${colors[slot.status]}20` }]}>
-                {slot.status === 'live' && <View style={[styles.liveDotSmall, { backgroundColor: colors[slot.status] }]} />}
-                <Text style={[styles.statusBadgeText, { color: colors[slot.status] }]}>
-                  {statusLabels[slot.status]}
-                </Text>
-              </View>
-              
-              {/* Swap Badge */}
-              {slot.isSwap && (
-                <View style={[styles.swapBadge, { backgroundColor: 'rgba(245, 158, 11, 0.2)' }]}>
-                  <Ionicons name="swap-horizontal" size={11} color="#F59E0B" />
-                  <Text style={styles.swapBadgeText}>SWAP</Text>
-                </View>
-              )}
-              
-              {/* Substitute Badge */}
-              {slot.isSubstitute && (
-                <View style={[styles.subBadge, { backgroundColor: 'rgba(167, 139, 250, 0.2)' }]}>
-                  <Ionicons name="person-outline" size={11} color="#A78BFA" />
-                  <Text style={styles.subBadgeText}>SUB</Text>
-                </View>
-              )}
-              
-              {/* Lab Batch Tag */}
-              {isLab && (
-                <View style={[styles.batchTag, { backgroundColor: isDark ? 'rgba(245, 158, 11, 0.2)' : 'rgba(245, 158, 11, 0.15)' }]}>
-                  <Ionicons name="people-outline" size={11} color="#F59E0B" />
-                  <Text style={styles.batchTagText}>{batchLabel}</Text>
-                </View>
-              )}
-              
-              {/* Period Count Badge for Merged Classes */}
-              {slot.periodCount && slot.periodCount > 1 && (
-                <View style={[styles.periodBadge, { backgroundColor: isDark ? 'rgba(13, 74, 74, 0.3)' : 'rgba(13, 74, 74, 0.15)' }]}>
-                  <Ionicons name="copy-outline" size={11} color="#0D4A4A" />
-                  <Text style={styles.periodBadgeText}>{slot.periodCount}x</Text>
-                </View>
-              )}
-            </View>
-          </View>
-
-          {/* Action Icon */}
-          <View style={styles.scheduleAction}>
-            <Ionicons 
-              name={slot.status === 'completed' ? 'checkmark-circle' : slot.status === 'live' ? 'chevron-forward' : 'time-outline'} 
-              size={22} 
-              color={colors[slot.status]} 
-            />
-          </View>
-        </View>
-      </TouchableOpacity>
-    );
-  };
 
   return (
     <View style={styles.container}>
@@ -1082,7 +960,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
             <View style={[styles.scheduleContainer, { 
               marginTop: 8 
             }]}>
-              {schedule.map((slot, index) => renderScheduleItem(slot, index))}
+              {schedule.map((slot, index) => (
+                <ScheduleCard key={slot.id || index} slot={slot} onPress={handleScheduleCardPress} />
+              ))}
             </View>
           </View>
         )}

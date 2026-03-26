@@ -55,7 +55,7 @@ import {
 import { ZenToast } from "@components/ZenToast";
 import { PulsingDots } from "@components/ui/LoadingAnimation";
 import { scale, verticalScale, moderateScale, normalizeFont } from "@utils/responsive";
-import { safeJsonParse } from "@utils/safeUtils";
+import { safeExecute, safeJsonParse } from "../../../utils/safeUtils";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -879,64 +879,66 @@ export const ScanScreen: React.FC = () => {
   }, []);
 
   const handleConfirmSubmit = useCallback(() => {
-    setShowHeadcount(false);
-    setScanState("SUBMITTING");
+    safeExecute(async () => {
+      setShowHeadcount(false);
+      setScanState("SUBMITTING");
 
-    // Save attendance to Supabase and redirect
-    const saveAndRedirect = async () => {
-      try {
-        // Senior Dev Fix: Timeout race to prevent infinite hanging on bad connections
-        const submitPromise = submitToSupabase();
-        const timeoutPromise = new Promise<{ success: boolean; error: any }>((_, reject) => {
-          setTimeout(() => reject(new Error('Network timeout: Submission took too long')), 10000);
-        });
+      // Save attendance to Supabase and redirect
+      const saveAndRedirect = async () => {
+        try {
+          // dev Fix: Timeout race to prevent infinite hanging on bad connections
+          const submitPromise = submitToSupabase();
+          const timeoutPromise = new Promise<{ success: boolean; error: any }>((_, reject) => {
+            setTimeout(() => reject(new Error('Network timeout: Submission took too long')), 10000);
+          });
 
-        const { success, error } = await Promise.race([submitPromise, timeoutPromise]).catch(err => ({ success: false, error: err }));
+          const { success, error } = await Promise.race([submitPromise, timeoutPromise]).catch(err => ({ success: false, error: err }));
 
-        if (!success) {
-          console.error("Supabase submit failed:", error);
-          setToast({ visible: true, message: "Network unstable. Saved locally to sync later.", type: "warning" });
-        }
-
-        // Always save locally for override check and offline queueing
-        const now = new Date();
-        const takenAt = now.toLocaleTimeString("en-US", {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-        
-        await AsyncStorage.setItem(
-          `@attend_me/attendance_${classKey}`,
-          JSON.stringify({
-            takenAt,
-            presentCount,
-            absentCount,
-            date: now.toISOString(),
-            status: success ? 'synced' : 'pending_sync' // Track sync status
-          }),
-        );
-
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        Vibration.vibrate(400); // Strict vibration feedback
-
-        // Redirect immediately
-        safeNavigate(() => {
-          if (navigation.canGoBack()) {
-            navigation.goBack();
-          } else {
-            navigation.navigate("Home");
+          if (!success) {
+            console.error("Supabase submit failed:", error);
+            setToast({ visible: true, message: "Network unstable. Saved locally to sync later.", type: "warning" });
           }
-        });
-      } catch (err) {
-        console.error("Critical failure during attendance save:", err);
-        setToast({ visible: true, message: "A critical error occurred. Please try again or submit manually.", type: "error" });
-        setScanState("SUCCESS"); // Unblock UI
-      }
-    };
 
-    // Small delay for UI feedback
-    setTimeout(saveAndRedirect, 500);
-  }, [navigation, classKey, presentCount, absentCount, submitToSupabase]);
+          // Always save locally for override check and offline queueing
+          const now = new Date();
+          const takenAt = now.toLocaleTimeString("en-US", {
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+          
+          await AsyncStorage.setItem(
+            `@attend_me/attendance_${classKey}`,
+            JSON.stringify({
+              takenAt,
+              presentCount,
+              absentCount,
+              date: now.toISOString(),
+              status: success ? 'synced' : 'pending_sync' // Track sync status
+            }),
+          );
+
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          Vibration.vibrate(400); // Strict vibration feedback
+
+          // Redirect immediately
+          safeNavigate(() => {
+            if (navigation.canGoBack()) {
+              navigation.goBack();
+            } else {
+              navigation.navigate("Home");
+            }
+          });
+        } catch (err) {
+          console.error("Critical failure during attendance save:", err);
+          setToast({ visible: true, message: "A critical error occurred. Please try again or submit manually.", type: "error" });
+          setScanState("SUCCESS"); // Unblock UI
+        }
+      };
+
+      // Small delay for UI feedback
+      setTimeout(saveAndRedirect, 500);
+    }, undefined, { context: 'ScanScreen.handleConfirmSubmit' });
+  }, [navigation, classKey, presentCount, absentCount, submitToSupabase, safeNavigate]);
 
   const handleCancel = useCallback(() => {
     safeNavigate(() => {
@@ -949,15 +951,17 @@ export const ScanScreen: React.FC = () => {
   }, [navigation, safeNavigate]);
 
   const handleOverrideConfirm = useCallback(async () => {
-    // Clear the stored attendance record
-    await AsyncStorage.removeItem(`@attend_me/attendance_${classKey}`);
-    if (!isMountedRef.current) return;
-    setPreviousAttendance(null);
-    setShowOverride(false);
-    // Reset animation values for fresh start
-    handshakeProgress.setValue(0);
-    handshakeRotation.setValue(0);
-    // The useEffect will now trigger and start handshake animation
+    await safeExecute(async () => {
+      // Clear the stored attendance record
+      await AsyncStorage.removeItem(`@attend_me/attendance_${classKey}`);
+      if (!isMountedRef.current) return;
+      setPreviousAttendance(null);
+      setShowOverride(false);
+      // Reset animation values for fresh start
+      handshakeProgress.setValue(0);
+      handshakeRotation.setValue(0);
+      // The useEffect will now trigger and start handshake animation
+    }, undefined, { context: 'ScanScreen.handleOverrideConfirm' });
   }, [classKey, handshakeProgress, handshakeRotation]);
 
   const handleOverrideCancel = useCallback(() => {

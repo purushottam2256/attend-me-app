@@ -238,9 +238,62 @@ export const NotificationScreen = ({ navigation }: any) => {
     setToast({ visible: true, message, type });
   };
 
-  const loadData = useCallback(async (pageNum = 0) => {
+  // ─── SQLITE-FIRST LOADING ARCHITECTURE ───────────────────────────────
+  // 1. Mount: Load from SQLite instantly (no skeleton on revisit)
+  // 2. Background: Sync from Supabase → SQLite → update state silently
+  // 3. Pull-to-refresh: Only shows RefreshControl spinner, not skeleton
+  // ─────────────────────────────────────────────────────────────────────
+
+  // Ref to avoid stale closure issues with refreshing state
+  const isLoadingRef = useRef(false);
+
+  /**
+   * Load cached data from SQLite — instant, no network needed.
+   * Shows skeleton ONLY on first-ever load (when SQLite is empty).
+   */
+  const loadFromCache = useCallback(async () => {
     try {
-      if (pageNum === 0 && !refreshing) setInitialLoading(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const [cachedNotifs, cachedSubs, cachedSwaps] = await Promise.all([
+        NotificationRepository.getNotifications(user.id, 50),
+        NotificationRepository.getSubstitutions(user.id),
+        NotificationRepository.getSwaps(user.id),
+      ]);
+
+      // Get hidden IDs from local cache
+      let hiddenSet = new Set<string>();
+      try {
+        const localDeleted = await NotificationRepository.getDeletedIds();
+        localDeleted.forEach(id => hiddenSet.add(id));
+      } catch { /* ignore */ }
+
+      const filteredNotifs = (cachedNotifs ?? []).filter((n: any) => !hiddenSet.has(n.id));
+      const filteredSubs = (cachedSubs ?? []).filter((s: any) => !hiddenSet.has(s.id) && !s.is_hidden);
+      const filteredSwaps = (cachedSwaps ?? []).filter((s: any) => !hiddenSet.has(s.id) && !s.is_hidden);
+
+      setNotifications(filteredNotifs);
+      setRequests(filteredSubs);
+      setSwaps(filteredSwaps);
+      // Leaves are only from Supabase (no local cache), will be filled by background sync
+
+      return { hasData: filteredNotifs.length > 0 || filteredSubs.length > 0 || filteredSwaps.length > 0 };
+    } catch (e) {
+      console.log('Cache load error (non-fatal):', e);
+      return { hasData: false };
+    }
+  }, []);
+
+  /**
+   * Background sync from Supabase → merges into state WITHOUT full-screen reload.
+   * No skeleton, no loading state change — just silently updates data.
+   */
+  const syncFromServer = useCallback(async (pageNum = 0) => {
+    if (isLoadingRef.current) return;
+    isLoadingRef.current = true;
+
+    try {
       if (pageNum > 0) setLoadingMore(true);
 
       const { data: { user } } = await supabase.auth.getUser();
@@ -249,15 +302,11 @@ export const NotificationScreen = ({ navigation }: any) => {
       // 1. Get Deleted/Hidden IDs (Merge Supabase + Local Cache)
       let hiddenSet = new Set<string>();
       
-      // Local cache (Sync)
       try {
           const localDeleted = await NotificationRepository.getDeletedIds();
           localDeleted.forEach(id => hiddenSet.add(id));
-      } catch (err) {
-          console.log('Local deleted cache error', err);
-      }
+      } catch { /* ignore */ }
 
-      // Remote cache (Async)
       if (pageNum === 0) {
         try {
           const { data: hiddenData } = await supabase
@@ -268,9 +317,7 @@ export const NotificationScreen = ({ navigation }: any) => {
           if (hiddenData) {
             hiddenData.forEach((item: any) => hiddenSet.add(item.item_id));
           }
-        } catch (err) {
-          console.log('Hidden items error', err);
-        }
+        } catch { /* ignore */ }
       }
 
       // 2. Fetch All Items (Paginated)
@@ -292,13 +339,13 @@ export const NotificationScreen = ({ navigation }: any) => {
               .range(from, to),
           supabase
               .from('leaves')
-              .select('*')
+              .select('id, user_id, reason, start_date, end_date, leave_type, status, admin_comment, created_at')
               .eq('user_id', user.id)
               .order('created_at', { ascending: false })
               .range(from, to),
           supabase
               .from('notifications')
-              .select('*')
+              .select('id, user_id, type, title, body, data, priority, is_read, created_at')
               .eq('user_id', user.id)
               .order('created_at', { ascending: false })
               .range(from, to)
@@ -312,7 +359,6 @@ export const NotificationScreen = ({ navigation }: any) => {
       // 3. Enrich Swaps Efficiently
       let enrichedSwaps = allSwaps;
       if (allSwaps.length > 0) {
-          // Use a Set to avoid redundant condition strings
           const conditionSet = new Set<string>();
           allSwaps.forEach(s => {
               if (s.faculty_a_id && s.slot_a_id) conditionSet.add(`and(faculty_id.eq.${s.faculty_a_id},slot_id.eq.${s.slot_a_id})`);
@@ -348,14 +394,22 @@ export const NotificationScreen = ({ navigation }: any) => {
       setHasMore(hasMoreData);
 
       if (pageNum === 0) {
+          // MERGE instead of REPLACE — prevents list from jumping
           setRequests(allSubs);
           setSwaps(enrichedSwaps);
           setLeaves(leaveData);
           setNotifications(notifData);
+
+          // Cache to SQLite in background (fire-and-forget)
+          try {
+            NotificationRepository.upsertNotifications(notifData);
+            NotificationRepository.upsertSubstitutions(allSubs);
+            NotificationRepository.upsertSwaps(enrichedSwaps);
+          } catch { /* cache errors are non-fatal */ }
+
           await refreshNotifications();
       } else {
           setRequests(prev => {
-             // Avoid appending duplicates
              const newIds = new Set(prev.map(p => p.id));
              const toAdd = allSubs.filter(r => !newIds.has(r.id));
              return [...prev, ...toAdd];
@@ -378,34 +432,65 @@ export const NotificationScreen = ({ navigation }: any) => {
       }
 
     } catch (e: any) {
-      console.log('Notification fetch error:', e);
-      showToast('Failed to load notifications. Please check your network connection.', 'error');
+      console.log('Notification sync error (non-fatal):', e);
+      // Only show toast if we have NO cached data to show
+      if (notifications.length === 0 && requests.length === 0) {
+        showToast('Failed to load notifications. Please check your network connection.', 'error');
+      }
     } finally {
       setInitialLoading(false);
       setLoadingMore(false);
       setRefreshing(false);
+      isLoadingRef.current = false;
     }
-  }, [refreshing, page, refreshNotifications]);
+  }, [refreshNotifications]);
 
+  // ─── MOUNT: Load from cache first, then sync from server ────────────
   useEffect(() => {
-    const timer = setTimeout(() => {
-      loadData(0);
-    }, 100);
-    return () => clearTimeout(timer);
-  }, [loadData]);
+    let isMounted = true;
+
+    const init = async () => {
+      // Step 1: Instant load from SQLite (shows cached data immediately)
+      const cacheResult = await loadFromCache();
+      
+      // Step 2: Only show skeleton if cache was completely empty (first-ever load)
+      if (!cacheResult?.hasData && isMounted) {
+        setInitialLoading(true);
+      } else if (isMounted) {
+        setInitialLoading(false);
+      }
+
+      // Step 3: Background sync from Supabase (no skeleton, no flicker)
+      if (isMounted) {
+        await syncFromServer(0);
+      }
+    };
+
+    const timer = setTimeout(init, 100);
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, []); // Run only on mount
 
   const onRefresh = async () => {
     setRefreshing(true);
     setPage(0);
     setHasMore(true);
-    await loadData(0);
+    await syncFromServer(0);
   };
 
+  const loadMoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const onLoadMore = () => {
-      if (!hasMore || loadingMore || refreshing) return;
-      const nextPage = page + 1;
-      setPage(nextPage);
-      loadData(nextPage);
+      if (!hasMore || loadingMore || refreshing || isLoadingRef.current) return;
+      // Debounce to prevent rapid fires
+      if (loadMoreTimerRef.current) clearTimeout(loadMoreTimerRef.current);
+      loadMoreTimerRef.current = setTimeout(() => {
+        const nextPage = page + 1;
+        setPage(nextPage);
+        syncFromServer(nextPage);
+      }, 300);
   };
 
   const toggleSelection = useCallback((id: string) => {
@@ -568,9 +653,9 @@ export const NotificationScreen = ({ navigation }: any) => {
       console.error("Action failed:", error);
       processedIds.delete(id);
       showToast("Action failed", "error");
-      loadData();
+      syncFromServer();
     } finally {
-      loadData();
+      syncFromServer();
     }
   }, [respondToSubstituteRequest]);
 
@@ -876,7 +961,7 @@ export const NotificationScreen = ({ navigation }: any) => {
     });
 
     return result;
-  }, [notifications, requests, swaps, activeFilter]);
+  }, [notifications, requests, swaps, leaves, activeFilter]);
 
   const counts = useMemo(() => {
     const unreadNotifs = notifications.filter(n => !n.is_read).length;
@@ -1278,7 +1363,8 @@ const ListItem = React.memo(({ item, isSelected, selectionMode, isDark, onToggle
           }
           showsVerticalScrollIndicator={false}
           onEndReached={onLoadMore}
-          onEndReachedThreshold={0.5}
+          onEndReachedThreshold={0.3}
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           ListFooterComponent={
               loadingMore ? (
                   <View style={{ paddingVertical: 20 }}>

@@ -166,7 +166,7 @@ export const HistoryScreen: React.FC = () => {
 
       const { data, error } = await supabase
         .from('holidays')
-        .select('*')
+        .select('id, title, name, description, date, type, is_national')
         .gte('date', startOfMonth)
         .lte('date', endOfMonth);
 

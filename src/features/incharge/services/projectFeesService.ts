@@ -1,4 +1,5 @@
 import { supabase } from '../../../config/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface ProjectFee {
   id: string;
@@ -37,12 +38,13 @@ export const projectFeesService = {
 
       if (error) throw error;
       
-      // Filter out completed ones if you only want active ones, but for now we'll return all
-      // and let the UI decide. The schema maps 'project_fees' as an object or array depending on the fk.
-      // Since project_fees is the parent, it should be an object.
-      return (data || []).map((row: any) => row.project_fees as ProjectFee);
+      const result = (data || []).map((row: any) => row.project_fees as ProjectFee);
+      await AsyncStorage.setItem(`@attend_me/project_fees_class_${dept}_${year}_${section}`, JSON.stringify(result));
+      return result;
     } catch (error) {
       console.error('Error fetching project fees for class:', error);
+      const cached = await AsyncStorage.getItem(`@attend_me/project_fees_class_${dept}_${year}_${section}`);
+      if (cached) return JSON.parse(cached);
       throw error;
     }
   },
@@ -81,7 +83,7 @@ export const projectFeesService = {
       // 3. Merge them
       const recordsMap = new Map((records || []).map(r => [r.student_id, r]));
 
-      return students.map(s => {
+      const result = students.map(s => {
         const record = recordsMap.get(s.id);
         return {
           student_id: s.id,
@@ -91,8 +93,12 @@ export const projectFeesService = {
           reason: record?.reason || '',
         };
       });
+      await AsyncStorage.setItem(`@attend_me/project_fee_students_${feeId}_${dept}_${year}_${section}`, JSON.stringify(result));
+      return result;
     } catch (error) {
       console.error('Error fetching project fee students:', error);
+      const cached = await AsyncStorage.getItem(`@attend_me/project_fee_students_${feeId}_${dept}_${year}_${section}`);
+      if (cached) return JSON.parse(cached);
       throw error;
     }
   },

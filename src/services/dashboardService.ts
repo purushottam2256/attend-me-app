@@ -281,7 +281,7 @@ export async function getSwapsAndSubstitutions(
     // Fetch swaps where faculty is involved
     const { data: swaps } = await supabase
       .from('class_swaps')
-      .select('*')
+      .select('id, faculty_a_id, faculty_b_id, faculty_a_slot_id, faculty_b_slot_id, slot_a_id, slot_b_id, date, status, requested_at, faculty_a_name, faculty_b_name')
       .eq('date', date)
       .eq('status', 'accepted')
       .or(`faculty_a_id.eq.${facultyId},faculty_b_id.eq.${facultyId}`);
@@ -374,7 +374,7 @@ export async function getHolidayInfo(
   try {
     const { data, error } = await supabase
       .from('holidays')
-      .select('*')
+      .select('id, title, name, description, date, type, is_national')
       .eq('date', date);
 
     if (error || !data || data.length === 0) return null;

@@ -9,6 +9,8 @@ import createLogger from '../../../utils/logger';
 
 const log = createLogger('LeaveHistory');
 
+import { useLeaveHistory } from '../../../hooks/queries/useLeaveHistory';
+
 interface LeaveRequest {
   id: string;
   reason: string;
@@ -20,38 +22,9 @@ interface LeaveRequest {
   created_at: string;
 }
 
-export function LeaveHistory() { // TODO: Add props if needed
+export function LeaveHistory() {
   const colors = useColors();
-  const [requests, setRequests] = useState<LeaveRequest[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-
-  const fetchHistory = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data, error } = await supabase
-        .from('leaves') // Ensure this table exists in your Supabase schema
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setRequests(data || []);
-    } catch (err) {
-      log.error('Failed to fetch leave history:', err);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchHistory();
-    
-    // Auto-refresh on mount
-  }, []);
+  const { data: requests = [], isLoading, isRefetching, refetch } = useLeaveHistory();
 
   // Real-time Subscription for Status Updates
   useEffect(() => {
@@ -60,17 +33,13 @@ export function LeaveHistory() { // TODO: Add props if needed
       .on(
         'postgres_changes',
         {
-          event: 'UPDATE',
+          event: '*',
           schema: 'public',
           table: 'leaves',
-          // filter: `user_id=eq.${supabase.auth.user()?.id}`, // RLS typically handles this, but client-side filter good too
         },
         (payload) => {
           log.info('Leave update received:', payload);
-          // Update local state immediately
-          setRequests(prev => prev.map(r => 
-            r.id === payload.new.id ? { ...r, ...payload.new } : r
-          ));
+          refetch(); // Let query smoothly invalidate and refetch
         }
       )
       .subscribe();
@@ -78,7 +47,7 @@ export function LeaveHistory() { // TODO: Add props if needed
       return () => {
         subscription.unsubscribe();
       };
-  }, []);
+  }, [refetch]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -117,7 +86,7 @@ export function LeaveHistory() { // TODO: Add props if needed
     </View>
   );
 
-  if (loading) return <ActivityIndicator style={{ marginTop: 20 }} />;
+  if (isLoading && requests.length === 0) return <ActivityIndicator style={{ marginTop: 20 }} />;
   if (requests.length === 0) return (
      <View style={styles.emptyContainer}>
         <Text style={{ color: colors.textSecondary }}>No leave requests found.</Text>
@@ -129,7 +98,7 @@ export function LeaveHistory() { // TODO: Add props if needed
       data={requests}
       renderItem={renderItem}
       keyExtractor={items => items.id}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchHistory(); }} />}
+      refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} />}
       contentContainerStyle={styles.list}
     />
   );

@@ -9,17 +9,19 @@ import createLogger from '../utils/logger';
 
 const log = createLogger('AuthService');
 
-// Types
 export interface UserProfile {
   id: string;
   email: string;
   full_name: string;
   role: 'faculty' | 'class_incharge' | 'lab_incharge' | 'management' | 'hod' | 'principal' | 'developer';
   dept: string | null;
+  department?: string | null;
   faculty_id: string | null;
   mobile: string | null;
   is_biometric_enabled: boolean;
   is_on_leave: boolean;
+  avatar_url?: string | null;
+  notifications_enabled?: boolean;
 }
 
 export interface AuthState {
@@ -59,7 +61,7 @@ export async function signIn(email: string, password: string): Promise<{ user: U
     // Fetch user profile (must exist - created by HOD)
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('*')
+      .select('id, email, full_name, role, dept, faculty_id, mobile, is_biometric_enabled, is_on_leave')
       .eq('id', authData.user.id)
       .single();
 

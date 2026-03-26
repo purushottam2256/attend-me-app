@@ -7,7 +7,7 @@
  * - Local notifications for reminders and scheduled alerts
  * - Multiple Android channels for different notification types
  * 
- * @author Senior Dev Implementation
+ * @author dev Implementation
  */
 
 import * as Notifications from 'expo-notifications';

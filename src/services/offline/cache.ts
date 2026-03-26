@@ -335,7 +335,7 @@ export async function getCachedTodaySchedule(): Promise<CachedScheduleSlot[] | n
   }
 }
 
-export async function cacheTimetable(timetable: any[]): Promise<void> {
+export async function cacheTimetable(timetable: CachedScheduleSlot[]): Promise<void> {
   try {
     await storage.setItem(
       STORAGE_KEYS.TIMETABLE,
@@ -348,7 +348,7 @@ export async function cacheTimetable(timetable: any[]): Promise<void> {
   }
 }
 
-export async function getCachedTimetable(): Promise<any[] | null> {
+export async function getCachedTimetable(): Promise<CachedScheduleSlot[] | null> {
   try {
     const cached = await storage.getItem(STORAGE_KEYS.TIMETABLE);
     return cached ? JSON.parse(cached) : null;
@@ -389,7 +389,7 @@ export async function getCachedProfile(): Promise<CachedProfile | null> {
 // HISTORY CACHING (Use with caution due to size)
 // ============================================================================
 
-export async function cacheHistory(history: any[]): Promise<void> {
+export async function cacheHistory(history: Record<string, unknown>[]): Promise<void> {
   // Fire-and-forget: don't block UI for caching
   InteractionManager.runAfterInteractions(async () => {
     try {
@@ -401,7 +401,7 @@ export async function cacheHistory(history: any[]): Promise<void> {
   });
 }
 
-export async function getCachedHistory(): Promise<any[] | null> {
+export async function getCachedHistory(): Promise<Record<string, unknown>[] | null> {
     try {
         const cached = await storage.getItem(STORAGE_KEYS.HISTORY);
         return cached ? JSON.parse(cached) : null;
@@ -414,7 +414,7 @@ export async function getCachedHistory(): Promise<any[] | null> {
 // WATCHLIST CACHING
 // ============================================================================
 
-export async function cacheWatchlist(watchlist: any[]): Promise<void> {
+export async function cacheWatchlist(watchlist: Record<string, unknown>[]): Promise<void> {
   // Fire-and-forget: don't block UI for caching
   InteractionManager.runAfterInteractions(async () => {
     try {
@@ -426,7 +426,7 @@ export async function cacheWatchlist(watchlist: any[]): Promise<void> {
   });
 }
 
-export async function getCachedWatchlist(): Promise<any[] | null> {
+export async function getCachedWatchlist(): Promise<Record<string, unknown>[] | null> {
   try {
     const cached = await storage.getItem(STORAGE_KEYS.WATCHLIST);
     return cached ? JSON.parse(cached) : null;
@@ -440,7 +440,7 @@ export async function getCachedWatchlist(): Promise<any[] | null> {
 // ATTENDANCE DRAFTS (OFFLINE CACHING)
 // ============================================================================
 
-export async function saveDraftAttendance(slotId: string | number, students: any[]): Promise<void> {
+export async function saveDraftAttendance(slotId: string | number, students: Record<string, unknown>[]): Promise<void> {
   // Fire-and-forget: drafts must NEVER block touch events
   InteractionManager.runAfterInteractions(async () => {
     try {
@@ -462,7 +462,7 @@ export async function saveDraftAttendance(slotId: string | number, students: any
   });
 }
 
-export async function getDraftAttendance(slotId: string | number): Promise<any[] | null> {
+export async function getDraftAttendance(slotId: string | number): Promise<Record<string, unknown>[] | null> {
   try {
     const today = new Date().toISOString().split('T')[0];
     const key = `${STORAGE_KEYS.ATTENDANCE_DRAFTS_PREFIX}${slotId}_${today}`;

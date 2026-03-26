@@ -787,7 +787,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             label: "Apply for Leave",
             value: "Notify HOD",
             onPress: () => setLeaveModalVisible(true),
-            color: "#F59E0B",
+            color: "#10B981",
           },
           {
             icon: "calendar",
@@ -798,7 +798,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               loadTimetable();
               loadHolidays();
             },
-            color: "#F59E0B",
+            color: "#10B981",
           },
         ])}
 
@@ -809,7 +809,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             isToggle: true,
             toggleValue: isDark,
             onToggle: () => setTheme(isDark ? "light" : "dark"),
-            color: isDark ? "#F59E0B" : "#F59E0B",
+            color: "#10B981",
           },
 
           {
@@ -835,7 +835,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                 showZenToast('Class reminders resumed', 'success');
               }
             },
-            color: "#F97316",
+            color: "#10B981",
           },
         ])}
 
@@ -855,7 +855,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             label: "Help Center",
             value: "User Guide",
             onPress: () => setHelpModalVisible(true),
-            color: "#14B8A6",
+            color: "#10B981",
           },
           {
             icon: "medkit",
@@ -868,7 +868,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             icon: "warning",
             label: "Report Issue",
             onPress: () => setReportModalVisible(true),
-            color: "#F59E0B",
+            color: "#10B981",
           },
         ])}
 

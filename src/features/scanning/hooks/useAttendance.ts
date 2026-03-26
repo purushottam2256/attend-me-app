@@ -5,10 +5,10 @@
  * - Fetches students for a class (online or from cache)
  * - Handles attendance submission (online) or queue (offline)
  * - Offline support with fallback to cached roster
+ * - Fresh start on every page load (no draft restoration)
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Alert } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { 
   getStudentsForClass, 
@@ -21,8 +21,6 @@ import {
   findCachedRoster, 
   queueSubmission, 
   isCacheValid,
-  saveDraftAttendance,
-  getDraftAttendance,
   clearDraftAttendance
 } from '../../../services/offlineService';
 import { useConnectionStatus } from '../../../hooks';
@@ -68,6 +66,15 @@ interface UseAttendanceOptions {
   batchOverride?: 'full' | null; // When 'full', ignore classData.batch and load all students
 }
 
+// Offline/server-error modal state exposed to the UI
+export interface OfflineModalState {
+  visible: boolean;
+  title: string;
+  message: string;
+  onRetry: () => void;
+  onUseOffline: (() => void) | null; // null = server error, no offline option
+}
+
 interface UseAttendanceReturn {
   students: AttendanceStudent[];
   loading: boolean;
@@ -81,6 +88,8 @@ interface UseAttendanceReturn {
   submitAttendance: () => Promise<{ success: boolean; error: string | null; queued?: boolean }>;
   refreshStudents: () => Promise<void>;
   isOfflineMode: boolean;
+  offlineModal: OfflineModalState;
+  dismissOfflineModal: () => void;
 }
 
 export function useAttendance({ classData, batchOverride }: UseAttendanceOptions): UseAttendanceReturn {
@@ -90,10 +99,25 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
   const [isOfflineMode, setIsOfflineMode] = useState(false);
   const { isOnline } = useConnectionStatus();
   
+  // Custom offline/server-error modal state (replaces native Alert.alert)
+  const [offlineModal, setOfflineModal] = useState<OfflineModalState>({
+    visible: false, title: '', message: '', onRetry: () => {}, onUseOffline: null,
+  });
+  const dismissOfflineModal = useCallback(() => {
+    setOfflineModal(prev => ({ ...prev, visible: false }));
+  }, []);
+
   // Use a ref so fetchStudents always reads the LATEST value without
   // being recreated every time isOnline changes (which caused the race condition).
   const isOnlineRef = useRef(isOnline);
   isOnlineRef.current = isOnline;
+
+  // Mounted ref for safe state updates
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
 
   // Derived counts
   const presentCount = students.filter(s => s.status === 'present' || s.status === 'od').length;
@@ -125,8 +149,6 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
       let mappedStudents: AttendanceStudent[] = [];
       let fetchedOnline = false;
       
-      // Always TRY the online path first, regardless of cached isOnline state.
-      // This prevents the false-offline bug caused by stale state.
       const attemptOnlineFetch = async (): Promise<boolean> => {
         try {
           log.info('[ONLINE] Fetching students for:', target_dept, target_year, target_section, 'batch:', batchNumber);
@@ -218,6 +240,7 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
             log.info('Truly offline + cached roster found, prompting user...');
             
             const applyCache = async (roster: any) => {
+              if (!isMountedRef.current) return;
               let finalStudents: AttendanceStudent[] = roster.students.map((s: any) => ({
                 id: s.id,
                 name: s.name,
@@ -239,26 +262,7 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
                 });
               }
 
-              // Check for saved draft
-              if (classData?.slot_id) {
-                  const draft = await getDraftAttendance(classData.slot_id);
-                  if (draft && draft.length > 0) {
-                      log.info('Loaded draft attendance for slot:', classData.slot_id);
-                      const draftMap = new Map(draft.map((d: any) => [d.id, d]));
-                      finalStudents = finalStudents.map(s => {
-                          const draftStudent = draftMap.get(s.id);
-                          if (draftStudent && draftStudent.status !== 'pending') {
-                              return {
-                                  ...s,
-                                  status: draftStudent.status,
-                                  detectedAt: draftStudent.timestamp
-                              };
-                          }
-                          return s;
-                      });
-                  }
-              }
-
+              // Fresh start — no draft restoration, all students begin as pending
               setStudents(finalStudents);
               setIsOfflineMode(true);
               setLoading(false);
@@ -266,78 +270,65 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
 
             if (!silent) {
               isAwaitingPrompt = true;
-              Alert.alert(
-                "No Network Connection",
-                "You appear to be offline. Continue using cached data?",
-                [
-                  { text: "Retry", onPress: () => {
-                      setLoading(true);
-                      fetchStudents(signal, false);
-                  }},
-                  { text: "Use Offline Mode", isPreferred: true, onPress: () => applyCache(cachedRoster) }
-                ]
-              );
+              // Show custom modal instead of native Alert
+              setOfflineModal({
+                visible: true,
+                title: 'No Network Connection',
+                message: 'You appear to be offline. Continue using cached data?',
+                onRetry: () => {
+                  setOfflineModal(prev => ({ ...prev, visible: false }));
+                  setLoading(true);
+                  fetchStudents(signal, false);
+                },
+                onUseOffline: () => {
+                  setOfflineModal(prev => ({ ...prev, visible: false }));
+                  applyCache(cachedRoster);
+                },
+              });
               return;
             } else {
                return;
             }
           } else {
-            setError('Offline - No cached roster available');
-            setIsOfflineMode(true);
+            if (isMountedRef.current) {
+              setError('Offline - No cached roster available');
+              setIsOfflineMode(true);
+            }
           }
         } else {
           // Network is connected but server failed — show retry, NOT offline
           log.info('Network connected but Supabase failed. Showing server error.');
           if (!silent) {
             isAwaitingPrompt = true;
-            Alert.alert(
-              "Server Error",
-              "Could not reach the server. Your internet is connected — this may be a temporary issue.",
-              [
-                { text: "Retry", isPreferred: true, onPress: () => {
-                    setLoading(true);
-                    fetchStudents(signal, false);
-                }},
-                { text: "Cancel", style: 'cancel', onPress: () => {
-                    setError('Server unreachable. Please try again later.');
-                    setLoading(false);
-                }}
-              ]
-            );
+            // Show custom modal instead of native Alert
+            setOfflineModal({
+              visible: true,
+              title: 'Server Error',
+              message: 'Could not reach the server. Your internet is connected — this may be a temporary issue.',
+              onRetry: () => {
+                setOfflineModal(prev => ({ ...prev, visible: false }));
+                setLoading(true);
+                fetchStudents(signal, false);
+              },
+              onUseOffline: null, // No offline option for server errors
+            });
             return;
           }
         }
       }
 
-      // If mappedStudents were resolved successfully from ONLINE db, attach draft drafts if required
-      if (mappedStudents.length > 0) {
-          if (classData.slot_id) {
-              const draft = await getDraftAttendance(classData.slot_id);
-              if (draft && draft.length > 0) {
-                  const draftMap = new Map(draft.map((d: any) => [d.id, d]));
-                  mappedStudents = mappedStudents.map(s => {
-                      const draftStudent = draftMap.get(s.id);
-                      if (draftStudent && draftStudent.status !== 'pending') {
-                          return {
-                              ...s,
-                              status: draftStudent.status,
-                              detectedAt: draftStudent.timestamp
-                          };
-                      }
-                      return s;
-                  });
-              }
-          }
+      // Fresh start: set students directly without restoring drafts
+      if (mappedStudents.length > 0 && isMountedRef.current) {
           setStudents(mappedStudents);
       }
 
     } catch (err) {
-      if (!signal?.aborted) {
+      if (!signal?.aborted && isMountedRef.current) {
         log.error('Error fetching students:', err);
         if (!silent) setError('Failed to load students');
       }
     } finally {
-      if (!signal?.aborted && !silent && !isAwaitingPrompt) {
+      if (!signal?.aborted && !silent && !isAwaitingPrompt && isMountedRef.current) {
         setLoading(false);
       }
     }
@@ -370,6 +361,7 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
 
   // Update a single student's status
   const updateStudentStatus = useCallback((studentId: string, status: 'pending' | 'present' | 'absent' | 'od' | 'leave') => {
+    if (!isMountedRef.current) return;
     setStudents(prev => prev.map(s => 
       s.id === studentId 
         ? { ...s, status, detectedAt: status === 'present' ? Date.now() : undefined }
@@ -377,16 +369,7 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
     ));
   }, []);
 
-  // Auto-save draft when students change (Debounced to avoid excessive writes)
-  useEffect(() => {
-      if (!classData?.slot_id || loading || students.length === 0) return;
-
-      const timeoutId = setTimeout(() => {
-          saveDraftAttendance(classData.slot_id!, students);
-      }, 1000); // 1 second debounce
-
-      return () => clearTimeout(timeoutId);
-  }, [students, classData?.slot_id, loading]);
+  // Draft auto-save removed: users want fresh start on every page load
 
   // Submit attendance to Supabase (or queue if offline)
   const handleSubmitAttendance = useCallback(async (): Promise<{ success: boolean; error: string | null; queued?: boolean }> => {
@@ -507,6 +490,8 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
     submitAttendance: handleSubmitAttendance,
     refreshStudents: fetchStudents,
     isOfflineMode,
+    offlineModal,
+    dismissOfflineModal,
   };
 }
 

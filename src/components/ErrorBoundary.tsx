@@ -1,6 +1,10 @@
 /**
  * ErrorBoundary — Catches JS render errors and shows a recovery UI.
  * Prevents the app from crashing to a white screen.
+ *
+ * Recovery options:
+ * - Try Again: re-renders the component
+ * - Go Back: navigates to the previous screen (if navigation is available)
  */
 
 import React, { Component, ErrorInfo, ReactNode } from 'react';
@@ -10,6 +14,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   Dimensions,
+  BackHandler,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -34,15 +39,40 @@ class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-    // Log to console in dev, in production this would go to crash reporting
+    // Report to Sentry in all environments
+    try {
+      const Sentry = require('@sentry/react-native');
+      Sentry.captureException(error, {
+        tags: { component: 'ErrorBoundary' },
+        extra: { componentStack: errorInfo.componentStack },
+      });
+    } catch {
+      // Sentry not available — swallow
+    }
+
     if (__DEV__) {
       console.error('[ErrorBoundary] Caught error:', error, errorInfo);
     }
-    // TODO: Send to Sentry/Crashlytics when integrated
   }
 
   handleReset = (): void => {
     this.setState({ hasError: false, error: null });
+  };
+
+  handleGoBack = (): void => {
+    try {
+      // Try React Navigation first
+      const { navigationRef } = require('../navigation/navigationRef');
+      if (navigationRef?.current?.canGoBack?.()) {
+        this.setState({ hasError: false, error: null });
+        navigationRef.current.goBack();
+        return;
+      }
+    } catch {
+      // Navigation ref not available
+    }
+    // Fallback: use Android back button behavior
+    BackHandler.exitApp();
   };
 
   render(): ReactNode {
@@ -59,7 +89,7 @@ class ErrorBoundary extends Component<Props, State> {
             </View>
             <Text style={styles.title}>Something went wrong</Text>
             <Text style={styles.subtitle}>
-              The app encountered an unexpected error. Tap below to try again.
+              This section encountered an error. Your other tabs still work!
             </Text>
             {__DEV__ && this.state.error && (
               <View style={styles.errorBox}>
@@ -68,14 +98,24 @@ class ErrorBoundary extends Component<Props, State> {
                 </Text>
               </View>
             )}
-            <TouchableOpacity
-              style={styles.retryBtn}
-              onPress={this.handleReset}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="refresh" size={18} color="#FFF" />
-              <Text style={styles.retryText}>Try Again</Text>
-            </TouchableOpacity>
+            <View style={styles.buttonRow}>
+              <TouchableOpacity
+                style={styles.goBackBtn}
+                onPress={this.handleGoBack}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="arrow-back" size={18} color="#FFF" />
+                <Text style={styles.retryText}>Go Back</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.retryBtn}
+                onPress={this.handleReset}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="refresh" size={18} color="#FFF" />
+                <Text style={styles.retryText}>Try Again</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       );
@@ -144,13 +184,31 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   retryBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#0D9488',
-    paddingHorizontal: 24,
+    paddingHorizontal: 20,
     paddingVertical: 14,
     borderRadius: 14,
     gap: 8,
+  },
+  goBackBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#475569',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderRadius: 14,
+    gap: 8,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
   },
   retryText: {
     fontSize: 15,

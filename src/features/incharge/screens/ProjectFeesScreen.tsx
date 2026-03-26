@@ -83,7 +83,7 @@ export const ProjectFeesScreen: React.FC<ProjectFeesScreenProps> = ({ navigation
       // Get the faculty's assigned class incharge details
       const { data: inchargeData, error: inchargeError } = await supabase
         .from('class_incharges')
-        .select('*')
+        .select('id, faculty_id, dept, year, section, is_active')
         .eq('faculty_id', user.id)
         .eq('is_active', true)
         .single();
@@ -310,7 +310,7 @@ export const ProjectFeesScreen: React.FC<ProjectFeesScreenProps> = ({ navigation
                >
                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
                    <View style={[styles.projectIconContainer, { backgroundColor: isDark ? 'rgba(13, 148, 136, 0.2)' : '#F0FDFA' }]}>
-                      <Ionicons name="briefcase" size={normalizeFont(16)} color="#0D9488" />
+                      <Ionicons name="briefcase" size={normalizeFont(16)} color="#34C759" />
                    </View>
                    <View style={{ flex: 1, marginLeft: scale(12) }}>
                      <Text style={[styles.projectSelectorTitle, { color: isDark ? '#FFF' : '#0F172A' }]} numberOfLines={1}>
@@ -355,7 +355,7 @@ export const ProjectFeesScreen: React.FC<ProjectFeesScreenProps> = ({ navigation
                            {p.title} - ₹{p.amount}
                          </Text>
                          {p.id === selectedProject?.id && (
-                           <Ionicons name="checkmark-circle" size={18} color="#0D9488" />
+                           <Ionicons name="checkmark-circle" size={18} color="#34C759" />
                          )}
                       </TouchableOpacity>
                    ))}
@@ -380,7 +380,7 @@ export const ProjectFeesScreen: React.FC<ProjectFeesScreenProps> = ({ navigation
         >
           {loading ? (
              <View style={styles.centerContainer}>
-               <ActivityIndicator size="large" color="#0D9488" />
+               <ActivityIndicator size="large" color="#34C759" />
              </View>
           ) : projects.length === 0 ? (
              <View style={styles.centerContainer}>

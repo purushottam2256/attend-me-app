@@ -2,16 +2,19 @@
  * Global Error Handlers — Catches unhandled JS errors and promise rejections.
  * 
  * Call setupGlobalErrorHandlers() at app startup (App.tsx).
- * Prevents silent crashes from unhandled promise rejections.
+ * 
+ * PRODUCTION CRASH PREVENTION:
+ * - Fatal JS errors are swallowed in production (logged to Sentry) to prevent full-app crashes.
+ * - In __DEV__, fatal errors still show the Red Screen for debugging.
+ * - Unhandled promise rejections are always swallowed (logged, never crash).
  */
 
 import { LogBox, Platform } from 'react-native';
 import * as Sentry from '@sentry/react-native';
 
-// Initialize Sentry with a placeholder DSN.
-// The user should replace this with their actual DSN from sentry.io
+// Initialize Sentry with the actual DSN from the environment
 Sentry.init({
-  dsn: 'YOUR_SENTRY_DSN_HERE',
+  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN || '',
   tracesSampleRate: 1.0, // Capture 100% of transactions for performance monitoring
 });
 
@@ -31,40 +34,65 @@ export function setupGlobalErrorHandlers(): void {
     ]);
   }
 
-  // 2. Global unhandled promise rejection handler
-  // In React Native, unhandled promise rejections can silently kill features
-  // without any visible error. This catches them and logs instead of crashing.
+  // 2. Global unhandled error handler — THE KEY CRASH PREVENTION LAYER
+  // In React Native, unhandled JS errors (even in event handlers, async callbacks,
+  // setTimeout, setInterval, etc.) bubble up to ErrorUtils. By default, fatal
+  // errors crash the app. We swallow them in production.
   const originalHandler = (global as any).ErrorUtils?.getGlobalHandler?.();
 
   if ((global as any).ErrorUtils) {
     (global as any).ErrorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
+      // Safety: error itself could be undefined/null in edge cases
+      const safeError = error || new Error('Unknown error (null error object)');
+
       // Log the error
-      console.error(`[GlobalErrorHandler] ${isFatal ? 'FATAL' : 'NON-FATAL'}:`, error?.message || error);
+      console.error(`[GlobalErrorHandler] ${isFatal ? 'FATAL' : 'NON-FATAL'}:`, safeError?.message || safeError);
       
       // Capture the exact stack trace in the cloud
-      Sentry.captureException(error);
-
-      // For non-fatal errors, swallow them to prevent crash
-      // For fatal errors, delegate to the original handler (which shows the red screen in dev)
-      if (isFatal && originalHandler) {
-        originalHandler(error, isFatal);
+      try {
+        Sentry.captureException(safeError, {
+          tags: { fatal: String(!!isFatal), environment: __DEV__ ? 'dev' : 'production' },
+        });
+      } catch {
+        // Sentry itself failed — swallow
       }
+
+      if (__DEV__) {
+        // In development, show the Red Screen for fatal errors so devs can debug
+        if (isFatal && originalHandler) {
+          originalHandler(error, isFatal);
+        }
+      }
+      // In PRODUCTION: swallow ALL errors (both fatal and non-fatal)
+      // React ErrorBoundary will catch render errors and show recovery UI.
+      // Non-render errors (event handlers, async) just get logged to Sentry.
+      // This prevents the "app stopped working" dialog on Android.
     });
   }
 
   // 3. Catch unhandled promise rejections
   // @ts-ignore — React Native's global tracking
   if (typeof global !== 'undefined') {
-    const rejectionTracking = require('promise/setimmediate/rejection-tracking');
-    rejectionTracking.disable();
-    rejectionTracking.enable({
-      allRejections: true,
-      onUnhandled: (id: number, error: any) => {
-        console.warn('[UnhandledPromise]', error?.message || error);
-        Sentry.captureException(error);
-        // Don't crash — just log it
-      },
-      onHandled: () => {},
-    });
+    try {
+      const rejectionTracking = require('promise/setimmediate/rejection-tracking');
+      rejectionTracking.disable();
+      rejectionTracking.enable({
+        allRejections: true,
+        onUnhandled: (id: number, error: any) => {
+          console.warn('[UnhandledPromise]', error?.message || error);
+          try {
+            Sentry.captureException(error, {
+              tags: { type: 'unhandled_promise' },
+            });
+          } catch {
+            // Sentry failed — swallow
+          }
+          // Don't crash — just log it
+        },
+        onHandled: () => {},
+      });
+    } catch {
+     
+    }
   }
 }
