@@ -476,7 +476,7 @@ export const CumulativeAttendanceScreen: React.FC = () => {
                 data={processedStudents}
                 keyExtractor={item => item.student_id}
                 contentContainerStyle={{ paddingBottom: 60 }}
-                removeClippedSubviews={true}
+                removeClippedSubviews={false}
                 maxToRenderPerBatch={10}
                 windowSize={5}
                 initialNumToRender={10}

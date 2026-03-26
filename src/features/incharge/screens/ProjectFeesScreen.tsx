@@ -403,7 +403,7 @@ export const ProjectFeesScreen: React.FC<ProjectFeesScreenProps> = ({ navigation
                 initialNumToRender={10}
                 maxToRenderPerBatch={10}
                 windowSize={5}
-                removeClippedSubviews={true}
+                removeClippedSubviews={false}
                 ListEmptyComponent={() => (
                   <View style={styles.centerContainer}>
                      <Text style={{ color: isDark ? '#94A3B8' : '#64748B' }}>

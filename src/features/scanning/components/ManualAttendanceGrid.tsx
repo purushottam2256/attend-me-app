@@ -87,8 +87,9 @@ const SquareItem = React.memo(({ item, onTap, onLongPress }: {
 }) => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
-  const shortRoll = item.rollNo.slice(-3);
-  const firstName = item.name.split(' ')[0];
+  const shortRoll = item.rollNo.slice(-2);
+  const nameParts = (item.name || '').trim().split(' ');
+  const displayName = nameParts.length > 1 ? nameParts[1] : nameParts[0];
   const initials = item.name
     ? item.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
     : '??';
@@ -185,7 +186,7 @@ const SquareItem = React.memo(({ item, onTap, onLongPress }: {
               styles.nameText,
               isAbsentOrPending && { opacity: 0.5 },
             ]} numberOfLines={1}>
-              {firstName}
+              {displayName}
             </Text>
           </View>
         </LinearGradient>
@@ -220,7 +221,7 @@ export const ManualAttendanceGrid: React.FC<ManualAttendanceGridProps> = ({
         initialNumToRender={30}
         maxToRenderPerBatch={30}
         windowSize={10}
-        removeClippedSubviews={true}
+        removeClippedSubviews={false}
       />
     </View>
   );
