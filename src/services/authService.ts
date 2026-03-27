@@ -61,7 +61,7 @@ export async function signIn(email: string, password: string): Promise<{ user: U
     // Fetch user profile (must exist - created by HOD)
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('id, email, full_name, role, dept, faculty_id, mobile, is_biometric_enabled, is_on_leave')
+      .select('id, email, full_name, role, dept, faculty_id, mobile, is_on_leave')
       .eq('id', authData.user.id)
       .single();
 
@@ -90,10 +90,13 @@ export async function signIn(email: string, password: string): Promise<{ user: U
       return { user: null, error: 'Failed to load your profile. Please try again.' };
     }
 
-    // Store profile locally for offline access
-    await SecureStore.setItemAsync(STORAGE_KEYS.USER_PROFILE, JSON.stringify(profile));
+    const isBiometricEnabled = await SecureStore.getItemAsync(STORAGE_KEYS.BIOMETRIC_ENABLED) === 'true';
+    const completeProfile = { ...profile, is_biometric_enabled: isBiometricEnabled } as UserProfile;
 
-    return { user: profile as UserProfile, error: null };
+    // Store profile locally for offline access
+    await SecureStore.setItemAsync(STORAGE_KEYS.USER_PROFILE, JSON.stringify(completeProfile));
+
+    return { user: completeProfile, error: null };
   } catch (error) {
     log.error('Sign in error:', error);
     return { user: null, error: 'An unexpected error occurred' };
