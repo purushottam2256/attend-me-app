@@ -12,6 +12,7 @@
 
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../config/supabase';
 import createLogger from '../utils/logger';
 
@@ -314,6 +315,7 @@ export const NotificationService = {
 
   /**
    * Schedule a class reminder (10 minutes before)
+   * Respects the user's "Pause Class Reminders" preference
    */
   async scheduleClassReminder(
     subjectName: string,
@@ -321,6 +323,15 @@ export const NotificationService = {
     startTime: Date,
     slotId?: string
   ): Promise<string | null> {
+    // CRITICAL: Check if reminders are paused before doing anything
+    try {
+      const paused = await AsyncStorage.getItem('@attend_me/reminders_paused');
+      if (paused === 'true') {
+        log.info(`Skipping reminder for ${subjectName} — reminders paused by user`);
+        return null;
+      }
+    } catch { /* If we can't read the flag, proceed with scheduling */ }
+
     const triggerDate = new Date(startTime);
     triggerDate.setMinutes(triggerDate.getMinutes() - 10);
 

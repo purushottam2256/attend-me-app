@@ -30,11 +30,13 @@ import {
   type Permission,
 } from "../services/inchargeService";
 import { CustomDateTimePicker } from "../components/CustomDateTimePicker";
+import { useConnectionStatus } from '../../../hooks';
 
 export const ManagePermissionsScreen: React.FC = () => {
   const { isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
+  const { isOnline } = useConnectionStatus();
 
   const [permissions, setPermissions] = useState<
     (Permission & { student?: { full_name: string; roll_no: string } })[]
@@ -127,6 +129,11 @@ export const ManagePermissionsScreen: React.FC = () => {
   const handleUpdate = async () => {
     if (!editingPermission) return;
 
+    if (!isOnline) {
+      setToast({ visible: true, message: "Cannot edit permissions while offline", type: 'warning' });
+      return;
+    }
+
     // Basic validation
     if (editEndDate < editStartDate) {
       setToast({
@@ -164,6 +171,12 @@ export const ManagePermissionsScreen: React.FC = () => {
 
   const confirmDelete = async () => {
     if (!permissionToDelete) return;
+
+    if (!isOnline) {
+      setToast({ visible: true, message: "Cannot revoke permissions while offline", type: 'warning' });
+      setPermissionToDelete(null);
+      return;
+    }
 
     try {
       await deletePermission(permissionToDelete);

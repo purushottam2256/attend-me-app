@@ -939,6 +939,121 @@ export const getCurrentSemester = async (): Promise<string | null> => {
   return data?.value ? String(data.value).replace(/"/g, '') : null; 
 };
 
+// Types for Today's Absences
+export interface AbsentStudent {
+  student_id: string;
+  full_name: string;
+  roll_no: string;
+  student_mobile?: string;
+  parent_mobile?: string;
+  absent_periods: ('morning' | 'afternoon')[];
+}
+
+// Get today's absent students who DON'T have active permission (leave/OD)
+export const getTodaysAbsentees = async (
+  dept: string,
+  year: number,
+  section: string
+): Promise<AbsentStudent[]> => {
+  const today = getLocalDate();
+
+  try {
+    // 1. Find today's P1 and P4 sessions for this class
+    const { data: sessions, error: sessionError } = await supabase
+      .from('attendance_sessions')
+      .select('id, slot_id')
+      .eq('target_dept', dept)
+      .eq('target_year', year)
+      .eq('target_section', section)
+      .eq('date', today);
+
+    if (sessionError) throw sessionError;
+    if (!sessions || sessions.length === 0) return [];
+
+    const normalize = (id: string) => id?.toString().toLowerCase().replace(/[^a-z0-9]/g, '') || '';
+    const p1Variants = ['p1', '1', 'period1', '0900', '900'];
+    const p4Variants = ['p4', '4', 'period4', '1300', '1320', '0100'];
+
+    const p1Session = sessions.find(s => p1Variants.includes(normalize(s.slot_id)));
+    const p4Session = sessions.find(s => p4Variants.includes(normalize(s.slot_id)));
+
+    if (!p1Session && !p4Session) return [];
+
+    const sessionIds: string[] = [];
+    if (p1Session) sessionIds.push(p1Session.id);
+    if (p4Session) sessionIds.push(p4Session.id);
+
+    // 2. Get absent logs from those sessions
+    const { data: absentLogs, error: logError } = await supabase
+      .from('attendance_logs')
+      .select('student_id, session_id')
+      .in('session_id', sessionIds)
+      .eq('status', 'absent');
+
+    if (logError) throw logError;
+    if (!absentLogs || absentLogs.length === 0) return [];
+
+    // 3. Build absent periods map per student
+    const absentMap = new Map<string, Set<'morning' | 'afternoon'>>();
+    absentLogs.forEach(log => {
+      if (!absentMap.has(log.student_id)) {
+        absentMap.set(log.student_id, new Set());
+      }
+      const periods = absentMap.get(log.student_id)!;
+      if (p1Session && log.session_id === p1Session.id) periods.add('morning');
+      if (p4Session && log.session_id === p4Session.id) periods.add('afternoon');
+    });
+
+    const absentStudentIds = Array.from(absentMap.keys());
+    if (absentStudentIds.length === 0) return [];
+
+    // 4. Check for students with active permissions covering today
+    const { data: permissions, error: permError } = await supabase
+      .from('attendance_permissions')
+      .select('student_id')
+      .in('student_id', absentStudentIds)
+      .eq('is_active', true)
+      .lte('start_date', today)
+      .gte('end_date', today);
+
+    if (permError) {
+      console.error('[InchargeService] Error checking permissions for absentees:', permError);
+      // Don't throw — still show absent students even if permission check fails
+    }
+
+    const permittedStudentIds = new Set(
+      (permissions || []).map(p => p.student_id)
+    );
+
+    // Filter out students who have active permission
+    const unpermittedIds = absentStudentIds.filter(id => !permittedStudentIds.has(id));
+    if (unpermittedIds.length === 0) return [];
+
+    // 5. Fetch student details
+    const { data: students, error: studentError } = await supabase
+      .from('students')
+      .select('id, full_name, roll_no, mobile, parent_mobile')
+      .in('id', unpermittedIds)
+      .eq('is_active', true)
+      .order('roll_no');
+
+    if (studentError) throw studentError;
+
+    // 6. Return combined data
+    return (students || []).map(s => ({
+      student_id: s.id,
+      full_name: s.full_name,
+      roll_no: s.roll_no,
+      student_mobile: s.mobile,
+      parent_mobile: s.parent_mobile,
+      absent_periods: Array.from(absentMap.get(s.id) || []),
+    }));
+  } catch (error) {
+    console.error('[InchargeService] Error fetching today\'s absentees:', error);
+    return []; // Fail gracefully — don't crash the hub
+  }
+};
+
 export default {
   getClassStudents,
   getWatchlist,
@@ -953,4 +1068,5 @@ export default {
   updatePermission,
   getCurrentSemester,
   getCumulativeAttendance,
+  getTodaysAbsentees,
 };

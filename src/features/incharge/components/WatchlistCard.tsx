@@ -39,12 +39,12 @@ export const WatchlistCard: React.FC<WatchlistCardProps> = ({
   const isCritical = percentage < 65;
 
   const handleCallParent = async () => {
-    if (!parentMobile) {
-      onStatusMessage?.('Parent mobile number not available', 'error');
+    if (!studentMobile) {
+      onStatusMessage?.('Student mobile number not available', 'error');
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    await Linking.openURL(`tel:${parentMobile}`);
+    await Linking.openURL(`tel:${studentMobile}`);
   };
 
   const handleWhatsApp = async () => {
@@ -107,7 +107,7 @@ export const WatchlistCard: React.FC<WatchlistCardProps> = ({
             onPress={handleCallParent}
             activeOpacity={0.8}
           >
-            <Ionicons name="call" size={normalizeFont(18)} color="#FFFFFF" />
+            <Ionicons name="call" size={normalizeFont(15)} color="#FFFFFF" />
           </TouchableOpacity>
           
           <TouchableOpacity 
@@ -115,7 +115,7 @@ export const WatchlistCard: React.FC<WatchlistCardProps> = ({
             onPress={handleWhatsApp}
             activeOpacity={0.8}
           >
-            <Ionicons name="logo-whatsapp" size={normalizeFont(18)} color="#FFFFFF" />
+            <Ionicons name="logo-whatsapp" size={normalizeFont(15)} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
       </View>
@@ -172,24 +172,24 @@ const styles = StyleSheet.create({
     marginTop: verticalScale(2),
   },
   percentageBox: {
-    paddingHorizontal: scale(12),
-    paddingVertical: verticalScale(8),
-    borderRadius: moderateScale(10),
+    paddingHorizontal: scale(10),
+    paddingVertical: verticalScale(6),
+    borderRadius: moderateScale(8),
     alignItems: 'center',
-    minWidth: scale(56),
+    minWidth: scale(48),
   },
   percentageValue: {
-    fontSize: normalizeFont(16),
+    fontSize: normalizeFont(14),
     fontWeight: '800',
   },
   actionsRow: {
     flexDirection: 'row',
-    gap: scale(8),
+    gap: scale(6),
   },
   actionBtn: {
-    width: scale(36),
-    height: scale(36),
-    borderRadius: moderateScale(18),
+    width: scale(30),
+    height: scale(30),
+    borderRadius: moderateScale(15),
     alignItems: 'center',
     justifyContent: 'center',
   },

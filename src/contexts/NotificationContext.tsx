@@ -20,6 +20,7 @@ import React, {
 } from "react";
 import { InteractionManager } from "react-native";
 import * as Notifications from "expo-notifications";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../config/supabase";
 import { useAuth } from "./AuthContext";
 import {
@@ -268,7 +269,14 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
         break;
 
       case "SNOOZE":
-        // Re-schedule reminder for 5 minutes
+        // Re-schedule reminder for 5 minutes — but respect user's pause preference
+        try {
+          const paused = await AsyncStorage.getItem('@attend_me/reminders_paused');
+          if (paused === 'true') {
+            log.info('Snooze skipped — reminders paused by user');
+            break;
+          }
+        } catch { /* proceed if read fails */ }
         await NotificationService.scheduleNotification({
           title: response.notification.request.content.title || "Reminder",
           body: response.notification.request.content.body || "",

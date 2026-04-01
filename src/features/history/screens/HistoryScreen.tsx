@@ -225,7 +225,7 @@ export const HistoryScreen: React.FC = () => {
             target_section: p.classData.section || p.classData.sectionLetter || '???',
             target_year: p.classData.year || 0,
             present_count: p.attendance.filter(a => a.status === 'present').length,
-            absent_count: p.attendance.filter(a => a.status === 'absent').length,
+            absent_count: p.attendance.filter(a => a.status === 'absent' || a.status === 'leave').length,
             od_count: odCount,
             total_students: p.attendance.length,
             isOfflinePending: true,
@@ -241,7 +241,7 @@ export const HistoryScreen: React.FC = () => {
         const cached = await getCachedHistory();
         if (cached && cached.length > 0) {
           // Convert cached format to AttendanceSession format
-          const converted: AttendanceSession[] = cached.map(c => ({
+          const converted: AttendanceSession[] = cached.map((c: any) => ({
             id: c.id,
             date: c.date,
             slot_id: c.slot_id,
@@ -456,7 +456,7 @@ export const HistoryScreen: React.FC = () => {
   const handleSaveAttendance = (updatedStudents: any[]) => {
     // In production, call API to save
     const present = updatedStudents.filter(s => s.status === 'present').length;
-    const absent = updatedStudents.filter(s => s.status === 'absent').length;
+    const absent = updatedStudents.filter(s => s.status === 'absent' || s.status === 'leave').length;
     console.log(`Saved: ${present} present, ${absent} absent`);
     setShowEditModal(false);
     showToast('success', 'Attendance updated successfully');
@@ -503,12 +503,10 @@ export const HistoryScreen: React.FC = () => {
           const shortRoll = formatShortRollNo(log.students?.roll_no, log.students?.is_le);
           if (log.status === 'present') {
             presentStudents.push(shortRoll);
-          } else if (log.status === 'absent') {
+          } else if (log.status === 'absent' || log.status === 'leave') {
             absentStudents.push(shortRoll);
           } else if (log.status === 'od') {
             odStudents.push(shortRoll);
-          } else if (log.status === 'leave') {
-            leaveStudents.push(shortRoll);
           }
         });
       } else {
@@ -738,6 +736,7 @@ export const HistoryScreen: React.FC = () => {
   const renderSessionCard = (session: AttendanceSession, index: number) => {
     const isExpanded = expandedId === (session.id || String(index));
     const effectivePresent = session.present_count + (session.od_count || 0);
+    const effectiveAbsent = session.total_students > 0 ? (session.total_students - effectivePresent) : session.absent_count;
     const healthColor = getHealthColor(effectivePresent, session.total_students);
     const canEdit = isEditable(session.date);
     const percentage = session.total_students > 0 
@@ -845,7 +844,7 @@ export const HistoryScreen: React.FC = () => {
               <Text style={[styles.statLabel, { color: colors.textMuted }]}>Present</Text>
             </View>
             <View style={[styles.statBox, { backgroundColor: colors.statBg }]}>
-              <Text style={[styles.statValue, { color: colors.danger }]}>{session.absent_count}</Text>
+              <Text style={[styles.statValue, { color: colors.danger }]}>{effectiveAbsent}</Text>
               <Text style={[styles.statLabel, { color: colors.textMuted }]}>Absent</Text>
             </View>
           </View>

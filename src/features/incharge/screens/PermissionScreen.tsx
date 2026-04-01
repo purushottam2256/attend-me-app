@@ -38,6 +38,7 @@ import {
   getAssignedClass,
   type StudentAggregate,
 } from "../services/inchargeService";
+import { useConnectionStatus } from '../../../hooks';
 
 type PermissionType = "leave" | "od";
 type ODCategory = "dept_work" | "club_work" | "event" | "drive" | "other";
@@ -46,6 +47,7 @@ export const PermissionScreen: React.FC = () => {
   const { isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
+  const { isOnline } = useConnectionStatus();
 
   // State
   const [loading, setLoading] = useState(false);
@@ -126,6 +128,11 @@ export const PermissionScreen: React.FC = () => {
   const handleSubmit = async () => {
     if (selectedStudentIds.size === 0) {
       setToast({ visible: true, message: "Please select at least one student", type: 'warning' });
+      return;
+    }
+
+    if (!isOnline) {
+      setToast({ visible: true, message: "Cannot grant permissions while offline", type: 'warning' });
       return;
     }
 

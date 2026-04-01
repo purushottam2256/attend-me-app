@@ -5,8 +5,10 @@
  * - Traffic Light Zone (P1 & P4) (Zen Mode Styles)
  * - Weekly Trends (Zen Mode Colors)
  * - Permission Management
+ * - Today's Absences (Absent without permission)
  * - Watchlist (Critical Students)
- * - Home Screen Background (Gradient + Orbs)
+ * - Premium Skeleton Loading
+ * - Robust Offline Handling
  */
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -25,7 +27,6 @@ import {
   Image,
   Animated,
   Easing,
-
   Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -33,22 +34,29 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ZenToast } from '../../../components/ZenToast';
 import { PulsingDots } from '../../../components/ui/LoadingAnimation';
 import { safeHaptic } from '../../../utils/haptics';
 import * as Haptics from 'expo-haptics';
 
-
-
-import { TrafficLightZone, WatchlistCard, TrendsSection } from '../components';
+import { TrafficLightZone, WatchlistCard, TrendsSection, TodaysAbsencesSection } from '../components';
+import { ClassHubSkeleton } from '../components/ClassHubSkeleton';
 import { BellIcon } from '../../../components/BellIcon';
 import { useTheme } from '../../../contexts';
 import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive';
 import { supabase } from '../../../config/supabase';
-import { getClassStudents, getWatchlist, getKeyPeriodAttendance, getAllPeriodAttendance, getClassTrends, getAssignedClass, getCurrentSemester, type StudentAggregate, type PeriodAttendance } from '../services/inchargeService';
+import { getClassStudents, getWatchlist, getKeyPeriodAttendance, getAllPeriodAttendance, getClassTrends, getAssignedClass, getCurrentSemester, getTodaysAbsentees, type StudentAggregate, type PeriodAttendance, type AbsentStudent } from '../services/inchargeService';
 import { Colors, Fonts } from '../../../constants';
 import { cacheWatchlist, getCachedWatchlist, getCacheAge } from '../../../services/offlineService';
 import { useConnectionStatus } from '../../../hooks';
+
+// Cache keys for offline resilience
+const CACHE_KEYS = {
+  CLASS_INFO: '@attend_me/class_info',
+  TODAYS_ABSENTEES: '@attend_me/todays_absentees',
+  PROFILE_IMAGE: '@attend_me/hub_profile_image',
+};
 
 
 interface ClassInfo {
@@ -137,6 +145,7 @@ export const MyClassHubScreen: React.FC = () => {
   const [p1, setP1] = useState<PeriodAttendance | null>(null);
   const [p4, setP4] = useState<PeriodAttendance | null>(null);
   const [watchlist, setWatchlist] = useState<StudentAggregate[]>([]);
+  const [todaysAbsentees, setTodaysAbsentees] = useState<AbsentStudent[]>([]);
   const [trendData, setTrendData] = useState<{ day: string; percentage: number }[]>([]);
   const [trendRange, setTrendRange] = useState<'day' | 'week' | 'month'>('week');
   const [profileImage, setProfileImage] = useState<string | null>(null);
@@ -200,26 +209,69 @@ export const MyClassHubScreen: React.FC = () => {
   const connectionStatusRef = useRef(connectionStatus);
   connectionStatusRef.current = connectionStatus;
 
-  // Load Class Info
+  // Load Class Info — with offline cache fallback
   const fetchClassInfo = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { assignment: null, user: null };
-    const assignment = await getAssignedClass(user.id);
-    if (!assignment) console.log('[MyClassHub] No class assignment found.');
-    return { assignment, user };
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return { assignment: null, user: null };
+      const assignment = await getAssignedClass(user.id);
+      if (!assignment) console.log('[MyClassHub] No class assignment found.');
+      // Cache classInfo for offline use
+      if (assignment) {
+        await AsyncStorage.setItem(CACHE_KEYS.CLASS_INFO, JSON.stringify({ assignment, userId: user.id }));
+      }
+      return { assignment, user };
+    } catch (error) {
+      console.error('[MyClassHub] fetchClassInfo error, trying cache:', error);
+      // Offline fallback: load cached class info
+      try {
+        const cached = await AsyncStorage.getItem(CACHE_KEYS.CLASS_INFO);
+        if (cached) {
+          const { assignment } = JSON.parse(cached);
+          return { assignment, user: null };
+        }
+      } catch { /* cache read failed */ }
+      return { assignment: null, user: null };
+    }
   }, []);
 
-  // Load Data
+  // Load Data — robust with individual try-catch per section
   const loadData = useCallback(async () => {
     try {
       // OFFLINE FALLBACK: Use cached data if offline
       if (connectionStatusRef.current !== 'online') {
         console.log('[MyClassHub] Offline mode - loading from cache');
-        const cachedWatchlistData = await getCachedWatchlist();
-        if (cachedWatchlistData && cachedWatchlistData.length > 0) {
-          setWatchlist(cachedWatchlistData as unknown as StudentAggregate[]);
-          setIsOfflineData(true);
-        }
+        setIsOfflineData(true);
+        
+        // Load cached class info
+        try {
+          const cachedInfo = await AsyncStorage.getItem(CACHE_KEYS.CLASS_INFO);
+          if (cachedInfo) {
+            const { assignment } = JSON.parse(cachedInfo);
+            setClassInfo(assignment);
+          }
+        } catch { /* ignore */ }
+
+        // Load cached watchlist
+        try {
+          const cachedWatchlistData = await getCachedWatchlist();
+          if (cachedWatchlistData && cachedWatchlistData.length > 0) {
+            setWatchlist(cachedWatchlistData as unknown as StudentAggregate[]);
+          }
+        } catch { /* ignore */ }
+
+        // Load cached absentees
+        try {
+          const cachedAbsentees = await AsyncStorage.getItem(CACHE_KEYS.TODAYS_ABSENTEES);
+          if (cachedAbsentees) setTodaysAbsentees(JSON.parse(cachedAbsentees));
+        } catch { /* ignore */ }
+
+        // Load cached profile image
+        try {
+          const cachedImg = await AsyncStorage.getItem(CACHE_KEYS.PROFILE_IMAGE);
+          if (cachedImg) setProfileImage(cachedImg);
+        } catch { /* ignore */ }
+
         setLoading(false);
         return;
       }
@@ -235,37 +287,60 @@ export const MyClassHubScreen: React.FC = () => {
       setClassInfo(info);
       setError(null);
 
-      // Fetch everything in parallel — profile image + data queries
-      const [profileData, periods, students, currentSem] = await Promise.all([
-        currentUser ? supabase.from('profiles').select('avatar_url').eq('id', currentUser.id).single() : null,
+      // Fetch everything in parallel — each wrapped individually for resilience
+      const [profileResult, periodsResult, studentsResult, semesterResult, absenteesResult] = await Promise.allSettled([
+        currentUser ? supabase.from('profiles').select('avatar_url').eq('id', currentUser.id).single() : Promise.resolve(null),
         getKeyPeriodAttendance(info.dept, info.year, info.section),
         getWatchlist(info.dept, info.year, info.section, 60),
-        getCurrentSemester()
+        getCurrentSemester(),
+        getTodaysAbsentees(info.dept, info.year, info.section),
       ]);
 
-      if (profileData?.data?.avatar_url) {
-        setProfileImage(profileData.data.avatar_url);
+      // Apply results — each section independent
+      if (profileResult.status === 'fulfilled' && profileResult.value?.data?.avatar_url) {
+        const url = profileResult.value.data.avatar_url;
+        setProfileImage(url);
+        AsyncStorage.setItem(CACHE_KEYS.PROFILE_IMAGE, url).catch(() => {});
       }
 
-      setP1(periods.p1);
-      setP4(periods.p4);
-      setWatchlist(students);
-      if (currentSem) setSemester(currentSem);
-      
-      // Cache watchlist for offline use (only if we have data)
-      if (students.length > 0) {
-        const cacheData = students.map(s => ({
-          student_id: s.student_id,
-          full_name: s.full_name,
-          roll_no: s.roll_no,
-          attendance_percentage: s.attendance_percentage,
-          cachedAt: new Date().toISOString(),
-        }));
-        await cacheWatchlist(cacheData);
+      if (periodsResult.status === 'fulfilled') {
+        setP1(periodsResult.value.p1);
+        setP4(periodsResult.value.p4);
+      }
+
+      if (studentsResult.status === 'fulfilled') {
+        const students = studentsResult.value;
+        setWatchlist(students);
+        // Cache watchlist for offline use
+        if (students.length > 0) {
+          const cacheData = students.map(s => ({
+            student_id: s.student_id,
+            full_name: s.full_name,
+            roll_no: s.roll_no,
+            attendance_percentage: s.attendance_percentage,
+            parent_mobile: s.parent_mobile,
+            student_mobile: s.student_mobile,
+            cachedAt: new Date().toISOString(),
+          }));
+          cacheWatchlist(cacheData).catch(() => {});
+        }
+      }
+
+      if (semesterResult.status === 'fulfilled' && semesterResult.value) {
+        setSemester(semesterResult.value);
+      }
+
+      if (absenteesResult.status === 'fulfilled') {
+        const absentees = absenteesResult.value;
+        setTodaysAbsentees(absentees);
+        AsyncStorage.setItem(CACHE_KEYS.TODAYS_ABSENTEES, JSON.stringify(absentees)).catch(() => {});
       }
     } catch (error) {
       console.error('[MyClassHub] Error loading data:', error);
-      setToast({ visible: true, message: 'Failed to refresh data', type: 'error' });
+      // Don't show error toast if we have cached data
+      if (!classInfo) {
+        setToast({ visible: true, message: 'Failed to refresh data', type: 'error' });
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -367,12 +442,7 @@ export const MyClassHubScreen: React.FC = () => {
   };
 
   if (loading) {
-    return (
-      <View style={{ flex: 1, backgroundColor: isDark ? '#000' : '#F2F2F7', justifyContent: 'center', alignItems: 'center' }}>
-          <PulsingDots size="large" color={colors.accent} />
-          <Text style={{ marginTop: verticalScale(20), color: colors.textSecondary, fontSize: normalizeFont(16), fontFamily: Fonts.family.medium }}>Loading Class Data...</Text>
-      </View>
-    );
+    return <ClassHubSkeleton />;
   }
 
   if (error) {
@@ -554,8 +624,8 @@ export const MyClassHubScreen: React.FC = () => {
               activeOpacity={0.7}
               onPress={handleAddPermission}
             >
-              <View style={[styles.iconCircle, { backgroundColor: 'rgba(52, 199, 89, 0.1)' }]}>
-                <Ionicons name="add" size={normalizeFont(28)} color="#34C759" />
+              <View style={[styles.iconCircle, { backgroundColor: 'rgba(16, 185, 129, 0.1)' }]}>
+                <Ionicons name="add" size={normalizeFont(28)} color="#10B981" />
               </View>
               <Text style={[styles.actionTitle, { color: colors.textPrimary }]}>Grant Leave</Text>
               <Text style={[styles.actionSubtitle, { color: colors.textSecondary }]}>Approve OD/Leave</Text>
@@ -566,8 +636,8 @@ export const MyClassHubScreen: React.FC = () => {
               activeOpacity={0.7}
               onPress={() => navigation.navigate('ManagePermissions' as never)}
             >
-              <View style={[styles.iconCircle, { backgroundColor: 'rgba(0, 122, 255, 0.1)' }]}>
-                <Ionicons name="list" size={normalizeFont(28)} color="#007AFF" />
+              <View style={[styles.iconCircle, { backgroundColor: 'rgba(16, 185, 129, 0.1)' }]}>
+                <Ionicons name="list" size={normalizeFont(28)} color="#10B981" />
               </View>
               <Text style={[styles.actionTitle, { color: colors.textPrimary }]}>Manage</Text>
               <Text style={[styles.actionSubtitle, { color: colors.textSecondary }]}>View History</Text>
@@ -578,8 +648,8 @@ export const MyClassHubScreen: React.FC = () => {
               activeOpacity={0.7}
               onPress={() => navigation.navigate('ProjectFees' as never)}
             >
-              <View style={[styles.iconCircle, { backgroundColor: 'rgba(13, 148, 136, 0.1)' }]}>
-                <Ionicons name="briefcase" size={normalizeFont(28)} color="#0D9488" />
+              <View style={[styles.iconCircle, { backgroundColor: 'rgba(16, 185, 129, 0.1)' }]}>
+                <Ionicons name="briefcase" size={normalizeFont(28)} color="#10B981" />
               </View>
               <Text style={[styles.actionTitle, { color: colors.textPrimary }]}>Student Fees</Text>
               <Text style={[styles.actionSubtitle, { color: colors.textSecondary }]}>Manage Class Fees</Text>
@@ -590,8 +660,8 @@ export const MyClassHubScreen: React.FC = () => {
               activeOpacity={0.7}
               onPress={() => classInfo && (navigation as any).navigate('CumulativeAttendance', { classInfo })}
             >
-              <View style={[styles.iconCircle, { backgroundColor: 'rgba(99, 102, 241, 0.1)' }]}>
-                <Ionicons name="bar-chart" size={normalizeFont(28)} color="#6366F1" />
+              <View style={[styles.iconCircle, { backgroundColor: 'rgba(16, 185, 129, 0.1)' }]}>
+                <Ionicons name="bar-chart" size={normalizeFont(28)} color="#10B981" />
               </View>
               <Text style={[styles.actionTitle, { color: colors.textPrimary }]}>Cumulative</Text>
               <Text style={[styles.actionSubtitle, { color: colors.textSecondary }]}>Attendance Report</Text>
@@ -599,7 +669,16 @@ export const MyClassHubScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* 4. Watchlist (At Bottom) */}
+        {/* 4. Today's Absences (Above Watchlist) */}
+        {classInfo && (
+          <TodaysAbsencesSection
+            absentees={todaysAbsentees}
+            classLabel={`${classInfo.dept}-${classInfo.year}${classInfo.section}`}
+            onMessage={showToast}
+          />
+        )}
+
+        {/* 5. Watchlist (At Bottom) */}
         <View style={styles.sectionContainer}>
           <View style={[styles.glassCard, { backgroundColor: colors.surface }]}>
               <View style={styles.sectionHeaderRow}>
@@ -778,12 +857,12 @@ export const MyClassHubScreen: React.FC = () => {
                                          </View>
                                          <View style={{ flexDirection: 'row', gap: 10 }}>
                                              {item.student_mobile && (
-                                                <TouchableOpacity onPress={() => Linking.openURL(`whatsapp://send?phone=${item.student_mobile}`)}>
+                                                <TouchableOpacity onPress={() => Linking.openURL(`whatsapp://send?phone=+91${item.student_mobile?.replace(/\D/g, '')}&text=${encodeURIComponent(`Dear ${item.full_name},\n\nYour current attendance is ${Math.round(item.attendance_percentage)}%, which is below the required threshold. Please attend all upcoming classes.\n\nRegards,\nClass Incharge`)}`)}>
                                                     <Ionicons name="logo-whatsapp" size={18} color="#22C55E" />
                                                 </TouchableOpacity>
                                              )}
-                                             {item.parent_mobile && (
-                                                <TouchableOpacity onPress={() => Linking.openURL(`tel:${item.parent_mobile}`)}>
+                                             {item.student_mobile && (
+                                                <TouchableOpacity onPress={() => Linking.openURL(`tel:${item.student_mobile}`)}>
                                                     <Ionicons name="call" size={18} color="#3B82F6" />
                                                 </TouchableOpacity>
                                              )}

@@ -1032,7 +1032,7 @@ export const ScanScreen: React.FC = () => {
           style={{ marginTop: verticalScale(40), padding: scale(10) }}
           onPress={() =>
             safeNavigate(() => {
-              navigation.navigate("ManualEntry", {
+              navigation.replace("ManualEntry", {
                 classData,
                 existingAttendance,
               });
