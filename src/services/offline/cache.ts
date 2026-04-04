@@ -8,6 +8,7 @@ import {
 import { getStorage, getSqliteDb } from "./storage";
 import { InteractionManager } from 'react-native';
 import createLogger from '../../utils/logger';
+import { safeJsonParse } from '../../utils/safeUtils';
 
 const storage = getStorage();
 const log = createLogger('OfflineCache');
@@ -35,7 +36,7 @@ function yieldToUI(): Promise<void> {
 export async function getCacheTimestamps(): Promise<CacheTimestamps> {
   try {
     const data = await storage.getItem(STORAGE_KEYS.CACHE_TIMESTAMPS);
-    return data ? JSON.parse(data) : {};
+    return data ? safeJsonParse<CacheTimestamps>(data, {}) : {};
   } catch {
     return {};
   }
@@ -328,7 +329,7 @@ export async function cacheTodaySchedule(schedule: CachedScheduleSlot[]): Promis
 export async function getCachedTodaySchedule(): Promise<CachedScheduleSlot[] | null> {
   try {
     const cached = await storage.getItem(STORAGE_KEYS.TODAY_SCHEDULE);
-    return cached ? JSON.parse(cached) : null;
+    return cached ? safeJsonParse<CachedScheduleSlot[]>(cached, null as any) : null;
   } catch (error) {
     log.error("Error getting cached schedule:", error);
     return null;
@@ -351,7 +352,7 @@ export async function cacheTimetable(timetable: CachedScheduleSlot[]): Promise<v
 export async function getCachedTimetable(): Promise<CachedScheduleSlot[] | null> {
   try {
     const cached = await storage.getItem(STORAGE_KEYS.TIMETABLE);
-    return cached ? JSON.parse(cached) : null;
+    return cached ? safeJsonParse<CachedScheduleSlot[]>(cached, null as any) : null;
   } catch (error) {
     log.error("Error getting cached timetable:", error);
     return null;
@@ -378,7 +379,7 @@ export async function cacheProfile(profile: CachedProfile): Promise<void> {
 export async function getCachedProfile(): Promise<CachedProfile | null> {
   try {
     const cached = await storage.getItem(STORAGE_KEYS.PROFILE);
-    return cached ? JSON.parse(cached) : null;
+    return cached ? safeJsonParse<CachedProfile>(cached, null as any) : null;
   } catch (error) {
     log.error("Error getting cached profile:", error);
     return null;
@@ -404,7 +405,7 @@ export async function cacheHistory(history: Record<string, unknown>[]): Promise<
 export async function getCachedHistory(): Promise<Record<string, unknown>[] | null> {
     try {
         const cached = await storage.getItem(STORAGE_KEYS.HISTORY);
-        return cached ? JSON.parse(cached) : null;
+        return cached ? safeJsonParse<Record<string, unknown>[]>(cached, null as any) : null;
     } catch (error) {
         return null;
     }
@@ -429,7 +430,7 @@ export async function cacheWatchlist(watchlist: Record<string, unknown>[]): Prom
 export async function getCachedWatchlist(): Promise<Record<string, unknown>[] | null> {
   try {
     const cached = await storage.getItem(STORAGE_KEYS.WATCHLIST);
-    return cached ? JSON.parse(cached) : null;
+    return cached ? safeJsonParse<Record<string, unknown>[]>(cached, null as any) : null;
   } catch (error) {
     log.error("Error getting cached watchlist:", error);
     return null;
@@ -468,7 +469,7 @@ export async function getDraftAttendance(slotId: string | number): Promise<Recor
     const key = `${STORAGE_KEYS.ATTENDANCE_DRAFTS_PREFIX}${slotId}_${today}`;
     
     const data = await storage.getItem(key);
-    return data ? JSON.parse(data) : null;
+    return data ? safeJsonParse<Record<string, unknown>[]>(data, null as any) : null;
   } catch (error) {
     log.error("Error getting draft attendance:", error);
     return null;
@@ -507,7 +508,7 @@ export async function cachePermissions(date: string, permissions: CachedPermissi
     try {
       // Load existing cache
       const raw = await storage.getItem(STORAGE_KEYS.PERMISSIONS);
-      const all: Record<string, CachedPermission[]> = raw ? JSON.parse(raw) : {};
+      const all: Record<string, CachedPermission[]> = raw ? safeJsonParse(raw, {}) : {};
       
       // Merge / overwrite for this date
       all[date] = permissions;
@@ -528,7 +529,7 @@ export async function getCachedPermissions(date: string): Promise<CachedPermissi
   try {
     const raw = await storage.getItem(STORAGE_KEYS.PERMISSIONS);
     if (!raw) return [];
-    const all: Record<string, CachedPermission[]> = JSON.parse(raw);
+    const all: Record<string, CachedPermission[]> = safeJsonParse(raw, {});
     return all[date] || [];
   } catch (error) {
     log.error("Error getting cached permissions:", error);
@@ -543,7 +544,7 @@ export async function purgeExpiredPermissions(): Promise<void> {
   try {
     const raw = await storage.getItem(STORAGE_KEYS.PERMISSIONS);
     if (!raw) return;
-    const all: Record<string, CachedPermission[]> = JSON.parse(raw);
+    const all: Record<string, CachedPermission[]> = safeJsonParse(raw, {});
     
     const today = new Date().toISOString().split('T')[0];
     const cleaned: Record<string, CachedPermission[]> = {};

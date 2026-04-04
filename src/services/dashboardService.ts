@@ -462,14 +462,16 @@ export async function getStudentsForClass(
 
     if (error) {
       log.error('[getStudentsForClass] Supabase error:', error.message, error.code, error.details);
-      throw error;
+      // Return empty array instead of throwing — prevents UI crash
+      return [];
     }
 
     log.info('[getStudentsForClass] Success, returned', (data || []).length, 'students');
     return data || [];
   } catch (error: any) {
-    log.error('[getStudentsForClass] THROW:', error?.message || error);
-    throw error;
+    log.error('[getStudentsForClass] Error:', error?.message || error);
+    // CRASH-PROOF: Return empty array instead of re-throwing
+    return [];
   }
 }
 

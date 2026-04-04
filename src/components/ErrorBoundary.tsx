@@ -5,6 +5,9 @@
  * Recovery options:
  * - Try Again: re-renders the component
  * - Go Back: navigates to the previous screen (if navigation is available)
+ * 
+ * CRASH-PROOF: handleGoBack NEVER calls BackHandler.exitApp().
+ * Instead it resets to Home or clears the error state.
  */
 
 import React, { Component, ErrorInfo, ReactNode } from 'react';
@@ -68,11 +71,20 @@ class ErrorBoundary extends Component<Props, State> {
         navigationRef.current.goBack();
         return;
       }
+      // Fallback: navigate to Home instead of killing the app
+      if (navigationRef?.current?.isReady?.()) {
+        this.setState({ hasError: false, error: null });
+        navigationRef.current.reset({
+          index: 0,
+          routes: [{ name: 'MainTabs' as never }],
+        });
+        return;
+      }
     } catch {
       // Navigation ref not available
     }
-    // Fallback: use Android back button behavior
-    BackHandler.exitApp();
+    // Last resort: just clear the error — NEVER exit the app
+    this.setState({ hasError: false, error: null });
   };
 
   render(): ReactNode {

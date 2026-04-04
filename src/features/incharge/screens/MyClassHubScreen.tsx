@@ -38,6 +38,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ZenToast } from '../../../components/ZenToast';
 import { PulsingDots } from '../../../components/ui/LoadingAnimation';
 import { safeHaptic } from '../../../utils/haptics';
+import { safeJsonParse } from '../../../utils/safeUtils';
 import * as Haptics from 'expo-haptics';
 
 import { TrafficLightZone, WatchlistCard, TrendsSection, TodaysAbsencesSection } from '../components';
@@ -227,7 +228,7 @@ export const MyClassHubScreen: React.FC = () => {
       try {
         const cached = await AsyncStorage.getItem(CACHE_KEYS.CLASS_INFO);
         if (cached) {
-          const { assignment } = JSON.parse(cached);
+          const { assignment } = safeJsonParse(cached, { assignment: null });
           return { assignment, user: null };
         }
       } catch { /* cache read failed */ }
@@ -247,7 +248,7 @@ export const MyClassHubScreen: React.FC = () => {
         try {
           const cachedInfo = await AsyncStorage.getItem(CACHE_KEYS.CLASS_INFO);
           if (cachedInfo) {
-            const { assignment } = JSON.parse(cachedInfo);
+            const { assignment } = safeJsonParse(cachedInfo, { assignment: null });
             setClassInfo(assignment);
           }
         } catch { /* ignore */ }
@@ -263,7 +264,7 @@ export const MyClassHubScreen: React.FC = () => {
         // Load cached absentees
         try {
           const cachedAbsentees = await AsyncStorage.getItem(CACHE_KEYS.TODAYS_ABSENTEES);
-          if (cachedAbsentees) setTodaysAbsentees(JSON.parse(cachedAbsentees));
+          if (cachedAbsentees) setTodaysAbsentees(safeJsonParse<AbsentStudent[]>(cachedAbsentees, []));
         } catch { /* ignore */ }
 
         // Load cached profile image
@@ -351,25 +352,41 @@ export const MyClassHubScreen: React.FC = () => {
       setToast({ visible: true, message, type });
   }, []);
 
-  // Fetch trends
+  // Fetch trends — DEBOUNCED to prevent concurrent calls on rapid day/week/month switching
   useEffect(() => {
      if (!classInfo) return;
-     const fetchTrends = async () => {
+     let cancelled = false;
+
+     // 300ms debounce: allows user to tap through options without firing 3 concurrent requests
+     const debounceTimer = setTimeout(async () => {
          try {
              const data = await getClassTrends(classInfo.dept, classInfo.year, classInfo.section, trendRange);
-             setTrendData(data.map(d => ({ day: d.label, percentage: d.value })));
+             // Guard: if user switched tabs again while this was in-flight, discard result
+             if (!cancelled) {
+               setTrendData((data || []).map(d => ({ day: d.label, percentage: d.value })));
+             }
          } catch (e) {
              console.error("Error fetching trends", e);
+             // On error, show empty state rather than crash
+             if (!cancelled) setTrendData([]);
          }
+     }, 300);
+
+     return () => {
+       cancelled = true;
+       clearTimeout(debounceTimer);
      };
-     fetchTrends();
   }, [classInfo, trendRange]);
 
+  // PERFORMANCE: Defer initial data load until screen transition animation is complete.
+  // MyClassHub fires 5 concurrent Supabase calls in loadData — running these during
+  // the navigation animation blocks the JS thread and causes jank/crash.
   useEffect(() => {
-    const timer = setTimeout(() => {
-        loadData();
-    }, 100);
-    return () => clearTimeout(timer);
+    const InteractionManager = require('react-native').InteractionManager;
+    const task = InteractionManager.runAfterInteractions(() => {
+      loadData();
+    });
+    return () => task.cancel();
   }, [loadData]);
 
   const onRefresh = useCallback(async () => {

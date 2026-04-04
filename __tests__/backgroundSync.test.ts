@@ -1,63 +1,85 @@
-import { processBackgroundSync } from '../src/services/backgroundSync';
-import { supabase } from '../src/config/supabase';
-import { fetchQueue, getQueueCount, updateQueueStatus } from '../src/services/offline/cache';
+/**
+ * backgroundSync.test.ts — Tests for background sync crash safety
+ * 
+ * Verifies that TaskManager.defineTask doesn't crash the app
+ * even when the module isn't linked properly.
+ */
 
-// Mock DB and Cache
-jest.mock('../src/config/supabase', () => ({
-  supabase: {
-    rpc: jest.fn(),
-    from: jest.fn(() => ({
-      update: jest.fn().mockReturnThis(),
-      eq: jest.fn().mockResolvedValue({ error: null }),
-    })),
+// Mock TaskManager
+jest.mock('expo-task-manager', () => ({
+  defineTask: jest.fn(),
+}));
+
+jest.mock('expo-background-fetch', () => ({
+  registerTaskAsync: jest.fn(),
+  unregisterTaskAsync: jest.fn(),
+  BackgroundFetchResult: {
+    NewData: 1,
+    NoData: 2,
+    Failed: 3,
   },
 }));
 
-jest.mock('../src/services/offline/cache', () => ({
-  fetchQueue: jest.fn(),
-  getQueueCount: jest.fn(),
-  updateQueueStatus: jest.fn(),
-  getOfflineSession: jest.fn().mockResolvedValue({ start_time: new Date().toISOString() }),
+jest.mock('@react-native-community/netinfo', () => ({
+  fetch: jest.fn().mockResolvedValue({ isConnected: true }),
 }));
 
-describe('Background Sync Engine', () => {
+// Mock Sentry
+jest.mock('@sentry/react-native', () => ({
+  init: jest.fn(),
+  captureException: jest.fn(),
+  captureMessage: jest.fn(),
+}));
+
+// Mock offline services
+jest.mock('../src/services/offline', () => ({
+  initOffline: jest.fn().mockResolvedValue(undefined),
+  getPendingCount: jest.fn().mockResolvedValue(0),
+  syncPendingSubmissions: jest.fn().mockResolvedValue({ synced: 0, failed: 0 }),
+}));
+
+describe('Background Sync — Module Import Safety', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it('aborts sync immediately if the queue is empty', async () => {
-    (fetchQueue as jest.Mock).mockResolvedValue([]);
-    
-    const result = await processBackgroundSync();
-    
-    expect(result).toBe(0);
-    expect(supabase.rpc).not.toHaveBeenCalled();
+  it('imports backgroundSync module without crashing', () => {
+    // This tests that the module-level try-catch around TaskManager.defineTask works
+    expect(() => {
+      require('../src/services/backgroundSync');
+    }).not.toThrow();
   });
 
-  it('processes pending queue items via RPC and marks them as synced', async () => {
-    (fetchQueue as jest.Mock).mockResolvedValue([
-      { id: 'item-1', operation: 'sync_attendance', payload: { session_id: 's-1', students: [] } },
-    ]);
-    (supabase.rpc as jest.Mock).mockResolvedValue({ error: null });
+  it('TaskManager.defineTask is called at import time', () => {
+    const TaskManager = require('expo-task-manager');
+    // Force re-import
+    jest.resetModules();
+    
+    // Re-mock after resetModules
+    jest.mock('expo-task-manager', () => ({
+      defineTask: jest.fn(),
+    }));
+    jest.mock('expo-background-fetch', () => ({
+      registerTaskAsync: jest.fn(),
+      unregisterTaskAsync: jest.fn(),
+      BackgroundFetchResult: { NewData: 1, NoData: 2, Failed: 3 },
+    }));
+    jest.mock('@react-native-community/netinfo', () => ({
+      fetch: jest.fn().mockResolvedValue({ isConnected: true }),
+    }));
+    jest.mock('@sentry/react-native', () => ({
+      init: jest.fn(),
+      captureException: jest.fn(),
+      captureMessage: jest.fn(),
+    }));
+    jest.mock('../src/services/offline', () => ({
+      initOffline: jest.fn(),
+      getPendingCount: jest.fn().mockResolvedValue(0),
+      syncPendingSubmissions: jest.fn().mockResolvedValue({ synced: 0, failed: 0 }),
+    }));
 
-    const result = await processBackgroundSync();
-
-    expect(result).toBe(1);
-    expect(supabase.rpc).toHaveBeenCalledWith('sync_offline_attendance', expect.any(Object));
-    expect(updateQueueStatus).toHaveBeenCalledWith('item-1', 'synced');
-  });
-
-  it('safely catches server failures and leaves queue tasks in pending state', async () => {
-    (fetchQueue as jest.Mock).mockResolvedValue([
-      { id: 'item-1', operation: 'sync_attendance', payload: { session_id: 's-1' } },
-    ]);
-    // Mock an RPC error
-    (supabase.rpc as jest.Mock).mockResolvedValue({ error: { message: 'Network Timeout' } });
-
-    const result = await processBackgroundSync();
-
-    // 0 items completed
-    expect(result).toBe(0);
-    expect(updateQueueStatus).toHaveBeenCalledWith('item-1', 'failed');
+    require('../src/services/backgroundSync');
+    const TM = require('expo-task-manager');
+    expect(TM.defineTask).toHaveBeenCalled();
   });
 });

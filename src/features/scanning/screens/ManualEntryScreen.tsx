@@ -123,8 +123,8 @@ export const ManualEntryScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, 'ManualEntry'>>();
 
-  // Params
-  const { classData } = route.params;
+  // Params — guarded against undefined route.params
+  const classData = route.params?.classData;
 
   // State
   const [hasChanges, setHasChanges] = useState(false);

@@ -218,20 +218,32 @@ export const RootNavigator: React.FC = () => {
     <View style={styles.container} onLayout={onLayoutRootView}>
       <NavigationContainer 
         ref={navigationRef}
+        onUnhandledAction={(action) => {
+          // Swallow unhandled navigation actions instead of crashing
+          if (__DEV__) {
+            console.warn('[Navigation] Unhandled action:', action);
+          }
+        }}
         onStateChange={(state) => {
           // Send automatic screen tracking events
           if (!state) return;
           try {
-            const currentRoute = state.routes[state.index];
+            // BOUNDS CHECK: Ensure index is valid before accessing routes
+            const index = state.index ?? 0;
+            if (!state.routes || index < 0 || index >= state.routes.length) return;
+            const currentRoute = state.routes[index];
             if (currentRoute) {
               const routeName = currentRoute.name;
               // If we are in the 'Main' tab, drill down to find the specific tab
               if (routeName === 'Main' && currentRoute.state) {
                  const tabState = currentRoute.state as any;
-                 const tabRoute = tabState.routes[tabState.index];
-                 if (tabRoute) {
-                   trackScreen(`Tab_${tabRoute.name}`);
-                   return;
+                 const tabIndex = tabState.index ?? 0;
+                 if (tabState.routes && tabIndex >= 0 && tabIndex < tabState.routes.length) {
+                   const tabRoute = tabState.routes[tabIndex];
+                   if (tabRoute) {
+                     trackScreen(`Tab_${tabRoute.name}`);
+                     return;
+                   }
                  }
               }
               trackScreen(routeName);

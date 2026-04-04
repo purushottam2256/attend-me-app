@@ -1,10 +1,13 @@
 /**
  * Network Context
  * Provides network status and queued actions functionality
+ * 
+ * REFACTORED: Now consumes the shared useConnectionStatus singleton
+ * instead of creating its own NetInfo listener.
  */
 
-import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
-import NetInfo, { NetInfoState } from '@react-native-community/netinfo';
+import React, { createContext, useContext, useRef, ReactNode } from 'react';
+import { useConnectionStatus } from '../hooks/useConnectionStatus';
 import createLogger from '../utils/logger';
 
 const log = createLogger('Network');
@@ -34,35 +37,33 @@ interface NetworkProviderProps {
 }
 
 export const NetworkProvider: React.FC<NetworkProviderProps> = ({ children }) => {
-  const [isOnline, setIsOnline] = useState(true);
-  const [isConnecting, setIsConnecting] = useState(false);
+  const { isOnline, justCameOnline } = useConnectionStatus();
   const queuedActions = useRef<QueuedAction[]>([]);
+  const isProcessingRef = useRef(false);
 
-  useEffect(() => {
-    const unsubscribe = NetInfo.addEventListener((state: NetInfoState) => {
-      const online = state.isConnected && state.isInternetReachable !== false;
-      setIsOnline(online ?? true);
-
-      // Process queued actions when back online
-      if (online && queuedActions.current.length > 0) {
-        processQueue();
-      }
-    });
-
-    return () => unsubscribe();
-  }, []);
+  // Process queued actions when back online
+  React.useEffect(() => {
+    if (justCameOnline && queuedActions.current.length > 0 && !isProcessingRef.current) {
+      processQueue();
+    }
+  }, [justCameOnline]);
 
   const processQueue = async () => {
+    if (isProcessingRef.current) return;
+    isProcessingRef.current = true;
+    
     const actions = [...queuedActions.current];
     queuedActions.current = [];
 
-    for (const { action } of actions) {
+    for (const { action, description } of actions) {
       try {
         await action();
       } catch (error) {
-        log.error('Queued action failed:', error);
+        log.error(`Queued action "${description}" failed:`, error);
       }
     }
+    
+    isProcessingRef.current = false;
   };
 
   const queueAction = (action: () => Promise<void>, description: string) => {
@@ -71,7 +72,7 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({ children }) =>
   };
 
   return (
-    <NetworkContext.Provider value={{ isOnline, isConnecting, queueAction }}>
+    <NetworkContext.Provider value={{ isOnline, isConnecting: false, queueAction }}>
       {children}
     </NetworkContext.Provider>
   );

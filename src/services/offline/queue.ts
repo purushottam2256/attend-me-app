@@ -1,6 +1,7 @@
 import { PendingSubmission, STORAGE_KEYS } from "./types";
 import { getStorage, getSqliteDb, SQLiteStorageAdapter } from "./storage";
 import createLogger from '../../utils/logger';
+import { safeJsonParse } from '../../utils/safeUtils';
 
 const log = createLogger('OfflineQueue');
 
@@ -16,7 +17,7 @@ export async function getPendingSubmissions(): Promise<PendingSubmission[]> {
       const rows = await db.getAllAsync<{ data: string }>(
         'SELECT data FROM pending_submissions ORDER BY created_at ASC'
       );
-      return rows.map((row: { data: string }) => JSON.parse(row.data));
+      return rows.map((row: { data: string }) => safeJsonParse<PendingSubmission>(row.data, null as any)).filter(Boolean);
     } catch (error) {
       log.error("Error getting pending submissions from SQLite:", error);
       return [];
@@ -26,7 +27,7 @@ export async function getPendingSubmissions(): Promise<PendingSubmission[]> {
   // Legacy / AsyncStorage Fallback
   try {
     const json = await storage.getItem(STORAGE_KEYS.PENDING_SUBMISSIONS);
-    return json ? JSON.parse(json) : [];
+    return json ? safeJsonParse<PendingSubmission[]>(json, []) : [];
   } catch (error) {
     log.error("Error getting pending submissions:", error);
     return [];

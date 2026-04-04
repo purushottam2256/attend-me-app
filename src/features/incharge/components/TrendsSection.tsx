@@ -7,6 +7,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../../contexts';
 import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive';
+import { safeMax } from '../../../utils/safeUtils';
 
 interface TrendData {
   day: string;
@@ -22,7 +23,7 @@ export const TrendsSection: React.FC<TrendsSectionProps> = ({ data }) => {
   
   // Calculate insight
   const getInsight = (): string => {
-    if (data.length === 0) return 'No data available yet';
+    if (!data || data.length === 0) return 'No data available yet';
     
     // Find lowest day
     const sorted = [...data].sort((a, b) => a.percentage - b.percentage);
@@ -38,7 +39,8 @@ export const TrendsSection: React.FC<TrendsSectionProps> = ({ data }) => {
     return 'Stable week';
   };
 
-  const maxPercentage = Math.max(...data.map(d => d.percentage), 100);
+  // FIXED: safeMax prevents -Infinity crash when data is empty
+  const maxPercentage = safeMax(data.map(d => d.percentage), 100);
 
   return (
     <View style={styles.container}>

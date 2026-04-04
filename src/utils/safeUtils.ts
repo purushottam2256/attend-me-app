@@ -4,9 +4,12 @@
  * - Unhandled async errors
  * - Invalid API responses
  * - Missing required fields
+ * - JS thread blocking during heavy data loads
  *
  * EVERY async call in the app should go through safeExecute() or safeApi().
  */
+
+import { InteractionManager } from 'react-native';
 
 import * as Sentry from '@sentry/react-native';
 
@@ -211,4 +214,69 @@ export function validateRequired(
   });
 
   return { valid: missing.length === 0, missing };
+}
+
+// ============================================================================
+// INTERACTION-SAFE EXECUTION — defers work until after animations complete
+// ============================================================================
+
+/**
+ * Defers execution of heavy async work until after pending UI interactions
+ * (navigation animations, gesture handlers) complete. This prevents the
+ * JS thread from being blocked during screen transitions, which is the
+ * #1 cause of ANRs and janky animations in React Native.
+ *
+ * Usage:
+ *   await safeInteractionExecute(() => fetchHeavyData(), []);
+ */
+export function safeInteractionExecute<T>(
+  fn: () => Promise<T>,
+  fallback: T,
+  context: string = 'Unknown'
+): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const handle = InteractionManager.runAfterInteractions(async () => {
+      try {
+        const result = await fn();
+        resolve(result);
+      } catch (error: any) {
+        if (__DEV__) {
+          console.warn(`[safeInteractionExecute][${context}] Error:`, error?.message || error);
+        }
+        try {
+          Sentry.captureException(error, { tags: { safeInteraction: context } });
+        } catch {
+          // Sentry failed — swallow
+        }
+        resolve(fallback);
+      }
+    });
+
+    // Safety: if InteractionManager never fires (edge case on Android),
+    // force-resolve after 10 seconds to prevent hanging
+    setTimeout(() => {
+      resolve(fallback);
+    }, 10000);
+  });
+}
+
+// ============================================================================
+// SAFE MATH — prevents -Infinity/NaN from crashing render
+// ============================================================================
+
+/**
+ * Safe Math.max that handles empty arrays. Math.max() with no args returns -Infinity,
+ * and Math.max(...[]) also returns -Infinity, which causes NaN in downstream division.
+ */
+export function safeMax(values: number[], fallback: number = 0): number {
+  if (!values || values.length === 0) return fallback;
+  return Math.max(...values);
+}
+
+/**
+ * Safe Math.min that handles empty arrays.
+ */
+export function safeMin(values: number[], fallback: number = 0): number {
+  if (!values || values.length === 0) return fallback;
+  return Math.min(...values);
 }

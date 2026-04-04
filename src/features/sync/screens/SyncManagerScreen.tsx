@@ -6,17 +6,18 @@ import { useTheme } from '../../../contexts/ThemeContext';
 import { ZenToast } from '../../../components/ZenToast';
 import { ResolverEngine, SyncResult } from '../../../services/ResolverEngine';
 import { getPendingCount } from '../../../services/offlineService';
-import NetInfo from '@react-native-community/netinfo';
+import { useConnectionStatus } from '../../../hooks/useConnectionStatus';
 import { LinearGradient } from 'expo-linear-gradient';
 
 export const SyncManagerScreen = ({ navigation }: any) => {
     const { isDark } = useTheme();
     const insets = useSafeAreaInsets();
     
+    const { isOnline } = useConnectionStatus();
+    
     const [stats, setStats] = useState({ pending: 0, lastSync: 'Never' });
     const [isSyncing, setIsSyncing] = useState(false);
     const [syncLog, setSyncLog] = useState<string[]>([]);
-    const [isOnline, setIsOnline] = useState(true);
     const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'warning' }>({
         visible: false,
         message: '',
@@ -25,10 +26,6 @@ export const SyncManagerScreen = ({ navigation }: any) => {
 
     useEffect(() => {
         checkStatus();
-        const unsubscribe = NetInfo.addEventListener(state => {
-            setIsOnline(!!state.isConnected);
-        });
-        return unsubscribe;
     }, []);
 
     const checkStatus = async () => {

@@ -20,6 +20,7 @@ import { scale, verticalScale, moderateScale, normalizeFont } from '../../../uti
 import { Colors, Fonts } from '../../../constants';
 import { PulsingDots } from '../../../components/ui/LoadingAnimation';
 import { safeHaptic } from '../../../utils/haptics';
+import { safeJsonParse } from '../../../utils/safeUtils';
 
 import { getCumulativeAttendance, type CumulativeAttendanceResult } from '../services/inchargeService';
 import { supabase } from '../../../config/supabase';
@@ -252,13 +253,15 @@ export const CumulativeAttendanceScreen: React.FC = () => {
       if (connectionStatus === 'offline') {
          const cached = await AsyncStorage.getItem(cacheKey);
          if (cached) {
-            const parsed = JSON.parse(cached);
-            setData(parsed.data);
-            setSessionDates(parsed.sessionDates || []);
-            setAllDatesInRange(parsed.allDatesInRange || []);
-            setStudentDateMap(parsed.studentDateMap || {});
-            setSpecialDays(parsed.specialDays || {});
-            setIsOfflineData(true);
+            const parsed = safeJsonParse<any>(cached, null);
+            if (parsed) {
+              setData(parsed.data);
+              setSessionDates(parsed.sessionDates || []);
+              setAllDatesInRange(parsed.allDatesInRange || []);
+              setStudentDateMap(parsed.studentDateMap || {});
+              setSpecialDays(parsed.specialDays || {});
+              setIsOfflineData(true);
+            }
          }
          return;
       }
@@ -361,21 +364,28 @@ export const CumulativeAttendanceScreen: React.FC = () => {
       // Fallback to cache on error
       const cached = await AsyncStorage.getItem(cacheKey);
       if (cached) {
-         const parsed = JSON.parse(cached);
-         setData(parsed.data);
-         setSessionDates(parsed.sessionDates || []);
-         setAllDatesInRange(parsed.allDatesInRange || []);
-         setStudentDateMap(parsed.studentDateMap || {});
-         setSpecialDays(parsed.specialDays || {});
-         setIsOfflineData(true);
+         const parsed = safeJsonParse<any>(cached, null);
+         if (parsed) {
+           setData(parsed.data);
+           setSessionDates(parsed.sessionDates || []);
+           setAllDatesInRange(parsed.allDatesInRange || []);
+           setStudentDateMap(parsed.studentDateMap || {});
+           setSpecialDays(parsed.specialDays || {});
+           setIsOfflineData(true);
+         }
       }
     } finally {
       setLoading(false);
     }
   }, [classInfo, startDate, endDate, connectionStatus]);
 
+  // PERFORMANCE: Defer data load until after screen transition completes
   useEffect(() => {
-    loadData();
+    const InteractionManager = require('react-native').InteractionManager;
+    const task = InteractionManager.runAfterInteractions(() => {
+      loadData();
+    });
+    return () => task.cancel();
   }, [loadData]);
 
   // --- Memoized Sorting & Filtering ---

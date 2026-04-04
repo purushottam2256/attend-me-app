@@ -3,6 +3,7 @@ import * as SQLite from 'expo-sqlite';
 import { supabase } from '../config/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import createLogger from '../utils/logger';
+import { safeJsonParse } from '../utils/safeUtils';
 
 import { dbPool } from '../config/database';
 
@@ -25,7 +26,7 @@ export const NotificationRepository = {
       );
       return result.map((row: any) => ({
         ...row,
-        data: row.data ? JSON.parse(row.data) : {},
+        data: row.data ? safeJsonParse(row.data, {}) : {},
         is_read: Boolean(row.is_read)
       }));
     } catch (error) {
@@ -101,7 +102,7 @@ export const NotificationRepository = {
   async getDeletedIds(): Promise<Set<string>> {
       try {
           const json = await AsyncStorage.getItem('deleted_notification_ids');
-          return json ? new Set(JSON.parse(json)) : new Set();
+          return json ? new Set(safeJsonParse<string[]>(json, [])) : new Set();
       } catch (error) {
           log.error('Error fetching deleted IDs from cache:', error);
           return new Set();

@@ -13,10 +13,26 @@ import { LogBox, Platform } from 'react-native';
 import * as Sentry from '@sentry/react-native';
 
 // Initialize Sentry with the actual DSN from the environment
-Sentry.init({
-  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN || '',
-  tracesSampleRate: 1.0, // Capture 100% of transactions for performance monitoring
-});
+// Wrapped in try-catch: a missing/invalid DSN must NEVER crash the app at import time
+try {
+  const dsn = process.env.EXPO_PUBLIC_SENTRY_DSN || '';
+  if (dsn) {
+    Sentry.init({
+      dsn,
+      tracesSampleRate: __DEV__ ? 1.0 : 0.2, // 20% in production to save bandwidth
+      enableNativeCrashHandling: true,
+      // Prevent Sentry from crashing the app on its own errors
+      beforeSend(event) {
+        return event;
+      },
+    });
+  }
+} catch (sentryInitError) {
+  // Sentry init failed — app must still work
+  if (__DEV__) {
+    console.warn('[Sentry] Init failed:', sentryInitError);
+  }
+}
 
 let isSetup = false;
 

@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,12 +8,15 @@ import {
   FlatList,
   Animated,
   Image,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { scale, verticalScale, moderateScale, normalizeFont } from '../../../utils/responsive';
 import { getFallbackAvatar } from '../../../utils/avatars';
+import { isLateralEntry } from '../../../utils/studentUtils';
+import { safeHaptic } from '../../../utils/haptics';
+import * as Haptics from 'expo-haptics';
 
 interface Student {
   id: string;
@@ -45,21 +48,21 @@ const StatusConfig = {
     icon: 'person-outline' as const,
     iconColor: 'rgba(255,255,255,0.4)',
     label: '',
-    overlay: 'rgba(71,85,105,0.85)', // Strong gray = absent/unmarked
+    overlay: 'rgba(71,85,105,0.85)',
   },
   present: {
     gradient: ['#10B981', '#059669'] as const,
     icon: 'checkmark-circle' as const,
     iconColor: 'rgba(255,255,255,0.9)',
     label: '',
-    overlay: 'rgba(5,150,105,0.15)', // Minimal overlay = vivid/colored
+    overlay: 'rgba(5,150,105,0.15)',
   },
   absent: {
     gradient: ['#EF4444', '#B91C1C'] as const,
     icon: 'close-circle' as const,
     iconColor: '#FFF',
     label: '',
-    overlay: 'rgba(185,28,28,0.15)', // Minimal overlay for red
+    overlay: 'rgba(185,28,28,0.15)',
   },
   od: {
     gradient: ['#F59E0B', '#D97706'] as const,
@@ -77,8 +80,6 @@ const StatusConfig = {
   },
 };
 
-import { isLateralEntry } from '../../../utils/studentUtils';
-
 const SquareItem = React.memo(({ item, onTap, onLongPress }: { 
     item: Student; 
     onTap: (id: string) => void; 
@@ -90,9 +91,6 @@ const SquareItem = React.memo(({ item, onTap, onLongPress }: {
   const shortRoll = item.rollNo.slice(-2);
   const nameParts = (item.name || '').trim().split(' ');
   const displayName = nameParts.length > 1 ? nameParts[1] : nameParts[0];
-  const initials = item.name
-    ? item.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
-    : '??';
 
   const config = StatusConfig[item.status] || StatusConfig.pending;
   const isInteractive = item.status !== 'od' && item.status !== 'leave';
@@ -100,26 +98,30 @@ const SquareItem = React.memo(({ item, onTap, onLongPress }: {
   const isAbsentOrPending = item.status === 'absent' || item.status === 'pending';
   const isLE = isLateralEntry(item.rollNo, item.isLE);
 
-  const handlePress = () => {
+  const handlePress = useCallback(() => {
     Animated.sequence([
       Animated.timing(scaleAnim, { toValue: 0.92, duration: 40, useNativeDriver: true }),
       Animated.spring(scaleAnim, { toValue: 1, friction: 5, useNativeDriver: true })
     ]).start();
 
-    Haptics.impactAsync(
+    // Use safeHaptic instead of raw Haptics.impactAsync — prevents crash on devices
+    // without haptic engines and respects user preference
+    safeHaptic(
       isMarkedPresent ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light
     );
     onTap(item.id);
-  };
+  }, [item.id, isMarkedPresent, onTap, scaleAnim]);
+
+  const handleLongPress = useCallback(() => {
+    safeHaptic(Haptics.ImpactFeedbackStyle.Heavy);
+    onLongPress(item);
+  }, [item, onLongPress]);
 
   return (
     <TouchableOpacity
       activeOpacity={0.9}
       onPress={isInteractive ? handlePress : undefined}
-      onLongPress={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-        onLongPress(item);
-      }}
+      onLongPress={handleLongPress}
       disabled={!isInteractive && item.status !== 'od' && item.status !== 'leave'}
     >
       <Animated.View style={[styles.squareContainer, { transform: [{ scale: scaleAnim }] }]}>
@@ -133,7 +135,7 @@ const SquareItem = React.memo(({ item, onTap, onLongPress }: {
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
         >
-          {/* Avatar Background */}
+          {/* Avatar Background — uses defaultSource for fast initial render */}
           <View style={[StyleSheet.absoluteFillObject, { padding: scale(10) }]}>
             <Image
               source={item.photoUrl ? { uri: item.photoUrl } : getFallbackAvatar(item.id)}
@@ -143,6 +145,8 @@ const SquareItem = React.memo(({ item, onTap, onLongPress }: {
                 isMarkedPresent && { opacity: 0.45 },
               ]}
               resizeMode="contain"
+              // CRITICAL: fadeDuration prevents all 70+ images from decoding simultaneously
+              fadeDuration={0}
             />
           </View>
 
@@ -218,10 +222,20 @@ export const ManualAttendanceGrid: React.FC<ManualAttendanceGridProps> = ({
             />
         )}
         showsVerticalScrollIndicator={false}
-        initialNumToRender={30}
-        maxToRenderPerBatch={30}
-        windowSize={10}
-        removeClippedSubviews={false}
+        // PERFORMANCE: Progressive rendering — render 15 items first (fills ~3 rows),
+        // then render more as user scrolls. Prevents 70+ simultaneous LinearGradient renders.
+        initialNumToRender={15}
+        maxToRenderPerBatch={10}
+        windowSize={5}
+        // CRITICAL: On Android, enable removeClippedSubviews to release off-screen
+        // View instances from the native hierarchy, reducing memory pressure
+        removeClippedSubviews={Platform.OS === 'android'}
+        // Optimize re-renders by providing stable layout metrics
+        getItemLayout={(_data, index) => ({
+          length: ITEM_SIZE + GAP,
+          offset: (ITEM_SIZE + GAP) * Math.floor(index / COLUMNS),
+          index,
+        })}
       />
     </View>
   );
@@ -258,16 +272,13 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: 'rgba(255,255,255,0.1)',
   },
-  // Grayed out = absent/pending look
   grayedOut: {
     opacity: 0.7,
   },
-  // Present = vivid glow
   presentGlow: {
     borderColor: 'rgba(16,185,129,0.5)',
     shadowColor: '#10B981',
   },
-  // Large initials as background watermark (replaces image for crash safety)
   initialsWatermark: {
     position: 'absolute',
     top: '15%',
@@ -276,7 +287,6 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.3)',
     letterSpacing: 1,
   },
-  // Green checkmark for present
   presentIndicator: {
     position: 'absolute',
     top: scale(3),
@@ -290,7 +300,6 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: 'rgba(255,255,255,0.3)',
   },
-  // OD/Leave locked badge
   lockedBadge: {
     position: 'absolute',
     top: scale(3),

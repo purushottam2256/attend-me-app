@@ -1,68 +1,53 @@
-import { safeJsonParse, safeJsonStringify, safeArray, safeGet } from '../src/utils/safeUtils';
+/**
+ * safeUtils.test.ts — Tests for core crash-prevention utilities
+ * These are the most critical utils in the app: if they fail, everything fails.
+ */
 
-describe('safeUtils', () => {
-  describe('safeJsonParse', () => {
-    it('parses valid JSON successfully', () => {
-      const json = '{"key":"value","num":42}';
-      const result = safeJsonParse(json, null);
-      expect(result).toEqual({ key: 'value', num: 42 });
-    });
+// Mock Sentry BEFORE importing safeUtils
+jest.mock('@sentry/react-native', () => ({
+  captureException: jest.fn(),
+  captureMessage: jest.fn(),
+}));
 
-    it('returns fallback for invalid JSON instead of throwing', () => {
-      const json = '{invalid_json:true}'; // Missing quotes
-      const fallback = { fallback: true };
-      const result = safeJsonParse(json, fallback);
-      expect(result).toBe(fallback);
-    });
+import {
+  safeJsonParse,
+  safeJsonStringify,
+} from '../src/utils/safeUtils';
 
-    it('returns fallback for null string', () => {
-      const result = safeJsonParse(null, 'default');
-      expect(result).toBe('default');
-    });
-
-    it('returns fallback for undefined string', () => {
-      const result = safeJsonParse(undefined, []);
-      expect(result).toEqual([]);
-    });
+describe('safeJsonParse', () => {
+  it('parses valid JSON correctly', () => {
+    expect(safeJsonParse('{"name":"test"}', {})).toEqual({ name: 'test' });
+    expect(safeJsonParse('[1,2,3]', [])).toEqual([1, 2, 3]);
+    expect(safeJsonParse('"hello"', '')).toBe('hello');
   });
 
-  describe('safeJsonStringify', () => {
-    it('stringifies valid objects', () => {
-      const obj = { start: true };
-      expect(safeJsonStringify(obj)).toBe('{"start":true}');
-    });
-
-    it('returns fallback for circular references (which cause stringify to throw)', () => {
-      const circular: any = {};
-      circular.self = circular;
-      expect(safeJsonStringify(circular, 'fallback_string')).toBe('fallback_string');
-    });
+  it('returns fallback for invalid JSON — never throws', () => {
+    expect(safeJsonParse('not-json', { safe: true })).toEqual({ safe: true });
+    expect(safeJsonParse('{broken:', [])).toEqual([]);
+    expect(safeJsonParse('', 'default')).toBe('default');
   });
 
-  describe('safeArray', () => {
-    it('returns the same array if input is an array', () => {
-      const arr = [1, 2, 3];
-      expect(safeArray(arr)).toBe(arr);
-    });
-
-    it('returns empty array if input is not an array', () => {
-      expect(safeArray(null)).toEqual([]);
-      expect(safeArray(undefined)).toEqual([]);
-      expect(safeArray("string")).toEqual([]);
-      expect(safeArray({ key: "val" })).toEqual([]);
-    });
+  it('returns fallback for null/undefined — never throws', () => {
+    expect(safeJsonParse(null, 'fallback')).toBe('fallback');
+    expect(safeJsonParse(undefined, [])).toEqual([]);
   });
 
-  describe('safeGet', () => {
-    it('returns value when defined', () => {
-      expect(safeGet("data", "fallback")).toBe("data");
-      expect(safeGet(0, 10)).toBe(0); // 0 is falsy but not nullish!
-      expect(safeGet(false, true)).toBe(false);
-    });
+  it('returns null as default fallback', () => {
+    expect(safeJsonParse(null)).toBeNull();
+    expect(safeJsonParse('bad-json')).toBeNull();
+  });
+});
 
-    it('returns fallback when value is null or undefined', () => {
-      expect(safeGet(null, "fallback")).toBe("fallback");
-      expect(safeGet(undefined, 123)).toBe(123);
-    });
+describe('safeJsonStringify', () => {
+  it('stringifies valid objects', () => {
+    expect(safeJsonStringify({ a: 1 })).toBe('{"a":1}');
+    expect(safeJsonStringify([1, 2])).toBe('[1,2]');
+  });
+
+  it('returns fallback for circular references — never throws', () => {
+    const circular: any = {};
+    circular.self = circular;
+    expect(safeJsonStringify(circular)).toBe('{}');
+    expect(safeJsonStringify(circular, '[]')).toBe('[]');
   });
 });

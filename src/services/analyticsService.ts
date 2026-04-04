@@ -9,6 +9,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import createLogger from '../utils/logger';
+import { safeJsonParse } from '../utils/safeUtils';
 
 const log = createLogger('Analytics');
 
@@ -50,7 +51,7 @@ export async function trackEvent(
 
     // Store locally
     const raw = await AsyncStorage.getItem(ANALYTICS_KEY);
-    const events: AnalyticsEvent[] = raw ? JSON.parse(raw) : [];
+    const events: AnalyticsEvent[] = raw ? safeJsonParse<AnalyticsEvent[]>(raw, []) : [];
 
     events.push(event);
 
@@ -103,7 +104,7 @@ export function trackTiming(name: string, durationMs: number): void {
 export async function getStoredEvents(): Promise<AnalyticsEvent[]> {
   try {
     const raw = await AsyncStorage.getItem(ANALYTICS_KEY);
-    return raw ? JSON.parse(raw) : [];
+    return raw ? safeJsonParse<AnalyticsEvent[]>(raw, []) : [];
   } catch {
     return [];
   }

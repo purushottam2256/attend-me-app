@@ -6,6 +6,7 @@
 import { supabase } from '../config/supabase';
 import * as SecureStore from 'expo-secure-store';
 import createLogger from '../utils/logger';
+import { safeJsonParse } from '../utils/safeUtils';
 
 const log = createLogger('AuthService');
 
@@ -152,7 +153,7 @@ export async function getStoredProfile(): Promise<UserProfile | null> {
   try {
     const profileStr = await SecureStore.getItemAsync(STORAGE_KEYS.USER_PROFILE);
     if (profileStr) {
-      return JSON.parse(profileStr) as UserProfile;
+      return safeJsonParse<UserProfile>(profileStr, null as any);
     }
     return null;
   } catch (error) {

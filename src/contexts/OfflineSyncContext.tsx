@@ -10,7 +10,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
 import { InteractionManager, AppState, AppStateStatus } from 'react-native';
-import { useNetworkStatus } from '../hooks/useNetworkStatus';
+import { useConnectionStatus } from '../hooks/useConnectionStatus';
 import {
   cacheAllRosters,
   syncPendingSubmissions,
@@ -47,7 +47,7 @@ interface OfflineSyncContextType {
 const OfflineSyncContext = createContext<OfflineSyncContextType | null>(null);
 
 export function OfflineSyncProvider({ children }: { children: ReactNode }) {
-  const { isOnline, justCameOnline } = useNetworkStatus();
+  const { isOnline, justCameOnline } = useConnectionStatus();
   
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({
     lastSyncTime: null,
@@ -250,7 +250,19 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
 export function useOfflineSync() {
   const context = useContext(OfflineSyncContext);
   if (!context) {
-    throw new Error('useOfflineSync must be used within OfflineSyncProvider');
+    // Return safe defaults instead of throwing — prevents crash during hot-reload
+    // or when component tree is partially unmounted
+    return {
+      isOnline: true,
+      syncStatus: { lastSyncTime: null, pendingCount: 0, isExpired: true } as SyncStatus,
+      isSyncing: false,
+      lastError: null,
+      pendingCount: 0,
+      lastSyncAge: 'Never synced',
+      syncRosters: async () => ({ success: false, count: 0 }),
+      syncPending: async () => ({ synced: 0, failed: 0 }),
+      refreshStatus: async () => {},
+    } as OfflineSyncContextType;
   }
   return context;
 }

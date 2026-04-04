@@ -101,17 +101,22 @@ export const NotificationService = {
    * Call this once when the app starts (in NotificationContext)
    */
   async init(): Promise<void> {
-    log.info('Initializing...');
-    
-    // Setup Android channels
-    if (Platform.OS === 'android') {
-      await this.setupAndroidChannels();
+    try {
+      log.info('Initializing...');
+      
+      // Setup Android channels
+      if (Platform.OS === 'android') {
+        await this.setupAndroidChannels();
+      }
+      
+      // Setup interactive notification categories
+      await this.setupNotificationCategories();
+      
+      log.info('Initialized successfully');
+    } catch (error: any) {
+      // Non-fatal: app works without notifications
+      log.error('Init failed (non-fatal):', error?.message || error);
     }
-    
-    // Setup interactive notification categories
-    await this.setupNotificationCategories();
-    
-    log.info('Initialized successfully');
   },
 
   /**
@@ -120,14 +125,18 @@ export const NotificationService = {
    */
   async setupAndroidChannels(): Promise<void> {
     for (const channel of Object.values(CHANNELS)) {
-      await Notifications.setNotificationChannelAsync(channel.id, {
-        name: channel.name,
-        description: channel.description,
-        importance: channel.importance,
-        sound: (channel as any).sound,
-        vibrationPattern: (channel as any).vibrationPattern,
-        lightColor: (channel as any).lightColor,
-      });
+      try {
+        await Notifications.setNotificationChannelAsync(channel.id, {
+          name: channel.name,
+          description: channel.description,
+          importance: channel.importance,
+          sound: (channel as any).sound,
+          vibrationPattern: (channel as any).vibrationPattern,
+          lightColor: (channel as any).lightColor,
+        });
+      } catch (channelError: any) {
+        log.warn(`Failed to create channel ${channel.id}:`, channelError?.message);
+      }
     }
     log.info('Android channels configured');
   },

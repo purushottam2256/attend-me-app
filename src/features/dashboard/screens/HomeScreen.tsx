@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useIsMounted } from '../../../hooks/useIsMounted';
 import {
   View,
   Text,
@@ -90,6 +91,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
   const navigation = useNavigation<any>();
   const { status: connectionStatus } = useConnectionStatus();
   const heroRef = useRef<CircularClockHeroRef>(null);
+  const isMounted = useIsMounted();
   
   const [heroState, setHeroState] = useState<HeroState>('LOADING');
   const [schedule, setSchedule] = useState<ScheduleSlot[]>([]);
@@ -154,8 +156,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
   };
 
   const parseTime = (timeStr: string): Date => {
-    const [hour, min] = timeStr.split(':').map(Number);
     const date = new Date();
+    if (!timeStr || typeof timeStr !== 'string' || !timeStr.includes(':')) {
+      // Guard: return current time if input is malformed — prevents NaN crash
+      return date;
+    }
+    const parts = timeStr.split(':');
+    const hour = parseInt(parts[0], 10);
+    const min = parseInt(parts[1], 10);
+    if (isNaN(hour) || isNaN(min)) return date;
     date.setHours(hour, min, 0, 0);
     return date;
   };
@@ -523,7 +532,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ userName }) => {
       setHeroState('NO_CLASSES');
       setToast({ visible: true, message: 'Failed to load schedule. Please try again.', type: 'error' });
     }
-  }, [determineHeroState]);
+  }, [determineHeroState, connectionStatus]);
 
   useFocusEffect(
     useCallback(() => {

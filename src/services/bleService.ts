@@ -57,8 +57,8 @@ export interface DetectedStudent {
 
 export type BLEState = 'unknown' | 'resetting' | 'unsupported' | 'unauthorized' | 'off' | 'on';
 
-// Initialize BLE Manager
-export const initBLE = (): BleManager => {
+// Initialize BLE Manager — returns null on unsupported devices instead of crashing
+export const initBLE = (): BleManager | null => {
   try {
     if (!bleManager) {
       bleManager = new BleManager();
@@ -66,8 +66,9 @@ export const initBLE = (): BleManager => {
     }
     return bleManager;
   } catch (error: any) {
-    log.error('Failed to initialize BLE Manager:', error);
-    throw error;
+    log.error('Failed to initialize BLE Manager:', error?.message || error);
+    // Return null instead of throwing — caller must handle gracefully
+    return null;
   }
 };
 
@@ -75,6 +76,7 @@ export const initBLE = (): BleManager => {
 export const getBLEState = async (): Promise<BLEState> => {
   try {
     const manager = initBLE();
+    if (!manager) return 'unsupported'; // BLE not available on this device
     const state = await manager.state();
     return state.toLowerCase() as BLEState;
   } catch (error: any) {
@@ -127,6 +129,7 @@ export const requestBLEPermissions = async (): Promise<boolean> => {
 export const isBLEReady = async (): Promise<{ ready: boolean; reason?: string }> => {
   try {
     const manager = initBLE();
+    if (!manager) return { ready: false, reason: 'Bluetooth not available on this device' };
     const state = await manager.state();
     
     log.debug('Checking readiness, state:', state);
@@ -160,6 +163,7 @@ export const enableBluetooth = async (): Promise<boolean> => {
     }
     
     const manager = initBLE();
+    if (!manager) return false;
     const state = await manager.state();
     
     if (state === State.PoweredOn) {
@@ -330,6 +334,13 @@ export const startScanning = (
     const detectedDeviceIds = new Set<string>();
     
     // Start scanning
+    if (!manager) {
+      log.error('Cannot start scan: BLE Manager not available');
+      options?.onError?.(new Error('BLE not available') as any);
+      isCurrentlyScanning = false;
+      stopQueueProcessing();
+      return () => {};
+    }
     manager.startDeviceScan(
       null, // Scan all devices to see their advertised UUIDs
       { 
@@ -484,6 +495,10 @@ export const onBLEStateChange = (
 ): (() => void) => {
   try {
     const manager = initBLE();
+    if (!manager) {
+      log.warn('BLE Manager not available, cannot subscribe to state changes');
+      return () => {};
+    }
     
     const subscription = manager.onStateChange((state) => {
       log.info('State changed:', state);

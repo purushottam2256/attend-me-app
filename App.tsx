@@ -23,8 +23,13 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: 2,
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000), // Exponential backoff: 1s, 2s, 4s... max 30s
       staleTime: 1000 * 60 * 5, // 5 minutes fresh by default
       gcTime: 1000 * 60 * 60 * 24, // 24 hours garbage collection (was cacheTime)
+    },
+    mutations: {
+      retry: 1,
+      retryDelay: 1000,
     },
   },
 });
@@ -46,9 +51,15 @@ const log = createLogger('App');
 // CRASH PREVENTION: Setup global error handlers before anything else
 setupGlobalErrorHandlers();
 
-// Setup Database Connection
+// Setup Database Connection — wrapped for crash safety
 const getDb = () => {
+  try {
     return SQLite.openDatabaseSync('offline_sync.db');
+  } catch (dbError) {
+    log.error('SQLite open failed, attempting recovery:', dbError);
+    // If DB is corrupted, we can't do much — return a no-op to prevent crash
+    return null;
+  }
 };
 
 function App() {
@@ -71,15 +82,21 @@ function App() {
           if (!lastCleanupStr || (now - parseInt(lastCleanupStr, 10)) > ONE_WEEK_MS) {
             log.info("Running weekly hidden items cleanup...");
             const db = getDb();
-            await db.execAsync(`DELETE FROM hidden_items;`);
-            await AsyncStorage.setItem(LAST_CLEANUP_KEY, now.toString());
-            log.info("Hidden items cleanup complete.");
+            if (db) {
+              await db.execAsync(`DELETE FROM hidden_items;`);
+              await AsyncStorage.setItem(LAST_CLEANUP_KEY, now.toString());
+              log.info("Hidden items cleanup complete.");
+            }
           }
         } catch (cleanupErr) {
           log.error("Failed to run hidden items cleanup:", cleanupErr);
+          // Non-fatal — app continues without cleanup
         }
       })
-      .catch(err => log.error("Failed to init offline service:", err))
+      .catch(err => {
+        log.error("Failed to init offline service:", err);
+        // CRITICAL: Don't block app startup — offline features degrade gracefully
+      })
       .finally(() => {
         setIsReady(true);
         // Analytics: App launched successfully

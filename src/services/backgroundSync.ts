@@ -21,44 +21,52 @@ const BACKGROUND_SYNC_TASK = 'ATTEND_ME_BACKGROUND_SYNC';
 // TASK DEFINITION (must be at top level, outside of components)
 // ============================================================================
 
-TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
-  try {
-    log.info('Task triggered');
+try {
+  TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
+    try {
+      log.info('Task triggered');
 
-    // Check connectivity first
-    const netState = await NetInfo.fetch();
-    if (!netState.isConnected) {
-      log.info('No connectivity, skipping');
+      // Check connectivity first
+      const netState = await NetInfo.fetch();
+      if (!netState.isConnected) {
+        log.info('No connectivity, skipping');
+        return BackgroundFetch.BackgroundFetchResult.NoData;
+      }
+
+      // Check if there are pending submissions
+      const pendingCount = await getPendingCount();
+      if (pendingCount === 0) {
+        log.info('No pending submissions');
+        return BackgroundFetch.BackgroundFetchResult.NoData;
+      }
+
+      // Attempt sync
+      log.info(`Syncing ${pendingCount} pending submissions...`);
+      const result = await syncPendingSubmissions();
+      
+      if (result.synced > 0) {
+        log.info(`Successfully synced ${result.synced} submissions`);
+        return BackgroundFetch.BackgroundFetchResult.NewData;
+      }
+
+      if (result.failed > 0) {
+        log.warn(`${result.failed} submissions failed to sync`);
+        return BackgroundFetch.BackgroundFetchResult.Failed;
+      }
+
       return BackgroundFetch.BackgroundFetchResult.NoData;
-    }
-
-    // Check if there are pending submissions
-    const pendingCount = await getPendingCount();
-    if (pendingCount === 0) {
-      log.info('No pending submissions');
-      return BackgroundFetch.BackgroundFetchResult.NoData;
-    }
-
-    // Attempt sync
-    log.info(`Syncing ${pendingCount} pending submissions...`);
-    const result = await syncPendingSubmissions();
-    
-    if (result.synced > 0) {
-      log.info(`Successfully synced ${result.synced} submissions`);
-      return BackgroundFetch.BackgroundFetchResult.NewData;
-    }
-
-    if (result.failed > 0) {
-      log.warn(`${result.failed} submissions failed to sync`);
+    } catch (error) {
+      log.error('Task error:', error);
       return BackgroundFetch.BackgroundFetchResult.Failed;
     }
-
-    return BackgroundFetch.BackgroundFetchResult.NoData;
-  } catch (error) {
-    log.error('Task error:', error);
-    return BackgroundFetch.BackgroundFetchResult.Failed;
+  });
+} catch (defineTaskError) {
+  // Module-level crash prevention: if TaskManager isn't linked properly,
+  // the app should still work — background sync just won't be available
+  if (__DEV__) {
+    console.warn('[BackgroundSync] defineTask failed:', defineTaskError);
   }
-});
+}
 
 // ============================================================================
 // REGISTRATION & MANAGEMENT

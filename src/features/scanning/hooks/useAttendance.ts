@@ -335,10 +335,23 @@ export function useAttendance({ classData, batchOverride }: UseAttendanceOptions
   }, [classData, batchOverride, isOfflineMode]); // Added isOfflineMode so the silent check captures it locally.
 
   // Fetch on mount and when class/batch changes
+  // CRITICAL: Defer fetch until AFTER the screen transition animation completes.
+  // Without this, fetching 70+ students + permissions simultaneously with the
+  // navigation animation blocks the JS thread and causes ANR/crash.
   useEffect(() => {
     const controller = new AbortController();
-    fetchStudents(controller.signal);
-    return () => controller.abort();
+    const { InteractionManager } = require('react-native');
+    
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (!controller.signal.aborted) {
+        fetchStudents(controller.signal);
+      }
+    });
+
+    return () => {
+      controller.abort();
+      task.cancel();
+    };
   }, [fetchStudents]);
 
   // Background polling to recover when trapped in offline mode while network is back

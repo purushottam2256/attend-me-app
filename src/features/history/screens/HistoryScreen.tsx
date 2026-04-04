@@ -307,11 +307,13 @@ export const HistoryScreen: React.FC = () => {
     }
   }, [selectedDate]);
 
+  // PERFORMANCE: Defer data load until after screen transition completes
   useEffect(() => {
-    const timer = setTimeout(() => {
+    const InteractionManager = require('react-native').InteractionManager;
+    const task = InteractionManager.runAfterInteractions(() => {
       loadHistory();
-    }, 100);
-    return () => clearTimeout(timer);
+    });
+    return () => task.cancel();
   }, [loadHistory]);
 
   // Handle date selection
